@@ -1,0 +1,38 @@
+# =========================
+# Git ignore for MetalGenericDBEngine
+# =========================
+
+# Ignore all datasets and large files
+data/SF-1/
+*.tbl
+*.duckdb
+
+# macOS + Xcode temp files
+.DS_Store
+*/xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Build artifacts
+build/
+*.o
+*.air
+default.metallib
+
+# Editor Configs
+.vscode/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# C++ Build
+build-cmake/
+
+# Results and Logs
+results/
+execution_logs/
+
+# Xcode Project User Data
+MetalGenericDBEngine.xcodeproj/project.xcworkspace/xcuserdata/
