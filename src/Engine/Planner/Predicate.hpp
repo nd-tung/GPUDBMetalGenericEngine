@@ -1,0 +1,40 @@
+// Lightweight predicate pre-parsing and evaluation
+#pragma once
+#include <string>
+#include <string_view>
+#include <vector>
+#include <functional>
+
+namespace engine::expr {
+
+using RowGetter = std::function<double(std::size_t,const std::string&)>;
+using IntGetter = std::function<long long(std::size_t,const std::string&)>;
+using StringGetter = std::function<std::string_view(std::size_t,const std::string&)>;
+using ExistsFn = std::function<bool(const std::string&)>;
+
+enum class CompOp { LT, LE, GT, GE, EQ, NE };
+
+struct Clause {
+    std::string ident;      // left-hand side column identifier
+    CompOp op;              // comparison operator
+    bool isDate = false;    // true if RHS was a DATE literal
+    bool isString = false;  // true if RHS was a string literal
+    double num = 0.0;       // numeric literal (if !isDate && !isString)
+    long long date = 0;     // date literal encoded as YYYYMMDD (if isDate)
+    std::string strValue;   // string literal (if isString)
+    bool isOrNext = false;  // true if the NEXT clause is OR'd with this one (not AND'd)
+};
+
+// Parse comparisons separated by AND/OR.
+// Supports: <, <=, >, >=, = with numeric literals, DATE 'YYYY-MM-DD', or 'string' literals
+// Returns vector of Clause with isOrNext flags; if a comparison cannot be parsed it is skipped.
+std::vector<Clause> parse_predicate(const std::string& predicate, const ExistsFn& exists);
+
+// Evaluate already parsed clauses for a given row using provided accessors.
+bool eval_predicate(const std::vector<Clause>& clauses,
+                    std::size_t rowIndex,
+                    const RowGetter& getFloatLike,
+                    const IntGetter& getIntLike,
+                    const StringGetter& getStringLike);
+
+} // namespace engine::expr
