@@ -1,18 +1,5 @@
-# Data files
-*.tbl
-*.duckdb
-data/
-
-# Build artifacts
 build/
-
-# Results
-results/
-
-# macOS
+data/
+*.o
+*.dSYM
 .DS_Store
-
-# Xcode
-xcuserdata/
-*.xcodeproj/xcuserdata/
-*.xcodeproj/project.xcworkspace/xcuserdata/

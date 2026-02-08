@@ -2152,21 +2152,18 @@ kernel void reduce_min_f32(const device float* in [[buffer(0)]],
 }
 
 
-// ---- Arrow-style string kernels ----
-// All string kernels use Arrow-style offsets: offsets[gid+1] - offsets[gid] = length.
-// offsets buffer has (row_count + 1) elements. No separate lengths buffer.
-
 kernel void filter_string_prefix(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     
     if (pattern_len == 0) {
@@ -2191,15 +2188,16 @@ kernel void filter_string_prefix(const device char* chars [[buffer(0)]],
 
 kernel void filter_string_not_prefix(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     
     if (pattern_len == 0) {
@@ -2224,15 +2222,16 @@ kernel void filter_string_not_prefix(const device char* chars [[buffer(0)]],
 
 kernel void filter_string_contains(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     
     if (pattern_len == 0) {
@@ -2266,20 +2265,20 @@ kernel void filter_string_contains(const device char* chars [[buffer(0)]],
 // Multi-wildcard contains: pattern segments are packed into one buffer,
 // with their offsets/lengths in separate arrays.
 // Matches %seg0%seg1%...%segN% — each segment must be found in order.
-// Data offsets are Arrow-style (N+1). Pattern offsets/lengths are NOT Arrow-style.
 kernel void filter_string_multi_contains(const device char* chars [[buffer(0)]],
                                          const device uint32_t* offsets [[buffer(1)]],
-                                         device uint8_t* out_mask [[buffer(2)]],
-                                         const device char* patterns [[buffer(3)]],      // packed segments
-                                         const device uint32_t* pat_offsets [[buffer(4)]],
-                                         const device uint32_t* pat_lengths [[buffer(5)]],
-                                         constant uint& num_segments [[buffer(6)]],
-                                         constant uint& row_count [[buffer(7)]],
+                                         const device uint32_t* lengths [[buffer(2)]],
+                                         device uint8_t* out_mask [[buffer(3)]],
+                                         const device char* patterns [[buffer(4)]],      // packed segments
+                                         const device uint32_t* pat_offsets [[buffer(5)]],
+                                         const device uint32_t* pat_lengths [[buffer(6)]],
+                                         constant uint& num_segments [[buffer(7)]],
+                                         constant uint& row_count [[buffer(8)]],
                                          uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
 
     uint str_start = offsets[gid];
-    uint str_len   = offsets[gid + 1] - str_start;
+    uint str_len   = lengths[gid];
     const device char* str = chars + str_start;
 
     uint search_from = 0;
@@ -2323,107 +2322,92 @@ inline int compare_str(const device char* s1, uint len1, const device char* s2, 
 
 kernel void filter_string_eq(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) == 0) ? 1 : 0;
 }
 
 kernel void filter_string_ne(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) != 0) ? 1 : 0;
 }
 
 kernel void filter_string_lt(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) < 0) ? 1 : 0;
 }
 
 kernel void filter_string_le(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) <= 0) ? 1 : 0;
 }
 
 kernel void filter_string_gt(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) > 0) ? 1 : 0;
 }
 
 kernel void filter_string_ge(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   device uint8_t* out_mask [[buffer(2)]],
-                                   const device char* pattern [[buffer(3)]],
-                                   constant uint& pattern_len [[buffer(4)]],
-                                   constant uint& row_count [[buffer(5)]],
+                                   const device uint32_t* lengths [[buffer(2)]],
+                                   device uint8_t* out_mask [[buffer(3)]],
+                                   const device char* pattern [[buffer(4)]],
+                                   constant uint& pattern_len [[buffer(5)]],
+                                   constant uint& row_count [[buffer(6)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = offsets[gid + 1] - start;
+    uint len = lengths[gid];
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) >= 0) ? 1 : 0;
-}
-
-// ---- GPU string gather kernel (Arrow-style) ----
-// Phase 1: Compute output lengths from gathered source offsets.
-// Phase 2: Copy chars using prefix-summed output offsets.
-
-kernel void gather_flat_string_chars(const device char* src_chars [[buffer(0)]],
-                                     const device uint32_t* src_offsets [[buffer(1)]],
-                                     const device uint32_t* indices [[buffer(2)]],
-                                     const device uint32_t* dst_offsets [[buffer(3)]],
-                                     device char* dst_chars [[buffer(4)]],
-                                     constant uint& num_indices [[buffer(5)]],
-                                     uint gid [[thread_position_in_grid]]) {
-    if (gid >= num_indices) return;
-    uint src_idx = indices[gid];
-    uint src_start = src_offsets[src_idx];
-    uint src_len   = src_offsets[src_idx + 1] - src_start;
-    uint dst_start = dst_offsets[gid];
-    for (uint i = 0; i < src_len; ++i) {
-        dst_chars[dst_start + i] = src_chars[src_start + i];
-    }
 }
 
 // ----------------------------------------------------------------------------

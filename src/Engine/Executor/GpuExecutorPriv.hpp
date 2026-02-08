@@ -11,26 +11,9 @@
 #include <unordered_map>
 #include <variant>
 
-namespace MTL { class Buffer; class Device; }
+namespace MTL { class Buffer; }
 
 namespace engine {
-
-// Arrow-style flat string column: offsets (N+1 uint32_t) + chars (uint8_t).
-// offsets[i] = byte offset into chars where string i begins.
-// offsets[rowCount] = totalChars (sentinel). Length of string i = offsets[i+1] - offsets[i].
-// Both buffers use MTL::ResourceStorageModeShared for CPU/GPU access.
-struct FlatStringColumn {
-    MTL::Buffer* offsets  = nullptr; // uint32_t[rowCount + 1]
-    MTL::Buffer* chars    = nullptr; // uint8_t[totalChars]
-    uint32_t     rowCount   = 0;
-    uint32_t     totalChars = 0;
-
-    bool valid() const { return offsets && chars && rowCount > 0; }
-};
-
-// Build a FlatStringColumn from a vector<string>, allocating Metal shared-memory buffers.
-FlatStringColumn makeFlatStringColumn(MTL::Device* device,
-                                      const std::vector<std::string>& data);
 
 // Move EvalContext definition here so it can be shared across translation units
 struct EvalContext {
@@ -44,9 +27,6 @@ struct EvalContext {
     
     // Raw string columns for pattern matching (LIKE, CONTAINS)
     std::unordered_map<std::string, std::vector<std::string>> stringCols;
-
-    // Arrow-style flat string columns in GPU shared memory (mirrors stringCols)
-    std::unordered_map<std::string, FlatStringColumn> flatStringColsGPU;
     
     // Column aliases: maps alias -> canonical name
     // e.g., "supplier_no" -> "l_suppkey" for CTE aliasing

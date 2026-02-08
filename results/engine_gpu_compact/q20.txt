@@ -1,0 +1,253 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+ps_partkey_1|ps_availqty|ps_suppkey|ps_availqty_1|ps_suppkey|ps_partkey_1|n_nationkey|ps_partkey|ps_suppkey_1|p_partkey_1|ps_suppkey_2|s_suppkey|ps_partkey|s_nationkey|p_partkey_1|p_partkey|ps_partkey_1|(0.5 * sum(l_quantity))|sum(l_quantity)|ps_suppkey|p_name|p_name_1|s_name|n_name|s_address|
+72498|1931|20|1931|20|72498|3|72498|20|72498|20|20|72498|3|72498|72498|39.00|19.50|39.00|19.50|forest grey metallic midnight sky|forest grey metallic midnight sky|Supplier#000000020|CANADA|iybAE,RmTymrZVYaFZva2SH,j|
+62572|9457|91|9457|91|62572|3|62572|91|62572|91|91|62572|3|62572|62572|67.00|33.50|67.00|33.50|forest spring magenta plum ghost|forest spring magenta plum ghost|Supplier#000000091|CANADA|YV45D7TkfdQanOOZ7q9QxkyGUapU1oOWU6q3|
+55194|6175|205|6175|205|55194|3|55194|205|55194|205|205|55194|3|55194|55194|32.00|16.00|32.00|16.00|forest tan coral plum sky|forest tan coral plum sky|Supplier#000000205|CANADA|rF uV8d0JNEk|
+60284|6018|285|6018|285|60284|3|60284|285|60284|285|285|60284|3|60284|60284|47.00|23.50|47.00|23.50|forest honeydew yellow light hot|forest honeydew yellow light hot|Supplier#000000285|CANADA|Br7e1nnt1yxrw6ImgpJ7YdhFDjuBf|
+150286|9374|287|9374|287|150286|3|150286|287|150286|287|287|150286|3|150286|150286|42.00|21.00|42.00|21.00|forest ivory slate white lace|forest ivory slate white lace|Supplier#000000287|CANADA|7a9SP7qW5Yku5PvSg|
+122817|6482|354|6482|354|122817|3|122817|354|122817|354|354|122817|3|122817|122817|28.00|14.00|28.00|14.00|forest grey burlywood puff white|forest grey burlywood puff white|Supplier#000000354|CANADA|w8fOo5W,aS|
+80377|2843|378|2843|378|80377|3|80377|378|80377|378|378|80377|3|80377|80377|57.00|28.50|57.00|28.50|forest midnight orchid gainsboro firebrick|forest midnight orchid gainsboro firebrick|Supplier#000000378|CANADA|FfbhyCxWvcPrO8ltp9|
+65389|6398|402|6398|402|65389|3|65389|402|65389|402|402|65389|3|65389|65389|22.00|11.00|22.00|11.00|forest goldenrod pale metallic green|forest goldenrod pale metallic green|Supplier#000000402|CANADA|i9Sw4DoyMhzhKXCH9By,AYSgmD|
+80529|6200|530|6200|530|80529|3|80529|530|80529|530|530|80529|3|80529|80529|45.00|22.50|45.00|22.50|forest almond firebrick dodger goldenrod|forest almond firebrick dodger goldenrod|Supplier#000000530|CANADA|0qwCMwobKY OcmLyfRXlagA8ukENJv,|
+130554|3004|555|3004|555|130554|3|130554|555|130554|555|555|130554|3|130554|130554|84.00|42.00|84.00|42.00|forest steel coral brown chiffon|forest steel coral brown chiffon|Supplier#000000555|CANADA|TfB,a5bfl3Ah 3Z 74GqnNs6zKVGM|
+70639|6485|640|6485|640|70639|3|70639|640|70639|640|640|70639|3|70639|70639|49.00|24.50|49.00|24.50|forest steel light green slate|forest steel light green slate|Supplier#000000640|CANADA|mvvtlQKsTOsJj5Ihk7,cq|
+18227|4029|729|4029|729|18227|3|18227|729|18227|729|729|18227|3|18227|18227|10.00|5.00|10.00|5.00|forest lavender orchid blush mint|forest lavender orchid blush mint|Supplier#000000729|CANADA|pqck2ppy758TQpZCUAjPvlU55K3QjfL7Bi|
+60735|5113|736|5113|736|60735|3|60735|736|60735|736|736|60735|3|60735|60735|12.00|6.00|12.00|6.00|forest navy navajo dim lavender|forest navy navajo dim lavender|Supplier#000000736|CANADA|l6i2nMwVuovfKnuVgaSGK2rDy65DlAFLegiL7|
+188242|6991|761|6991|761|188242|3|188242|761|188242|761|761|188242|3|188242|188242|17.00|8.50|17.00|8.50|forest burnished sky lavender spring|forest burnished sky lavender spring|Supplier#000000761|CANADA|zlSLelQUj2XrvTTFnv7WAcYZGvvMTx882d4|
+173335|993|887|993|887|173335|3|173335|887|173335|887|887|173335|3|173335|173335|21.00|10.50|21.00|10.50|forest plum light chartreuse red|forest plum light chartreuse red|Supplier#000000887|CANADA|urEaTejH5POADP2ARrf|
+80934|1803|935|1803|935|80934|3|80934|935|80934|935|935|80934|3|80934|80934|45.00|22.50|45.00|22.50|forest red blanched chiffon peru|forest red blanched chiffon peru|Supplier#000000935|CANADA|ij98czM 2KzWe7dDTOxB8sq0UfCdvrX|
+195936|3972|975|3972|975|195936|3|195936|975|195936|975|975|195936|3|195936|195936|21.00|10.50|21.00|10.50|forest navy dim turquoise snow|forest navy dim turquoise snow|Supplier#000000975|CANADA|,AC e,tBpNwKb5xMUzeohxlRn, hdZJo73gFQF8y|
+28760|4405|1263|4405|1263|28760|3|28760|1263|28760|1263|1263|28760|3|28760|28760|48.00|24.00|48.00|24.00|forest chocolate ivory sky maroon|forest chocolate ivory sky maroon|Supplier#000001263|CANADA|rQWr6nf8ZhB2TAiIDIvo5Io|
+176332|7779|1367|7779|1367|176332|3|176332|1367|176332|1367|1367|176332|3|176332|176332|82.00|41.00|82.00|41.00|forest linen burnished navy red|forest linen burnished navy red|Supplier#000001367|CANADA|42YSkFcAXMMcucsqeEefOE4HeCC|
+88917|9870|1426|9870|1426|88917|3|88917|1426|88917|1426|1426|88917|3|88917|88917|41.00|20.50|41.00|20.50|forest navajo sky midnight steel|forest navajo sky midnight steel|Supplier#000001426|CANADA|bPOCc086oFm8sLtS,fGrH|
+48941|9158|1446|9158|1446|48941|3|48941|1446|48941|1446|1446|48941|3|48941|48941|4.00|2.00|4.00|2.00|forest royal navy orchid sienna|forest royal navy orchid sienna|Supplier#000001446|CANADA|lch9HMNU1R7a0LIybsUodVknk6|
+123963|9444|1500|9444|1500|123963|3|123963|1500|123963|1500|1500|123963|3|123963|123963|17.00|8.50|17.00|8.50|forest honeydew misty firebrick pink|forest honeydew misty firebrick pink|Supplier#000001500|CANADA|wDmF5xLxtQch9ctVu,|
+54086|8292|1602|8292|1602|54086|3|54086|1602|54086|1602|1602|54086|3|54086|54086|15.00|7.50|15.00|7.50|forest pink steel cream sandy|forest pink steel cream sandy|Supplier#000001602|CANADA|uKNWIeafaM644|
+46617|7371|1626|7371|1626|46617|3|46617|1626|46617|1626|1626|46617|3|46617|46617|62.00|31.00|62.00|31.00|forest gainsboro medium smoke antique|forest gainsboro medium smoke antique|Supplier#000001626|CANADA|UhxNRzUu1dtFmp0|
+139168|8223|1682|8223|1682|139168|3|139168|1682|139168|1682|1682|139168|3|139168|139168|58.00|29.00|58.00|29.00|forest orchid metallic gainsboro goldenrod|forest orchid metallic gainsboro goldenrod|Supplier#000001682|CANADA|pXTkGxrTQVyH1Rr|
+56689|8001|1700|8001|1700|56689|3|56689|1700|56689|1700|1700|56689|3|56689|56689|11.00|5.50|11.00|5.50|forest lawn red indian orchid|forest lawn red indian orchid|Supplier#000001700|CANADA|7hMlCof1Y5zLFg|
+29223|7451|1726|7451|1726|29223|3|29223|1726|29223|1726|1726|29223|3|29223|29223|37.00|18.50|37.00|18.50|forest mint peach beige red|forest mint peach beige red|Supplier#000001726|CANADA|TeRY7TtTH24sEword7yAaSkjx8|
+51729|5734|1730|5734|1730|51729|3|51729|1730|51729|1730|1730|51729|3|51729|51729|40.00|20.00|40.00|20.00|forest turquoise violet lace wheat|forest turquoise violet lace wheat|Supplier#000001730|CANADA|Rc8e,1Pybn r6zo0VJIEiD0UD vhk|
+114212|2617|1746|2617|1746|114212|3|114212|1746|114212|1746|1746|114212|3|114212|114212|32.00|16.00|32.00|16.00|forest saddle sandy firebrick tomato|forest saddle sandy firebrick tomato|Supplier#000001746|CANADA|qWsendlOekQG1aW4uq06uQaCm51se8lirv7 hBRd|
+96787|2023|1806|2023|1806|96787|3|96787|1806|96787|1806|1806|96787|3|96787|96787|13.00|6.50|13.00|6.50|forest cornflower violet tan royal|forest cornflower violet tan royal|Supplier#000001806|CANADA|M934fuZSnLW|
+86838|9172|1855|9172|1855|86838|3|86838|1855|86838|1855|1855|86838|3|86838|86838|90.00|45.00|90.00|45.00|forest sienna khaki drab dim|forest sienna khaki drab dim|Supplier#000001855|CANADA|MWk6EAeozXb|
+69424|8209|1931|8209|1931|69424|3|69424|1931|69424|1931|1931|69424|3|69424|69424|29.00|14.50|29.00|14.50|forest burnished rose lemon pink|forest burnished rose lemon pink|Supplier#000001931|CANADA|FpJbMU2h6ZR2eBv8I9NIxF|
+119510|8315|2022|8315|2022|119510|3|119510|2022|119510|2022|2022|119510|3|119510|119510|25.00|12.50|25.00|12.50|forest firebrick medium orange rose|forest firebrick medium orange rose|Supplier#000002022|CANADA|dwebGX7Id2pc25YvY33|
+64517|3055|2036|3055|2036|64517|3|64517|2036|64517|2036|2036|64517|3|64517|64517|48.00|24.00|48.00|24.00|forest lace blanched brown salmon|forest lace blanched brown salmon|Supplier#000002036|CANADA|20ytTtVObjKUUI2WCB0A|
+37089|2258|2096|2258|2096|37089|3|37089|2096|37089|2096|2096|37089|3|37089|37089|67.00|33.50|67.00|33.50|forest dark papaya seashell navajo|forest dark papaya seashell navajo|Supplier#000002096|CANADA|kuxseyLtq QPLXxm9ZUrnB6Kkh92JtK5cQzzXNU|
+192116|9745|2117|9745|2117|192116|3|192116|2117|192116|2117|2117|192116|3|192116|192116|65.00|32.50|65.00|32.50|forest orchid drab tan seashell|forest orchid drab tan seashell|Supplier#000002117|CANADA|MRtkgKolHJ9Wh X9J,urANHKDzvjr|
+64685|8392|2204|8392|2204|64685|3|64685|2204|64685|2204|2204|64685|3|64685|64685|86.00|43.00|86.00|43.00|forest khaki green dodger tomato|forest khaki green dodger tomato|Supplier#000002204|CANADA|uYmlr46C06udCqanj0KiRsoTQakZsEyssL|
+2217|7698|2218|7698|2218|2217|3|2217|2218|2217|2218|2218|2217|3|2217|2217|48.00|24.00|48.00|24.00|forest lavender snow thistle peru|forest lavender snow thistle peru|Supplier#000002218|CANADA|nODZw5q4dx kp0K5|
+127218|3402|2243|3402|2243|127218|3|127218|2243|127218|2243|2243|127218|3|127218|127218|44.00|22.00|44.00|22.00|forest saddle cyan beige lavender|forest saddle cyan beige lavender|Supplier#000002243|CANADA|nSOEV3JeOU79|
+199725|1908|2245|1908|2245|199725|3|199725|2245|199725|2245|2245|199725|3|199725|199725|63.00|31.50|63.00|31.50|forest tan spring hot navajo|forest tan spring hot navajo|Supplier#000002245|CANADA|hz2qWXWVjOyKhqPYMoEwz6zFkrTaDM|
+144739|8021|2282|8021|2282|144739|3|144739|2282|144739|2282|2282|144739|3|144739|144739|22.00|11.00|22.00|11.00|forest blush pale mint turquoise|forest blush pale mint turquoise|Supplier#000002282|CANADA|ES21K9dxoW1I1TzWCj7ekdlNwSWnv1Z  6mQ,BKn|
+79795|6345|2303|6345|2303|79795|3|79795|2303|79795|2303|2303|79795|3|79795|79795|107.00|53.50|107.00|53.50|forest honeydew orange azure deep|forest honeydew orange azure deep|Supplier#000002303|CANADA|nCoWfpB6YOymbgOht7ltfklpkHl|
+199811|7394|2331|7394|2331|199811|3|199811|2331|199811|2331|2331|199811|3|199811|199811|55.00|27.50|55.00|27.50|forest blanched floral ivory linen|forest blanched floral ivory linen|Supplier#000002331|CANADA|WRh2w5WFvRg7Z0S1AvSvHCL|
+152372|2640|2373|2640|2373|152372|3|152372|2373|152372|2373|2373|152372|3|152372|152372|1.00|0.50|1.00|0.50|forest navajo pale grey goldenrod|forest navajo pale grey goldenrod|Supplier#000002373|CANADA|RzHSxOTQmElCjxIBiVA52Z JB58rJhPRylR|
+64900|636|2419|636|2419|64900|3|64900|2419|64900|2419|2419|64900|3|64900|64900|82.00|41.00|82.00|41.00|forest pink chartreuse rose antique|forest pink chartreuse rose antique|Supplier#000002419|CANADA|qydBQd14I5l5mVXa4fYY|
+55055|7665|2571|7665|2571|55055|3|55055|2571|55055|2571|2571|55055|3|55055|55055|54.00|27.00|54.00|27.00|forest navy white chiffon blanched|forest navy white chiffon blanched|Supplier#000002571|CANADA|JZUugz04c iJFLrlGsz9O N,W 1rVHNIReyq|
+137558|9372|2585|9372|2585|137558|3|137558|2585|137558|2585|2585|137558|3|137558|137558|36.00|18.00|36.00|18.00|forest beige ghost khaki green|forest beige ghost khaki green|Supplier#000002585|CANADA|CsPoKpw2QuTY4AV1NkWuttneIa4SN|
+25122|4598|2629|4598|2629|25122|3|25122|2629|25122|2629|2629|25122|3|25122|25122|76.00|38.00|76.00|38.00|forest pale orange cyan red|forest pale orange cyan red|Supplier#000002629|CANADA|0Bw,q5Zp8su9XrzoCngZ3cAEXZwZ|
+77706|2953|2721|2953|2721|77706|3|77706|2721|77706|2721|2721|77706|3|77706|77706|98.00|49.00|98.00|49.00|forest indian peach purple goldenrod|forest indian peach purple goldenrod|Supplier#000002721|CANADA|HVdFAN2JHMQSpKm|
+135190|656|2730|656|2730|135190|3|135190|2730|135190|2730|2730|135190|3|135190|135190|53.00|26.50|53.00|26.50|forest dim black saddle lace|forest dim black saddle lace|Supplier#000002730|CANADA|lIFxR4fzm31C6,muzJwl84z|
+170257|2166|2775|2166|2775|170257|3|170257|2775|170257|2775|2775|170257|3|170257|170257|20.00|10.00|20.00|10.00|forest snow lavender lemon metallic|forest snow lavender lemon metallic|Supplier#000002775|CANADA|yDclaDaBD4ihH|
+10297|2929|2799|2929|2799|10297|3|10297|2799|10297|2799|2799|10297|3|10297|10297|40.00|20.00|40.00|20.00|forest tomato grey linen plum|forest tomato grey linen plum|Supplier#000002799|CANADA|lwr, 6L3gdfc79PQut,4XO6nQsTJY63cAyYO|
+192933|537|2934|537|2934|192933|3|192933|2934|192933|2934|2934|192933|3|192933|192933|35.00|17.50|35.00|17.50|forest pink antique burlywood red|forest pink antique burlywood red|Supplier#000002934|CANADA|m,trBENywSArwg3DhB|
+10439|885|2941|885|2941|10439|3|10439|2941|10439|2941|2941|10439|3|10439|10439|24.00|12.00|24.00|12.00|forest salmon red saddle hot|forest salmon red saddle hot|Supplier#000002941|CANADA|Naddba 8YTEKekZyP0|
+180509|9230|3028|9230|3028|180509|3|180509|3028|180509|3028|3028|180509|3|180509|180509|41.00|20.50|41.00|20.50|forest orchid azure dark metallic|forest orchid azure dark metallic|Supplier#000003028|CANADA|jouzgX0WZjhNMWLaH4fy|
+25588|5272|3095|5272|3095|25588|3|25588|3095|25588|3095|3095|25588|3|25588|25588|46.00|23.00|46.00|23.00|forest steel pale lawn slate|forest steel pale lawn slate|Supplier#000003095|CANADA|HxON3jJhUi3zjt,r mTD|
+155597|3791|3143|3791|3143|155597|3|155597|3143|155597|3143|3143|155597|3|155597|155597|58.00|29.00|58.00|29.00|forest lemon rose chiffon azure|forest lemon rose chiffon azure|Supplier#000003143|CANADA|hdolgh608uTkHh7t6qfSqkifKaiFjnCH|
+8184|6437|3185|6437|3185|8184|3|8184|3185|8184|3185|3185|8184|3|8184|8184|22.00|11.00|22.00|11.00|forest powder medium saddle bisque|forest powder medium saddle bisque|Supplier#000003185|CANADA|hMa535Cbf2mj1Nw4OWOKWVrsK0VdDkJURrdjSIJe|
+28184|9971|3189|9971|3189|28184|3|28184|3189|28184|3189|3189|28184|3|28184|28184|53.00|26.50|53.00|26.50|forest lawn plum almond peru|forest lawn plum almond peru|Supplier#000003189|CANADA|DWdPxt7 RnkZv6VOByR0em|
+23200|5811|3201|5811|3201|23200|3|23200|3201|23200|3201|3201|23200|3|23200|23200|47.00|23.50|47.00|23.50|forest dodger hot tan cornflower|forest dodger hot tan cornflower|Supplier#000003201|CANADA|E87yws6I,t0qNs4QW7UzExKiJnJDZWue|
+173212|5664|3213|5664|3213|173212|3|173212|3213|173212|3213|3213|173212|3|173212|173212|61.00|30.50|61.00|30.50|forest deep puff cornsilk chiffon|forest deep puff cornsilk chiffon|Supplier#000003213|CANADA|pxrRP4irQ1VoyfQ,dTf3|
+120762|5879|3275|5879|3275|120762|3|120762|3275|120762|3275|3275|120762|3|120762|120762|38.00|19.00|38.00|19.00|forest dodger aquamarine navajo blush|forest dodger aquamarine navajo blush|Supplier#000003275|CANADA|9xO4nyJ2QJcX6vGf|
+15784|2240|3288|2240|3288|15784|3|15784|3288|15784|3288|3288|15784|3|15784|15784|30.00|15.00|30.00|15.00|forest puff azure misty dodger|forest puff azure misty dodger|Supplier#000003288|CANADA|EDdfNt7E5Uc,xLTupoIgYL4yY7ujh,|
+43313|9284|3314|9284|3314|43313|3|43313|3314|43313|3314|3314|43313|3|43313|43313|4.00|2.00|4.00|2.00|forest slate beige smoke honeydew|forest slate beige smoke honeydew|Supplier#000003314|CANADA|jnisU8MzqO4iUB3zsPcrysMw3DDUojS4q7LD|
+18370|5472|3373|5472|3373|18370|3|18370|3373|18370|3373|3373|18370|3|18370|18370|35.00|17.50|35.00|17.50|forest rose smoke salmon slate|forest rose smoke salmon slate|Supplier#000003373|CANADA|iy8VM48ynpc3N2OsBwAvhYakO2us9R1bi|
+100910|3231|3421|3231|3421|100910|3|100910|3421|100910|3421|3421|100910|3|100910|100910|42.00|21.00|42.00|21.00|forest cream wheat brown burnished|forest cream wheat brown burnished|Supplier#000003421|CANADA|Sh3dt9W5oeofFWovnFhrg,|
+10920|5766|3422|5766|3422|10920|3|10920|3422|10920|3422|3422|10920|3|10920|10920|5.00|2.50|5.00|2.50|forest sandy salmon lace sienna|forest sandy salmon lace sienna|Supplier#000003422|CANADA|DJoCEapUeBXoV1iYiCcPFQvzsTv2ZI960|
+65922|5493|3441|5493|3441|65922|3|65922|3441|65922|3441|3441|65922|3|65922|65922|18.00|9.00|18.00|9.00|forest peach almond drab aquamarine|forest peach almond drab aquamarine|Supplier#000003441|CANADA|zvFJIzS,oUuShHjpcX|
+153589|4386|3590|4386|3590|153589|3|153589|3590|153589|3590|3590|153589|3|153589|153589|107.00|53.50|107.00|53.50|forest maroon powder rosy drab|forest maroon powder rosy drab|Supplier#000003590|CANADA|sy79CMLxqb,Cbo|
+166058|1698|3607|1698|3607|166058|3|166058|3607|166058|3607|3607|166058|3|166058|166058|57.00|28.50|57.00|28.50|forest powder mint firebrick ivory|forest powder mint firebrick ivory|Supplier#000003607|CANADA|lNqFHQYjwSAkf|
+181106|9516|3625|9516|3625|181106|3|181106|3625|181106|3625|3625|181106|3|181106|181106|33.00|16.50|33.00|16.50|forest firebrick blush lawn hot|forest firebrick blush lawn hot|Supplier#000003625|CANADA|qY588W0Yk5iaUy1RXTgNrEKrMAjBYHcKs|
+158692|3392|3723|3392|3723|158692|3|158692|3723|158692|3723|3723|158692|3|158692|158692|10.00|5.00|10.00|5.00|forest navy pale peach orange|forest navy pale peach orange|Supplier#000003723|CANADA|jZEp0OEythCLcS OmJSrFtxJ66bMlzSp|
+123848|2834|3849|2834|3849|123848|3|123848|3849|123848|3849|3849|123848|3|123848|123848|25.00|12.50|25.00|12.50|forest papaya burlywood purple cornflower|forest papaya burlywood purple cornflower|Supplier#000003849|CANADA|KgbZEaRk,6Q3mWvwh6uptrs1KRUHg 0|
+96366|1565|3894|1565|3894|96366|3|96366|3894|96366|3894|3894|96366|3|96366|96366|13.00|6.50|13.00|6.50|forest lace sky burlywood aquamarine|forest lace sky burlywood aquamarine|Supplier#000003894|CANADA|vvGC rameLOk|
+76419|6045|3941|6045|3941|76419|3|76419|3941|76419|3941|3941|76419|3|76419|76419|14.00|7.00|14.00|7.00|forest orchid mint thistle snow|forest orchid mint thistle snow|Supplier#000003941|CANADA|Pmb05mQfBMS618O7WKqZJ 9vyv|
+26552|2990|4059|2990|4059|26552|3|26552|4059|26552|4059|4059|26552|3|26552|26552|70.00|35.00|70.00|35.00|forest cornsilk smoke turquoise navy|forest cornsilk smoke turquoise navy|Supplier#000004059|CANADA|umEYZSq9RJ2WEzdsv9meU8rmqwzVLRgiZwC|
+64206|5139|4207|5139|4207|64206|3|64206|4207|64206|4207|4207|64206|3|64206|64206|26.00|13.00|26.00|13.00|forest saddle puff lawn brown|forest saddle puff lawn brown|Supplier#000004207|CANADA|tF64pwiOM4IkWjN3mS,e06WuAjLx|
+131722|2402|4236|2402|4236|131722|3|131722|4236|131722|4236|4236|131722|3|131722|131722|13.00|6.50|13.00|6.50|forest mint deep gainsboro orange|forest mint deep gainsboro orange|Supplier#000004236|CANADA|dl,HPtJmGipxYsSqn9wmqkuWjst,mCeJ8O6T|
+76756|3272|4278|3272|4278|76756|3|76756|4278|76756|4278|4278|76756|3|76756|76756|31.00|15.50|31.00|15.50|forest gainsboro firebrick peach antique|forest gainsboro firebrick peach antique|Supplier#000004278|CANADA|bBddbpBxIVp Di9|
+111769|664|4281|664|4281|111769|3|111769|4281|111769|4281|4281|111769|3|111769|111769|9.00|4.50|9.00|4.50|forest azure antique red sky|forest azure antique red sky|Supplier#000004281|CANADA|1OwPHh Pgiyeus,iZS5eA23JDOipwk|
+109283|6254|4304|6254|4304|109283|3|109283|4304|109283|4304|4304|109283|3|109283|109283|8.00|4.00|8.00|4.00|forest goldenrod cream hot chartreuse|forest goldenrod cream hot chartreuse|Supplier#000004304|CANADA|hQCAz59k,HLlp2CKUrcBIL|
+81837|8690|4346|8690|4346|81837|3|81837|4346|81837|4346|4346|81837|3|81837|81837|8.00|4.00|8.00|4.00|forest chartreuse navajo yellow linen|forest chartreuse navajo yellow linen|Supplier#000004346|CANADA|S3076LEOwo|
+196848|1855|4406|1855|4406|196848|3|196848|4406|196848|4406|4406|196848|3|196848|196848|34.00|17.00|34.00|17.00|forest beige azure coral black|forest beige azure coral black|Supplier#000004406|CANADA|Ah0ZaLu6VwufPWUz,7kbXgYZhauEaHqGIg|
+194429|4220|4430|4220|4430|194429|3|194429|4430|194429|4430|4430|194429|3|194429|194429|51.00|25.50|51.00|25.50|forest coral light firebrick navy|forest coral light firebrick navy|Supplier#000004430|CANADA|yvSsKNSTL5HLXBET4luOsPNLxKzAMk|
+64526|7939|4527|7939|4527|64526|3|64526|4527|64526|4527|4527|64526|3|64526|64526|48.00|24.00|48.00|24.00|forest cream snow dark slate|forest cream snow dark slate|Supplier#000004527|CANADA|p pVXCnxgcklWF6A1o3OHY3qW6|
+94654|2011|4655|2011|4655|94654|3|94654|4655|94654|4655|4655|94654|3|94654|94654|11.00|5.50|11.00|5.50|forest lavender deep puff plum|forest lavender deep puff plum|Supplier#000004655|CANADA|67NqBc4 t3PG3F8aO IsqWNq4kGaPowYL|
+107320|4055|4851|4055|4851|107320|3|107320|4851|107320|4851|4851|107320|3|107320|107320|6.00|3.00|6.00|3.00|forest pink medium lace metallic|forest pink medium lace metallic|Supplier#000004851|CANADA|Rj,x6IgLT7kBL99nqp|
+42366|6665|4871|6665|4871|42366|3|42366|4871|42366|4871|4871|42366|3|42366|42366|64.00|32.00|64.00|32.00|forest metallic red aquamarine snow|forest metallic red aquamarine snow|Supplier#000004871|CANADA|,phpt6AWEnUS8t4Avb50rFfdg7O9c6nU8xxv8eC5|
+162367|9215|4884|9215|4884|162367|3|162367|4884|162367|4884|4884|162367|3|162367|162367|49.00|24.50|49.00|24.50|forest lime drab peach slate|forest lime drab peach slate|Supplier#000004884|CANADA|42Z1uLye9nsn6aTGBNd dI8 x|
+147432|3322|4975|3322|4975|147432|3|147432|4975|147432|4975|4975|147432|3|147432|147432|73.00|36.50|73.00|36.50|forest lace chartreuse metallic misty|forest lace chartreuse metallic misty|Supplier#000004975|CANADA|GPq5PMKY6Wy|
+162559|1181|5076|1181|5076|162559|3|162559|5076|162559|5076|5076|162559|3|162559|162559|32.00|16.00|32.00|16.00|forest cream metallic honeydew blanched|forest cream metallic honeydew blanched|Supplier#000005076|CANADA|Xl7h9ifgvIHmqxFLgWfHK4Gjav BkP|
+55194|9484|5195|9484|5195|55194|3|55194|5195|55194|5195|5195|55194|3|55194|55194|7.00|3.50|7.00|3.50|forest tan coral plum sky|forest tan coral plum sky|Supplier#000005195|CANADA|Woi3b2ZaicPh ZSfu1EfXhE|
+172738|3501|5256|3501|5256|172738|3|172738|5256|172738|5256|5256|172738|3|172738|172738|28.00|14.00|28.00|14.00|forest floral green midnight rose|forest floral green midnight rose|Supplier#000005256|CANADA|Onc3t57VAMchm,pmoVLaU8bONni9NsuaM PzMMFz|
+185256|3214|5257|3214|5257|185256|3|185256|5257|185256|5257|5257|185256|3|185256|185256|23.00|11.50|23.00|11.50|forest light red rose ivory|forest light red rose ivory|Supplier#000005257|CANADA|f9g8SEHB7obMj3QXAjXS2vfYY22|
+10297|376|5300|376|5300|10297|3|10297|5300|10297|5300|5300|10297|3|10297|10297|93.00|46.50|93.00|46.50|forest tomato grey linen plum|forest tomato grey linen plum|Supplier#000005300|CANADA|gXG28YqpxU|
+167774|7108|5323|7108|5323|167774|3|167774|5323|167774|5323|5323|167774|3|167774|167774|73.00|36.50|73.00|36.50|forest sky indian misty honeydew|forest sky indian misty honeydew|Supplier#000005323|CANADA|tMCkdqbDoyNo8vMIkzjBqYexoRAuv,T6 qzcu|
+135385|538|5386|538|5386|135385|3|135385|5386|135385|5386|5386|135385|3|135385|135385|28.00|14.00|28.00|14.00|forest lawn floral chiffon slate|forest lawn floral chiffon slate|Supplier#000005386|CANADA|Ub6AAfHpWLWP|
+12924|6464|5426|6464|5426|12924|3|12924|5426|12924|5426|5426|12924|3|12924|12924|36.00|18.00|36.00|18.00|forest royal magenta rose sky|forest royal magenta rose sky|Supplier#000005426|CANADA|9Dz2OVT1q sb4BK71ljQ1XjPBYRPvO|
+125464|1091|5465|1091|5465|125464|3|125464|5465|125464|5465|5465|125464|3|125464|125464|12.00|6.00|12.00|6.00|forest goldenrod ghost blanched purple|forest goldenrod ghost blanched purple|Supplier#000005465|CANADA|63cYZenZBRZ613Q1FaoG0,smnC5zl9|
+125483|9493|5484|9493|5484|125483|3|125483|5484|125483|5484|5484|125483|3|125483|125483|16.00|8.00|16.00|8.00|forest azure cornflower firebrick olive|forest azure cornflower firebrick olive|Supplier#000005484|CANADA|saFdOR qW7AFY,3asPqiiAa11Mo22pCoN0BtPrKo|
+102994|5130|5505|5130|5505|102994|3|102994|5505|102994|5505|5505|102994|3|102994|102994|29.00|14.50|29.00|14.50|forest sienna purple red royal|forest sienna purple red royal|Supplier#000005505|CANADA|d2sbjG43KwMPX|
+180469|8407|5506|8407|5506|180469|3|180469|5506|180469|5506|5506|180469|3|180469|180469|2.00|1.00|2.00|1.00|forest smoke saddle pink red|forest smoke saddle pink red|Supplier#000005506|CANADA|On f5ypzoWgB|
+118097|3063|5631|3063|5631|118097|3|118097|5631|118097|5631|5631|118097|3|118097|118097|20.00|10.00|20.00|10.00|forest gainsboro burlywood frosted ghost|forest gainsboro burlywood frosted ghost|Supplier#000005631|CANADA|14TVrjlzo2SJEBYCDgpMwTlvwSqC|
+153126|4071|5642|4071|5642|153126|3|153126|5642|153126|5642|5642|153126|3|153126|153126|22.00|11.00|22.00|11.00|forest lavender chiffon royal bisque|forest lavender chiffon royal bisque|Supplier#000005642|CANADA|ZwKxAv3V40tW E8P7Qwu,zlu,kPsL|
+155685|7293|5686|7293|5686|155685|3|155685|5686|155685|5686|5686|155685|3|155685|155685|4.00|2.00|4.00|2.00|forest brown ghost grey indian|forest brown ghost grey indian|Supplier#000005686|CANADA|f2RBKec2T1NIi7yS M|
+173212|3813|5730|3813|5730|173212|3|173212|5730|173212|5730|5730|173212|3|173212|173212|99.00|49.50|99.00|49.50|forest deep puff cornsilk chiffon|forest deep puff cornsilk chiffon|Supplier#000005730|CANADA|5rkb0PSews HvxkL8JaD41UpnSF2cg8H1|
+190697|8322|5736|8322|5736|190697|3|190697|5736|190697|5736|5736|190697|3|190697|190697|2.00|1.00|2.00|1.00|forest dodger rosy aquamarine lemon|forest dodger rosy aquamarine lemon|Supplier#000005736|CANADA|2dq XTYhtYWSfp|
+63230|9416|5737|9416|5737|63230|3|63230|5737|63230|5737|5737|63230|3|63230|63230|29.00|14.50|29.00|14.50|forest violet hot white navajo|forest violet hot white navajo|Supplier#000005737|CANADA|dmEWcS32C3kx,d,B95 OmYn48|
+188242|8588|5797|8588|5797|188242|3|188242|5797|188242|5797|5797|188242|3|188242|188242|9.00|4.50|9.00|4.50|forest burnished sky lavender spring|forest burnished sky lavender spring|Supplier#000005797|CANADA|,o,OebwRbSDmVl9gN9fpWPCiqB UogvlSR|
+53369|9771|5875|9771|5875|53369|3|53369|5875|53369|5875|5875|53369|3|53369|53369|70.00|35.00|70.00|35.00|forest sky firebrick turquoise azure|forest sky firebrick turquoise azure|Supplier#000005875|CANADA|lK,sYiGzB94hSyHy9xvSZFbVQNCZe2LXZuGbS|
+175973|5401|5974|5401|5974|175973|3|175973|5974|175973|5974|5974|175973|3|175973|175973|10.00|5.00|10.00|5.00|forest blush antique smoke cornsilk|forest blush antique smoke cornsilk|Supplier#000005974|CANADA|REhR5jE,lLusQXvf54SwYySgsSSVFhu|
+56058|262|6059|262|6059|56058|3|56058|6059|56058|6059|6059|56058|3|56058|56058|23.00|11.50|23.00|11.50|forest gainsboro turquoise cornsilk rose|forest gainsboro turquoise cornsilk rose|Supplier#000006059|CANADA|4m0cv8MwJ9yX2vlwI Z|
+153549|8811|6065|8811|6065|153549|3|153549|6065|153549|6065|6065|153549|3|153549|153549|153.00|76.50|153.00|76.50|forest maroon yellow puff powder|forest maroon yellow puff powder|Supplier#000006065|CANADA|UiI2Cy3W4Tu5sLk LuvXLRy6KihlGv|
+6092|8994|6093|8994|6093|6092|3|6092|6093|6092|6093|6093|6092|3|6092|6092|31.00|15.50|31.00|15.50|forest goldenrod deep maroon misty|forest goldenrod deep maroon misty|Supplier#000006093|CANADA|KJNUg1odUT2wtCS2s6PrH3D6fd|
+166098|5350|6099|5350|6099|166098|3|166098|6099|166098|6099|6099|166098|3|166098|166098|4.00|2.00|4.00|2.00|forest tan floral misty white|forest tan floral misty white|Supplier#000006099|CANADA|aZilwQKYDTVPoK|
+16108|9578|6109|9578|6109|16108|3|16108|6109|16108|6109|6109|16108|3|16108|16108|72.00|36.00|72.00|36.00|forest pale floral blue dim|forest pale floral blue dim|Supplier#000006109|CANADA|rY5gbfh3dKHnylcQUTPGCwnbe|
+141188|9143|6217|9143|6217|141188|3|141188|6217|141188|6217|6217|141188|3|141188|141188|71.00|35.50|71.00|35.50|forest cornsilk thistle moccasin grey|forest cornsilk thistle moccasin grey|Supplier#000006217|CANADA|RVN23SYT9jenUeaWGXUd|
+193777|343|6297|343|6297|193777|3|193777|6297|193777|6297|6297|193777|3|193777|193777|28.00|14.00|28.00|14.00|forest lavender orchid navajo cornflower|forest lavender orchid navajo cornflower|Supplier#000006297|CANADA|73VRDOO56GUCyvc40oYJ|
+71420|4381|6435|4381|6435|71420|3|71420|6435|71420|6435|6435|71420|3|71420|71420|70.00|35.00|70.00|35.00|forest pale antique papaya snow|forest pale antique papaya snow|Supplier#000006435|CANADA|xIgE69XszYbnO4Eon7cHHO8y|
+28956|1065|6463|1065|6463|28956|3|28956|6463|28956|6463|6463|28956|3|28956|28956|41.00|20.50|41.00|20.50|forest floral tan white spring|forest floral tan white spring|Supplier#000006463|CANADA|7 wkdj2EO49iotley2kmIM ADpLSszGV3RNWj|
+163961|3966|6478|3966|6478|163961|3|163961|6478|163961|6478|6478|163961|3|163961|163961|136.00|68.00|136.00|68.00|forest rose blanched black purple|forest rose blanched black purple|Supplier#000006478|CANADA|bQYPnj9lpmW3U|
+61508|869|6521|869|6521|61508|3|61508|6521|61508|6521|6521|61508|3|61508|61508|13.00|6.50|13.00|6.50|forest tomato blanched powder orange|forest tomato blanched powder orange|Supplier#000006521|CANADA|b9 2zjHzxR|
+46641|5706|6642|5706|6642|46641|3|46641|6642|46641|6642|6642|46641|3|46641|46641|36.00|18.00|36.00|18.00|forest indian burnished antique chiffon|forest indian burnished antique chiffon|Supplier#000006642|CANADA|N,CUclSqRLJcS8zQ|
+21654|1354|6659|1354|6659|21654|3|21654|6659|21654|6659|6659|21654|3|21654|21654|26.00|13.00|26.00|13.00|forest brown lace snow honeydew|forest brown lace snow honeydew|Supplier#000006659|CANADA|iTLsnvD8D2GzWNUv kRInwRjk5rDeEmfup1|
+179117|9266|6669|9266|6669|179117|3|179117|6669|179117|6669|6669|179117|3|179117|179117|47.00|23.50|47.00|23.50|forest beige yellow thistle cornflower|forest beige yellow thistle cornflower|Supplier#000006669|CANADA|NQ4Yryj624p7K53|
+156747|4465|6748|4465|6748|156747|3|156747|6748|156747|6748|6748|156747|3|156747|156747|1.00|0.50|1.00|0.50|forest magenta goldenrod salmon moccasin|forest magenta goldenrod salmon moccasin|Supplier#000006748|CANADA|rC,2rEn8gKDIS5Q0dJEoiF|
+174243|2656|6761|2656|6761|174243|3|174243|6761|174243|6761|6761|174243|3|174243|174243|27.00|13.50|27.00|13.50|forest moccasin azure navajo cream|forest moccasin azure navajo cream|Supplier#000006761|CANADA|n4jhxGMqB5prD1HhpLvwrWStOLlla|
+136807|4210|6808|4210|6808|136807|3|136807|6808|136807|6808|6808|136807|3|136807|136807|38.00|19.00|38.00|19.00|forest brown sky turquoise dark|forest brown sky turquoise dark|Supplier#000006808|CANADA|HGd2Xo 9nEcHJhZvXjXxWKIpApT|
+49345|1654|6858|1654|6858|49345|3|49345|6858|49345|6858|6858|49345|3|49345|49345|8.00|4.00|8.00|4.00|forest metallic papaya moccasin cornsilk|forest metallic papaya moccasin cornsilk|Supplier#000006858|CANADA|fnlINT885vBBhsWwTGiZ0o22thwGY16h GHJj21|
+186945|673|6946|673|6946|186945|3|186945|6946|186945|6946|6946|186945|3|186945|186945|116.00|58.00|116.00|58.00|forest red lavender lemon plum|forest red lavender lemon plum|Supplier#000006946|CANADA|To6Slo0GJTqcIvD|
+11946|6541|6949|6541|6949|11946|3|11946|6949|11946|6949|6949|11946|3|11946|11946|6.00|3.00|6.00|3.00|forest rose metallic spring peru|forest rose metallic spring peru|Supplier#000006949|CANADA|mLxYUJhsGcLtKe ,GFirNu183AvT|
+62059|1105|7072|1105|7072|62059|3|62059|7072|62059|7072|7072|62059|3|62059|62059|25.00|12.50|25.00|12.50|forest steel seashell honeydew khaki|forest steel seashell honeydew khaki|Supplier#000007072|CANADA|2tRyX9M1a 4Rcm57s779F1ANG9jlpK|
+92079|9854|7098|9854|7098|92079|3|92079|7098|92079|7098|7098|92079|3|92079|92079|12.00|6.00|12.00|6.00|forest indian orchid lace tan|forest indian orchid lace tan|Supplier#000007098|CANADA|G3j8g0KC4OcbAu2OVoPHrXQWMCUdjq8wgCHOExu|
+127131|4978|7132|4978|7132|127131|3|127131|7132|127131|7132|7132|127131|3|127131|127131|37.00|18.50|37.00|18.50|forest dark linen lawn steel|forest dark linen lawn steel|Supplier#000007132|CANADA|xonvn0KAQIL3p8kYk HC1FSSDSUSTC|
+27134|7746|7135|7746|7135|27134|3|27134|7135|27134|7135|7135|27134|3|27134|27134|17.00|8.50|17.00|8.50|forest smoke dodger indian powder|forest smoke dodger indian powder|Supplier#000007135|CANADA|ls DoKV7V5ulfQy9V|
+144632|3049|7147|3049|7147|144632|3|144632|7147|144632|7147|7147|144632|3|144632|144632|48.00|24.00|48.00|24.00|forest dark lawn navajo light|forest dark lawn navajo light|Supplier#000007147|CANADA|Xzb16kC63wmLVYexUEgB0hXFvHkjT5iPpq|
+134646|7552|7160|7552|7160|134646|3|134646|7160|134646|7160|7160|134646|3|134646|134646|2.00|1.00|2.00|1.00|forest white floral thistle linen|forest white floral thistle linen|Supplier#000007160|CANADA|TqDGBULB3cTqIT6FKDvm9BS4e4v,zwYiQPb|
+4668|9722|7169|9722|7169|4668|3|4668|7169|4668|7169|7169|4668|3|4668|4668|15.00|7.50|15.00|7.50|forest lemon metallic blush orange|forest lemon metallic blush orange|Supplier#000007169|CANADA|tEc95D2moN9S84nd55O,dlnW|
+27277|787|7278|787|7278|27277|3|27277|7278|27277|7278|7278|27277|3|27277|27277|8.00|4.00|8.00|4.00|forest coral blue lawn sienna|forest coral blue lawn sienna|Supplier#000007278|CANADA|I2ae3rS7KVF8GVHtB|
+139825|8896|7365|8896|7365|139825|3|139825|7365|139825|7365|7365|139825|3|139825|139825|58.00|29.00|58.00|29.00|forest cornsilk lace peach khaki|forest cornsilk lace peach khaki|Supplier#000007365|CANADA|51xhROLvQMJ05DndtZWt|
+127397|6351|7398|6351|7398|127397|3|127397|7398|127397|7398|7398|127397|3|127397|127397|42.00|21.00|42.00|21.00|forest chocolate magenta wheat metallic|forest chocolate magenta wheat metallic|Supplier#000007398|CANADA|V8eE6oZ00OFNU,|
+39892|9368|7402|9368|7402|39892|3|39892|7402|39892|7402|7402|39892|3|39892|39892|41.00|20.50|41.00|20.50|forest sandy ivory indian dim|forest sandy ivory indian dim|Supplier#000007402|CANADA|4UVv58ery1rjmqSR5|
+52437|2515|7448|2515|7448|52437|3|52437|7448|52437|7448|7448|52437|3|52437|52437|174.00|87.00|174.00|87.00|forest mint linen beige dim|forest mint linen beige dim|Supplier#000007448|CANADA|yhhpWiJi7EJ6Q5VCaQ|
+77457|8118|7458|8118|7458|77457|3|77457|7458|77457|7458|7458|77457|3|77457|77457|161.00|80.50|161.00|80.50|forest medium purple pale cornflower|forest medium purple pale cornflower|Supplier#000007458|CANADA|BYuucapYkptZl6fnd2QaDyZmI9gR1Ih16e|
+72462|8615|7477|8615|7477|72462|3|72462|7477|72462|7477|7477|72462|3|72462|72462|58.00|29.00|58.00|29.00|forest seashell frosted brown maroon|forest seashell frosted brown maroon|Supplier#000007477|CANADA|9m9j0wfhWzCvVHxkU,PpAxwSH0h|
+124996|1744|7509|1744|7509|124996|3|124996|7509|124996|7509|7509|124996|3|124996|124996|63.00|31.50|63.00|31.50|forest plum blanched bisque grey|forest plum blanched bisque grey|Supplier#000007509|CANADA|q8,V6LJRoHJjHcOuSG7aLTMg|
+55055|4093|7561|4093|7561|55055|3|55055|7561|55055|7561|7561|55055|3|55055|55055|71.00|35.50|71.00|35.50|forest navy white chiffon blanched|forest navy white chiffon blanched|Supplier#000007561|CANADA|rMcFg2530VC|
+155100|2980|7616|2980|7616|155100|3|155100|7616|155100|7616|7616|155100|3|155100|155100|39.00|19.50|39.00|19.50|forest cornsilk purple dark olive|forest cornsilk purple dark olive|Supplier#000007616|CANADA|R IovIqzDi3,QHnaqZk1xS4hGAgelhP4yj|
+77759|2820|7760|2820|7760|77759|3|77759|7760|77759|7760|7760|77759|3|77759|77759|14.00|7.00|14.00|7.00|forest lavender blanched powder purple|forest lavender blanched powder purple|Supplier#000007760|CANADA|JsPE18PvcdFTK|
+20294|1475|7801|1475|7801|20294|3|20294|7801|20294|7801|7801|20294|3|20294|20294|8.00|4.00|8.00|4.00|forest lace seashell purple blanched|forest lace seashell purple blanched|Supplier#000007801|CANADA|69fi,U1r6enUb|
+52854|5489|7865|5489|7865|52854|3|52854|7865|52854|7865|7865|52854|3|52854|52854|14.00|7.00|14.00|7.00|forest yellow burnished cornsilk purple|forest yellow burnished cornsilk purple|Supplier#000007865|CANADA|5cDGCS,T6N|
+70363|7713|7885|7713|7885|70363|3|70363|7885|70363|7885|7885|70363|3|70363|70363|78.00|39.00|78.00|39.00|forest light brown seashell turquoise|forest light brown seashell turquoise|Supplier#000007885|CANADA|u3sicchh5ZpyTUpN1cJKNcAoabIWgY|
+17925|8811|7926|8811|7926|17925|3|17925|7926|17925|7926|7926|17925|3|17925|17925|5.00|2.50|5.00|2.50|forest cream blush turquoise saddle|forest cream blush turquoise saddle|Supplier#000007926|CANADA|ErzCF80K9Uy|
+37997|9346|7998|9346|7998|37997|3|37997|7998|37997|7998|7998|37997|3|37997|37997|27.00|13.50|27.00|13.50|forest violet turquoise orange maroon|forest violet turquoise orange maroon|Supplier#000007998|CANADA|LnASFBfYRFOo9d6d,asBvVq9Lo2P|
+188089|151|8090|151|8090|188089|3|188089|8090|188089|8090|8090|188089|3|188089|188089|15.00|7.50|15.00|7.50|forest hot maroon ivory rosy|forest hot maroon ivory rosy|Supplier#000008090|CANADA|eonbJZvoDFYBNUinYfp6yERIg|
+75716|4439|8224|4439|8224|75716|3|75716|8224|75716|8224|8224|75716|3|75716|75716|7.00|3.50|7.00|3.50|forest ivory purple wheat pink|forest ivory purple wheat pink|Supplier#000008224|CANADA|TWxt9f,LVER|
+90703|337|8231|337|8231|90703|3|90703|8231|90703|8231|8231|90703|3|90703|90703|27.00|13.50|27.00|13.50|forest firebrick puff medium light|forest firebrick puff medium light|Supplier#000008231|CANADA|IK7eGw Yj90sTdpsP,vcqWxLB|
+108242|3926|8243|3926|8243|108242|3|108242|8243|108242|8243|8243|108242|3|108242|108242|3.00|1.50|3.00|1.50|forest bisque turquoise almond maroon|forest bisque turquoise almond maroon|Supplier#000008243|CANADA|2AyePMkDqmzVzjGTizXthFLo8h EiudCMxOmIIG|
+195803|9589|8323|9589|8323|195803|3|195803|8323|195803|8323|8323|195803|3|195803|195803|59.00|29.50|59.00|29.50|forest drab navajo purple lemon|forest drab navajo purple lemon|Supplier#000008323|CANADA|75I18sZmASwm POeheRMdj9tmpyeQ,BfCXN5BIAb|
+25863|1166|8366|1166|8366|25863|3|25863|8366|25863|8366|8366|25863|3|25863|25863|25.00|12.50|25.00|12.50|forest lace navajo ivory midnight|forest lace navajo ivory midnight|Supplier#000008366|CANADA|h778cEj14BuW9OEKlvPTWq4iwASR6EBBXN7zeS8|
+93513|5344|8532|5344|8532|93513|3|93513|8532|93513|8532|8532|93513|3|93513|93513|18.00|9.00|18.00|9.00|forest beige lawn powder plum|forest beige lawn powder plum|Supplier#000008532|CANADA|Uc29q4,5xVdDOF87UZrxhr4xWS0ihEUXuh|
+13592|2467|8595|2467|8595|13592|3|13592|8595|13592|8595|8595|13592|3|13592|13592|21.00|10.50|21.00|10.50|forest dodger orchid gainsboro azure|forest dodger orchid gainsboro azure|Supplier#000008595|CANADA|MH0iB73GQ3z UW3O DbCbqmc|
+16108|7812|8610|7812|8610|16108|3|16108|8610|16108|8610|8610|16108|3|16108|16108|40.00|20.00|40.00|20.00|forest pale floral blue dim|forest pale floral blue dim|Supplier#000008610|CANADA|SgVgP90vP452sUNTgzL9zKwXHXAzV6tV|
+68682|1364|8683|1364|8683|68682|3|68682|8683|68682|8683|8683|68682|3|68682|68682|14.00|7.00|14.00|7.00|forest gainsboro metallic burnished cyan|forest gainsboro metallic burnished cyan|Supplier#000008683|CANADA|gLuGcugfpJSeGQARnaHNCaWnGaqsNnjyl20|
+61186|1871|8705|1871|8705|61186|3|61186|8705|61186|8705|8705|61186|3|61186|61186|34.00|17.00|34.00|17.00|forest lime almond navajo violet|forest lime almond navajo violet|Supplier#000008705|CANADA|aE,trRNdPx,4yinTD9O3DebDIp|
+118741|7754|8742|7754|8742|118741|3|118741|8742|118741|8742|8742|118741|3|118741|118741|59.00|29.50|59.00|29.50|forest cornsilk blue mint navy|forest cornsilk blue mint navy|Supplier#000008742|CANADA|HmPlQEzKCPEcTUL14,kKq|
+141298|2245|8841|2245|8841|141298|3|141298|8841|141298|8841|8841|141298|3|141298|141298|43.00|21.50|43.00|21.50|forest navajo coral purple plum|forest navajo coral purple plum|Supplier#000008841|CANADA|I 85Lu1sekbg2xrSIzm0|
+188871|527|8872|527|8872|188871|3|188871|8872|188871|8872|8872|188871|3|188871|188871|61.00|30.50|61.00|30.50|forest seashell puff cornflower olive|forest seashell puff cornflower olive|Supplier#000008872|CANADA|8D 45GgxJO2OwwYP9S4AaXJKvDwPfLM|
+16377|204|8879|204|8879|16377|3|16377|8879|16377|8879|8879|16377|3|16377|16377|75.00|37.50|75.00|37.50|forest moccasin ghost blanched olive|forest moccasin ghost blanched olive|Supplier#000008879|CANADA|rDSA,D9oPM,65NMWEFrmGKAu|
+156451|8164|8967|8164|8967|156451|3|156451|8967|156451|8967|8967|156451|3|156451|156451|28.00|14.00|28.00|14.00|forest cornsilk indian yellow brown|forest cornsilk indian yellow brown|Supplier#000008967|CANADA|2kwEHyMG 7FwozNImAUE6mH0hYtqYculJM|
+153941|7646|8972|7646|8972|153941|3|153941|8972|153941|8972|8972|153941|3|153941|153941|72.00|36.00|72.00|36.00|forest moccasin sienna blanched mint|forest moccasin sienna blanched mint|Supplier#000008972|CANADA|w2vF6 D5YZO3visPXsqVfLADTK|
+14029|4199|9032|4199|9032|14029|3|14029|9032|14029|9032|9032|14029|3|14029|14029|49.00|24.50|49.00|24.50|forest bisque azure ghost indian|forest bisque azure ghost indian|Supplier#000009032|CANADA|qK,trB6Sdy4Dz1BRUFNy|
+164010|97|9043|97|9043|164010|3|164010|9043|164010|9043|9043|164010|3|164010|164010|23.00|11.50|23.00|11.50|forest thistle blue powder yellow|forest thistle blue powder yellow|Supplier#000009043|CANADA|57OPvKH4qyXIZ7IzYeCaw11a5N1Ki9f1WWmVQ,|
+61759|3354|9278|3354|9278|61759|3|61759|9278|61759|9278|9278|61759|3|61759|61759|48.00|24.00|48.00|24.00|forest puff beige tomato tan|forest puff beige tomato tan|Supplier#000009278|CANADA|RqYTzgxj93CLX 0mcYfCENOefD|
+154295|9577|9326|9577|9326|154295|3|154295|9326|154295|9326|9326|154295|3|154295|154295|56.00|28.00|56.00|28.00|forest khaki brown bisque antique|forest khaki brown bisque antique|Supplier#000009326|CANADA|XmiC,uy36B9,fb0zhcjaagiXQutg|
+11926|8259|9430|8259|9430|11926|3|11926|9430|11926|9430|9430|11926|3|11926|11926|10.00|5.00|10.00|5.00|forest red peru blush dodger|forest red peru blush dodger|Supplier#000009430|CANADA|igRqmneFt|
+69548|9754|9549|9754|9549|69548|3|69548|9549|69548|9549|9549|69548|3|69548|69548|33.00|16.50|33.00|16.50|forest azure honeydew cyan brown|forest azure honeydew cyan brown|Supplier#000009549|CANADA|h3RVchUf8MzY46IzbZ0ng09|
+179600|2208|9601|2208|9601|179600|3|179600|9601|179600|9601|9601|179600|3|179600|179600|16.00|8.00|16.00|8.00|forest royal spring powder red|forest royal spring powder red|Supplier#000009601|CANADA|51m637bO,Rw5DnHWFUvLacRx9|
+189708|4268|9709|4268|9709|189708|3|189708|9709|189708|9709|9709|189708|3|189708|189708|69.00|34.50|69.00|34.50|forest orange snow burlywood blush|forest orange snow burlywood blush|Supplier#000009709|CANADA|rRnCbHYgDgl9PZYnyWKVYSUW0vKg|
+124728|9501|9753|9501|9753|124728|3|124728|9753|124728|9753|9753|124728|3|124728|124728|46.00|23.00|46.00|23.00|forest navy steel rose antique|forest navy steel rose antique|Supplier#000009753|CANADA|wLhVEcRmd7PkJF4FBnGK7Z|
+52283|5411|9799|5411|9799|52283|3|52283|9799|52283|9799|9799|52283|3|52283|52283|11.00|5.50|11.00|5.50|forest drab thistle dark lavender|forest drab thistle dark lavender|Supplier#000009799|CANADA|4wNjXGa4OKWl|
+97301|7724|9811|7724|9811|97301|3|97301|9811|97301|9811|9811|97301|3|97301|97301|43.00|21.50|43.00|21.50|forest salmon olive mint rose|forest salmon olive mint rose|Supplier#000009811|CANADA|E3iuyq7UnZxU7oPZIe2Gu6|
+199811|4530|9812|4530|9812|199811|3|199811|9812|199811|9812|9812|199811|3|199811|199811|15.00|7.50|15.00|7.50|forest blanched floral ivory linen|forest blanched floral ivory linen|Supplier#000009812|CANADA|APFRMy3lCbgFga53n5t9DxzFPQPgnjrGt32|
+139845|2301|9846|2301|9846|139845|3|139845|9846|139845|9846|9846|139845|3|139845|139845|20.00|10.00|20.00|10.00|forest cornflower gainsboro spring orange|forest cornflower gainsboro spring orange|Supplier#000009846|CANADA|57sNwJJ3PtBDu,hMPP5QvpcOcSNRXn3PypJJrh|
+12395|1901|9899|1901|9899|12395|3|12395|9899|12395|9899|9899|12395|3|12395|12395|16.00|8.00|16.00|8.00|forest steel blue mint gainsboro|forest steel blue mint gainsboro|Supplier#000009899|CANADA|7XdpAHrzr1t,UQFZE|
+49973|3747|9974|3747|9974|49973|3|49973|9974|49973|9974|9974|49973|3|49973|49973|51.00|25.50|51.00|25.50|forest aquamarine tomato sky bisque|forest aquamarine tomato sky bisque|Supplier#000009974|CANADA|7wJ,J5DKcxSU4Kp1cQLpbcAvB5AsvKT|
+---------------------------------------------------
+Planning time: 20.39 ms
+Data Load Time (Disk+Upload): 9111.12 ms
+GPU kernels time: 25.05 ms
+CPU postprocess time: 79.98 ms
+Total Internal Pipeline time: 9216.14 ms
+Total Host Execution time: 9225.88 ms
+Total Wall time (Plan+Exec): 9246.27 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.205 ms (0.819%) [1 calls]
+  compact        :    3.208 ms (12.809%) [5 calls]
+  filter         :   10.128 ms (40.438%) [5 calls]
+  gather         :    6.764 ms (27.008%) [9 calls]
+  groupby        :    1.012 ms (4.042%) [3 calls]
+  hash_join_probe_u32:    1.696 ms (6.771%) [4 calls]
+  hash_join_probe_u64:    1.298 ms (5.181%) [4 calls]
+  sort           :    0.734 ms (2.932%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 25.046 ms
+  Kernel invocations: 33
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                6.966             25          0.004
+ops::compact_indices                 0.763             25          0.033
+ops::gather_col_u32                  0.871              1          0.001
+ops::gather_col_u32                  2.330              1          0.000
+hash_join_probe_write_multi          0.942          10000         10.612
+ops::filter_string_ge                0.701         200000        285.120
+ops::compact_indices                 0.288         200000        695.048
+ops::filter_string_lt                0.991         200000        201.850
+ops::compact_indices                 0.648         200000        308.840
+hash_join_probe_write_multi          0.217          63143        290.702
+ops::gather_col_u32                  0.193           2127         11.021
+ops::gather_col_u32                  0.746           2127          2.852
+ops::gather_col_u32                  0.775           2127          2.745
+hash_join_probe_write_multi          0.319         800000       2507.185
+ops::filter_ge_u32                   0.888        6001215       6755.584
+ops::compact_indices                 0.891        6001215       6735.998
+ops::filter_lt_u32_indexed           0.581        4336142       7462.700
+ops::compact_indices_indexed         0.619        4336142       7008.382
+ops::gather_col_u32                  0.536         909455       1696.086
+ops::gather_col_u32                  0.352         909455       2583.063
+ops::gather_col_u32                  0.482         909455       1887.976
+ops::gather_col_f32                  0.479         909455       1897.996
+ops::join_probe_u64                  0.558         909455       1631.064
+ops::groupby_agg_multi_key_ty        0.571           9741         17.051
+ops::ht_mark_valid                   0.225          32768        145.367
+ops::ht_extract_compact              0.216           5843         27.082
+ops::join_probe_u64                  0.242           5843         24.157
+ops::join_probe_u64                  0.262           8508         32.473
+ops::join_probe_u64                  0.236           8508         36.032
+ops::cast_u32_to_f32                 0.205           8508         41.460
+hash_join_probe_write_multi          0.217            412          1.896
+block_sort_kv_u64                    0.000            186          0.000
+orderby_gpu_gather                   0.734           4650          6.333
+─────────────────────────────────────────────────────────────────
+TOTAL: 25.046 ms

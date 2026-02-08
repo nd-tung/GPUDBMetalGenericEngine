@@ -1,7 +1,6 @@
 #include "GpuExecutorPriv.hpp"
 #include "Operators.hpp" // Included for GpuOps::filter*
 #include "Predicate.hpp"    // Included for engine::expr::CompOp
-#include "ColumnStoreGPU.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -224,20 +223,10 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                       }
                       
                       std::optional<FilterResult> res;
-                      // Prefer Arrow-style flat string path (avoids re-flattening)
-                      auto flatIt = ctx.flatStringColsGPU.find(colName);
-                      if (flatIt != ctx.flatStringColsGPU.end() && flatIt->second.valid()) {
-                          if (fn.name == "PREFIX") {
-                              res = GpuOps::filterStringPrefixFlat(colName, flatIt->second, pat, false);
-                          } else {
-                              res = GpuOps::filterStringFlat(colName, flatIt->second, op, pat);
-                          }
+                      if (fn.name == "PREFIX") {
+                          res = GpuOps::filterStringPrefix(colName, *vec, pat, false);
                       } else {
-                          if (fn.name == "PREFIX") {
-                              res = GpuOps::filterStringPrefix(colName, *vec, pat, false);
-                          } else {
-                              res = GpuOps::filterString(colName, *vec, op, pat);
-                          }
+                          res = GpuOps::filterString(colName, *vec, op, pat);
                       }
                       
                       if (res) {
@@ -528,14 +517,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                       }
                       
                       engine::expr::CompOp op = (cmp.op == engine::CompareOp::Like) ? (engine::expr::CompOp)999 : engine::expr::CompOp::EQ;
-                      // Prefer flat string path
-                      std::optional<FilterResult> res;
-                      auto flatIt = ctx.flatStringColsGPU.find(colName);
-                      if (flatIt != ctx.flatStringColsGPU.end() && flatIt->second.valid()) {
-                          res = GpuOps::filterStringFlat(colName, flatIt->second, op, pat);
-                      } else {
-                          res = GpuOps::filterString(colName, *vec, op, pat);
-                      }
+                      auto res = GpuOps::filterString(colName, *vec, op, pat);
                       
                       if (res) {
                           if (ctx.activeRowsGPU) {
@@ -681,11 +663,6 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                              // Register temp column
                              colName = "tmp_sub_" + baseCol;
                              ctx.stringCols[colName] = std::move(newVec);
-                             // Create flat string column for GPU filter path
-                             {
-                                 auto& cstoreTmp = ColumnStoreGPU::instance();
-                                 ctx.flatStringColsGPU[colName] = makeFlatStringColumn(cstoreTmp.device(), ctx.stringCols[colName]);
-                             }
                              isCol = true;
                          }
                      }
@@ -992,14 +969,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              if (std::holds_alternative<std::string>(litExpr->asLiteral().value)) {
                   pat = std::get<std::string>(litExpr->asLiteral().value);
              }
-             // Prefer flat string path
-             std::optional<FilterResult> res;
-             auto flatIt = ctx.flatStringColsGPU.find(colName);
-             if (flatIt != ctx.flatStringColsGPU.end() && flatIt->second.valid()) {
-                 res = GpuOps::filterStringFlat(colName, flatIt->second, op, pat);
-             } else {
-                 res = GpuOps::filterString(colName, *strVec, op, pat);
-             }
+             auto res = GpuOps::filterString(colName, *strVec, op, pat);
              if (res) {
                   if (ctx.activeRowsGPU) {
                       auto joinRes = GpuOps::joinHash(
@@ -1326,14 +1296,9 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                  if (ctx.stringCols.count(c)) vec = &ctx.stringCols.at(c);
                  
                  if (vec) {
-                      // Apply NOT LIKE prefix (prefer flat path)
-                      std::optional<FilterResult> res;
-                      auto flatIt = ctx.flatStringColsGPU.find(c);
-                      if (flatIt != ctx.flatStringColsGPU.end() && flatIt->second.valid()) {
-                          res = GpuOps::filterStringPrefixFlat(c, flatIt->second, pat, true);
-                      } else {
-                          res = GpuOps::filterStringPrefix(c, *vec, pat, true);
-                      }
+                      // Apply NOT LIKE prefix
+                      // prefix matching: Like 'pat%'
+                      std::optional<FilterResult> res = GpuOps::filterStringPrefix(c, *vec, pat, true);
                       
                       if (res) {
                           if (ctx.activeRowsGPU) {

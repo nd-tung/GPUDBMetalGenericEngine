@@ -2,7 +2,6 @@
 #include "GpuExecutorPriv.hpp"
 #include "Relation.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
 
 #include <iostream>
 #include <vector>
@@ -81,12 +80,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
             if (ctx.f32Cols.find(n) == ctx.f32Cols.end()) ctx.f32Cols[n] = v;
         }
         for (const auto& [n, v] : savedString) {
-            if (ctx.stringCols.find(n) == ctx.stringCols.end()) {
-                ctx.stringCols[n] = v;
-                // Also create flat string column for GPU path
-                auto& cstoreP = ColumnStoreGPU::instance();
-                ctx.flatStringColsGPU[n] = makeFlatStringColumn(cstoreP.device(), v);
-            }
+            if (ctx.stringCols.find(n) == ctx.stringCols.end()) ctx.stringCols[n] = v;
         }
     }
     
@@ -188,14 +182,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         
                         ctx.stringCols[outName] = std::move(substrResults);
                         ctx.stringCols[posName] = ctx.stringCols[outName];
-                        
-                        // Create flat string columns for GPU filter path
-                        {
-                            auto& cstoreS = ColumnStoreGPU::instance();
-                            auto flat = makeFlatStringColumn(cstoreS.device(), ctx.stringCols[outName]);
-                            ctx.flatStringColsGPU[outName] = flat;
-                            ctx.flatStringColsGPU[posName] = flat;
-                        }
                         
                         // Create u32 encoded values for groupby compatibility (simple hash).
                         std::vector<uint32_t> encoded;
@@ -469,13 +455,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (outName != col) ctx.columnAliases[col] = outName;
                 }
                 ctx.stringCols[posName] = sub;
-                // Create flat string columns for GPU filter path
-                {
-                    auto& cstorePr = ColumnStoreGPU::instance();
-                    auto flatP = makeFlatStringColumn(cstorePr.device(), sub);
-                    if (!outName.empty()) ctx.flatStringColsGPU[outName] = flatP;
-                    ctx.flatStringColsGPU[posName] = flatP;
-                }
                 out.string_cols.push_back(std::move(sub));
                 out.string_names.push_back(outName.empty() ? col : outName);
                 
@@ -928,13 +907,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             }
                             ctx.stringCols[posName] = res;
                             if (!outName.empty()) ctx.stringCols[outName] = res;
-                            // Create flat string columns for GPU filter path
-                            {
-                                auto& cstoreCR = ColumnStoreGPU::instance();
-                                auto flatCR = makeFlatStringColumn(cstoreCR.device(), res);
-                                ctx.flatStringColsGPU[posName] = flatCR;
-                                if (!outName.empty()) ctx.flatStringColsGPU[outName] = flatCR;
-                            }
                             out.string_cols.push_back(res);
                             out.string_names.push_back(outName.empty() ? neededCol : outName);
                             // Dummy u32

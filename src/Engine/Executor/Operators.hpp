@@ -12,8 +12,6 @@
 
 namespace engine {
 
-struct FlatStringColumn; // forward decl (defined in GpuExecutorPriv.hpp)
-
 struct FilterResult {
     MTL::Buffer* indices = nullptr; // u32 indices, length == count
     uint32_t count = 0;
@@ -97,19 +95,6 @@ public:
                                                       const std::vector<std::string>& data,
                                                       const std::string& pattern,
                                                       bool invert = false);
-
-    // Arrow-style flat string filter overloads — use persistent FlatStringColumn buffers
-    // directly, avoiding the re-flatten from vector<string>.
-    static std::optional<FilterResult> filterStringFlat(const std::string& colName,
-                                                        const FlatStringColumn& flat,
-                                                        engine::expr::CompOp op,
-                                                        const std::string& pattern);
-
-    static std::optional<FilterResult> filterStringPrefixFlat(const std::string& colName,
-                                                               const FlatStringColumn& flat,
-                                                               const std::string& pattern,
-                                                               bool invert = false);
-
     static std::optional<FilterResult> filterU32Indexed(const std::string& colName,
                                                            MTL::Buffer* col,
                                                            MTL::Buffer* indices,

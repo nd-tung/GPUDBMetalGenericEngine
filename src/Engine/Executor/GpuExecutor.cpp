@@ -654,12 +654,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                                 vec = std::move(compact);
                                             }
                                         }
-                                        // Rebuild flat string columns from compacted data
-                                        tableCtx.flatStringColsGPU.clear();
-                                        for (auto& [name, vec] : tableCtx.stringCols) {
-                                            auto& cstore = ColumnStoreGPU::instance();
-                                            tableCtx.flatStringColsGPU[name] = makeFlatStringColumn(cstore.device(), vec);
-                                        }
                                         for (auto& [name, buf] : tableCtx.u32ColsGPU) {
                                             if (tableCtx.u32Cols.count(name) && !tableCtx.u32Cols.at(name).empty()) {
                                                 const auto& v = tableCtx.u32Cols.at(name);
@@ -681,7 +675,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                         tableCtx.f32Cols.clear();
                                         tableCtx.f32ColsGPU.clear();
                                         tableCtx.stringCols.clear();
-                                        tableCtx.flatStringColsGPU.clear();
                                         // Also strip non-correlation u32 columns
                                         {
                                             std::set<std::string> keepCols(dedupCols.begin(), dedupCols.end());
@@ -811,12 +804,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                             vec = std::move(compact);
                                         }
                                     }
-                                    // Rebuild flat string columns from compacted data
-                                    currentCtx.flatStringColsGPU.clear();
-                                    for (auto& [name, vec] : currentCtx.stringCols) {
-                                        auto& cstore = ColumnStoreGPU::instance();
-                                        currentCtx.flatStringColsGPU[name] = makeFlatStringColumn(cstore.device(), vec);
-                                    }
                                     // Re-upload GPU columns
                                     for (auto& [name, buf] : currentCtx.u32ColsGPU) {
                                         if (currentCtx.u32Cols.count(name) && !currentCtx.u32Cols.at(name).empty()) {
@@ -839,7 +826,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                     currentCtx.f32Cols.clear();
                                     currentCtx.f32ColsGPU.clear();
                                     currentCtx.stringCols.clear();
-                                    currentCtx.flatStringColsGPU.clear();
                                     // Also strip non-correlation u32 columns
                                     {
                                         std::set<std::string> keepCols(dedupCols.begin(), dedupCols.end());
@@ -1137,7 +1123,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 currentCtx.u32Cols.clear();
                 currentCtx.f32Cols.clear();
                 currentCtx.stringCols.clear();
-                currentCtx.flatStringColsGPU.clear();
                 currentCtx.currentTable.clear();
                 
                 // Reset joinedTables for SEMI join decorrelation pattern
@@ -1181,15 +1166,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         currentCtx.stringCols[tableResult.string_names[i]] = tableResult.string_cols[i];
                         if (debug) std::cerr << "[Exec] GroupBy: setting stringCol " << tableResult.string_names[i] 
                                             << " with " << tableResult.string_cols[i].size() << " rows\n";
-                    }
-                }
-
-                // Rebuild flat string columns after GroupBy
-                if (!currentCtx.stringCols.empty()) {
-                    auto& cstoreGB = ColumnStoreGPU::instance();
-                    currentCtx.flatStringColsGPU.clear();
-                    for (const auto& [sn, sv] : currentCtx.stringCols) {
-                        currentCtx.flatStringColsGPU[sn] = makeFlatStringColumn(cstoreGB.device(), sv);
                     }
                 }
 
@@ -1378,14 +1354,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 for (size_t i = 0; i < tableResult.string_cols.size(); ++i) {
                     if (i < tableResult.string_names.size())
                         currentCtx.stringCols[tableResult.string_names[i]] = tableResult.string_cols[i];
-                }
-                // Rebuild flat string columns after OrderBy sort
-                if (!currentCtx.stringCols.empty()) {
-                    auto& cstoreOB = ColumnStoreGPU::instance();
-                    currentCtx.flatStringColsGPU.clear();
-                    for (const auto& [sn, sv] : currentCtx.stringCols) {
-                        currentCtx.flatStringColsGPU[sn] = makeFlatStringColumn(cstoreOB.device(), sv);
-                    }
                 }
                 if (debug) {
                     std::cerr << "[Exec] OrderBy applied\n";

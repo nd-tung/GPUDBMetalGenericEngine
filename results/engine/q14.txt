@@ -1,0 +1,133 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'promo_revenue' -> '100.00 * sum(case
+        when p_type like 'PROMO%'
+        then l_extendedprice * (1 - l_discount)
+        else 0
+    end) / sum(l_extendedprice * (1 - l_discount))'
+[Planner]   '100.00*sum(casewhenp_typelike'promo%'thenl_extendedprice*(1-l_discount)else0end)/sum(l_extendedprice*(1-l_discount))' -> 'promo_revenue'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: UNGROUPED_AGGREGATE
+[Planner] Traversing: UNGROUPED_AGGREGATE
+[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Skipping capture for 'part' table to force full Traversal
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_partkey
+[Planner] Proj: p_type
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 0 Plan: 6122465560
+[Planner] Node SEQ_SCAN  output projections: p_partkey, p_type, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_partkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 2 Plan: 6122465560
+[Planner] Node SEQ_SCAN  output projections: l_partkey, l_extendedprice, l_discount, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
+[Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
+[Planner] ChildProjs size: 5
+  #0: l_partkey
+  #1: l_extendedprice
+  #2: l_discount
+  #3: p_partkey
+  #4: p_type
+[Planner] Resolved Condition: 'l_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_1'
+[Planner] Join Key Analysis: l => lineitem, r => part
+[Planner] Captured RHS Table: tmpl_join_1
+[Planner] RHS Tables: tmpl_join_1, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: l_partkey, l_extendedprice, l_discount, p_partkey, p_type, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: CASE  WHEN (prefix(p_type, 'PROMO')) THEN ((l_extendedprice * (1.00 - l_discount))) ELSE 0.0000 END
+[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
+[Planner] Forcing keep of global column: p_type
+[Planner] Forcing keep of global column: p_partkey
+[Planner] Forcing keep of global column: l_discount
+[Planner] Forcing keep of global column: l_partkey
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Node PROJECTION output projections: CASE  WHEN (prefix(p_type, 'PROMO')) THEN ((l_extendedprice * (1.00 - l_discount))) ELSE 0.0000 END, (l_extendedprice * (1.00 - l_discount)), 
+[Planner] Processing aggregate: 'sum(CASE  WHEN (prefix(p_type, 'PROMO')) THEN ((l_extendedprice * (1.00 - l_discount))) ELSE 0.0000 END)'
+[Planner] Processing aggregate: 'sum((l_extendedprice * (1.00 - l_discount)))'
+[Planner] Node UNGROUPED_AGGREGATE output projections: sum(CASE  WHEN (prefix(p_type, 'PROMO')) THEN ((l_extendedprice * (1.00 - l_discount))) ELSE 0.0000 END), sum((l_extendedprice * (1.00 - l_discount))), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: promo_revenue
+[Planner] Projection: resolving alias 'promo_revenue' -> '100.00 * sum(case
+        when p_type like 'PROMO%'
+        then l_extendedprice * (1 - l_discount)
+        else 0
+    end) / sum(l_extendedprice * (1 - l_discount))'
+DEBUG: Parsing string containing CASE: 'sum(case
+        when p_type like 'PROMO%'
+        then l_extendedprice * (1 - l_discount)
+        else 0
+    end)'
+DEBUG: Is Start? 0
+DEBUG: Is End? 0
+[Planner] Node PROJECTION output projections: promo_revenue, 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (123 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar promo_revenue: 16.38
+---------------------------------------------------
+Planning time: 20.31 ms
+Data Load Time (Disk+Upload): 8549.38 ms
+GPU kernels time: 15.48 ms
+CPU postprocess time: 31.73 ms
+Total Internal Pipeline time: 8596.59 ms
+Total Host Execution time: 8598.08 ms
+Total Wall time (Plan+Exec): 8618.39 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    2.628 ms (16.978%) [2 calls]
+  filter         :    7.964 ms (51.452%) [2 calls]
+  gather         :    4.670 ms (30.171%) [8 calls]
+  hash_join_probe_u32:    0.217 ms (1.399%) [1 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 15.478 ms
+  Kernel invocations: 13
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_ge_u32                   7.064        6001215        849.604
+ops::compact_indices                 1.718        6001215       3494.157
+ops::filter_lt_u32_indexed           0.900        2817779       3130.431
+ops::compact_indices_indexed         0.910        2817779       3095.185
+ops::gather_col_u32                  0.867          75983         87.643
+ops::gather_col_u32                  0.952          75983         79.828
+ops::gather_col_f32                  0.938          75983         80.966
+ops::gather_col_f32                  0.386          75983        197.082
+hash_join_probe_write_multi          0.217          75983        350.894
+ops::gather_col_f32                  0.972          12519         12.880
+ops::gather_col_f32                  0.185          12519         67.823
+ops::gather_col_f32                  0.189          12519         66.399
+ops::gather_col_f32                  0.182          12519         68.802
+─────────────────────────────────────────────────────────────────
+TOTAL: 15.478 ms

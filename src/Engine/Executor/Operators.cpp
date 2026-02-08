@@ -1,7 +1,6 @@
 #include "Operators.hpp"
 
 #include "ColumnStoreGPU.hpp"
-#include "GpuExecutorPriv.hpp"
 #include "KernelTimer.hpp"
 
 #include <algorithm>
@@ -14,43 +13,6 @@
 #include <unordered_map>
 
 namespace engine {
-
-// ---- Arrow-style FlatStringColumn builder ----
-
-FlatStringColumn makeFlatStringColumn(MTL::Device* device,
-                                      const std::vector<std::string>& data) {
-    FlatStringColumn col;
-    if (!device || data.empty()) return col;
-
-    const uint32_t N = static_cast<uint32_t>(data.size());
-    // Build offsets (N+1) and chars
-    std::vector<uint32_t> offsets(N + 1);
-    uint32_t total = 0;
-    for (uint32_t i = 0; i < N; ++i) {
-        offsets[i] = total;
-        total += static_cast<uint32_t>(data[i].size());
-    }
-    offsets[N] = total;
-
-    col.rowCount   = N;
-    col.totalChars = total;
-    col.offsets = device->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t),
-                                    MTL::ResourceStorageModeShared);
-    if (total > 0) {
-        // Build contiguous char buffer
-        std::vector<uint8_t> chars(total);
-        for (uint32_t i = 0; i < N; ++i) {
-            if (!data[i].empty())
-                std::memcpy(chars.data() + offsets[i], data[i].data(), data[i].size());
-        }
-        col.chars = device->newBuffer(chars.data(), total, MTL::ResourceStorageModeShared);
-    } else {
-        col.chars = device->newBuffer(1, MTL::ResourceStorageModeShared); // placeholder
-    }
-    return col;
-}
-
-// ---- end FlatStringColumn builder ----
 
 static MTL::ComputePipelineState* makePSO(MTL::Device* dev, MTL::Library* lib, const char* fn) {
     // Cache PSOs for the lifetime of the process to avoid repeated compilation.
@@ -620,15 +582,16 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     auto& store = ColumnStoreGPU::instance();
     if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
 
-    // 1. Prepare data — build Arrow-style offsets (N+1) + chars (no lengths buffer)
+    // 1. Prepare data
     size_t rowCount = data.size();
     if (rowCount == 0) return FilterResult{nullptr, 0};
     if (std::getenv("GPUDB_DEBUG_OPS")) {
         std::cerr << "[Exec] GPU filterString: rowCount=" << rowCount << " pattern=" << pattern << "\n";
     }
     
-    // Build Arrow-style offsets (N+1)
-    std::vector<uint32_t> offsets(rowCount + 1);
+    // Flatten
+    std::vector<uint32_t> offsets(rowCount);
+    std::vector<uint32_t> lengths(rowCount);
     
     // First pass: calculate total size
     size_t totalChars = 0;
@@ -643,12 +606,12 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     size_t currentOffset = 0;
     for (size_t i = 0; i < rowCount; ++i) {
         offsets[i] = static_cast<uint32_t>(currentOffset);
+        lengths[i] = static_cast<uint32_t>(data[i].size());
         if (!data[i].empty()) {
             chars.insert(chars.end(), data[i].begin(), data[i].end());
         }
         currentOffset += data[i].size();
     }
-    offsets[rowCount] = static_cast<uint32_t>(currentOffset);
     
     // 2. Upload to GPU
     MTL::Buffer* bufChars = nullptr;
@@ -659,6 +622,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     }
 
     auto bufOffsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto bufLengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     
     // 3. Process Pattern — detect multi-wildcard LIKE (e.g. %Customer%Complaints%)
     std::string rawPattern = pattern;
@@ -737,6 +701,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     if (!p_filter || !p_compact) {
         bufChars->release();
         bufOffsets->release();
+        bufLengths->release();
         bufPattern->release();
         if (bufPatOffsets) bufPatOffsets->release();
         if (bufPatLengths) bufPatLengths->release();
@@ -754,18 +719,19 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_filter);
         enc->setBuffer(bufChars, 0, 0);
-        enc->setBuffer(bufOffsets, 0, 1);   // Arrow-style N+1
-        enc->setBuffer(mask, 0, 2);
+        enc->setBuffer(bufOffsets, 0, 1);
+        enc->setBuffer(bufLengths, 0, 2);
+        enc->setBuffer(mask, 0, 3);
         if (useMultiContains) {
-            enc->setBuffer(bufPattern, 0, 3);
-            enc->setBuffer(bufPatOffsets, 0, 4);
-            enc->setBuffer(bufPatLengths, 0, 5);
-            enc->setBytes(&numSegments, sizeof(numSegments), 6);
-            enc->setBytes(&rc, sizeof(rc), 7);
+            enc->setBuffer(bufPattern, 0, 4);
+            enc->setBuffer(bufPatOffsets, 0, 5);
+            enc->setBuffer(bufPatLengths, 0, 6);
+            enc->setBytes(&numSegments, sizeof(numSegments), 7);
+            enc->setBytes(&rc, sizeof(rc), 8);
         } else {
-            enc->setBuffer(bufPattern, 0, 3);
-            enc->setBytes(&patternLen, sizeof(patternLen), 4);
-            enc->setBytes(&rc, sizeof(rc), 5);
+            enc->setBuffer(bufPattern, 0, 4);
+            enc->setBytes(&patternLen, sizeof(patternLen), 5);
+            enc->setBytes(&rc, sizeof(rc), 6);
         }
         if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Dispatching 1D...\n";
         dispatch1D(enc, rowCount);
@@ -782,6 +748,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
 
     bufChars->release();
     bufOffsets->release();
+    bufLengths->release();
     bufPattern->release();
     if (bufPatOffsets) bufPatOffsets->release();
     if (bufPatLengths) bufPatLengths->release();
@@ -850,8 +817,8 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
         std::cerr << "[GpuOps] filterStringPrefix pattern='" << pattern << "' invert=" << invert << " rowCount=" << rowCount << "\n";
     }
     
-    // Arrow-style offsets (N+1)
-    std::vector<uint32_t> offsets(rowCount + 1);
+    std::vector<uint32_t> offsets(rowCount);
+    std::vector<uint32_t> lengths(rowCount);
     size_t totalChars = 0;
     for (const auto& s : data) totalChars += s.size();
     
@@ -861,18 +828,19 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
     size_t currentOffset = 0;
     for (size_t i = 0; i < rowCount; ++i) {
         offsets[i] = static_cast<uint32_t>(currentOffset);
+        lengths[i] = static_cast<uint32_t>(data[i].size());
         if (!data[i].empty()) {
             chars.insert(chars.end(), data[i].begin(), data[i].end());
         }
         currentOffset += data[i].size();
     }
-    offsets[rowCount] = static_cast<uint32_t>(currentOffset);
     
     MTL::Buffer* bufChars = nullptr;
     if (!chars.empty()) bufChars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
     else bufChars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
 
     auto bufOffsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto bufLengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     
     std::string rawPattern = pattern;
     if (!rawPattern.empty() && rawPattern.back() == '%') rawPattern.pop_back();
@@ -898,6 +866,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
         if(!p_compact) std::cerr << "[GpuOps] Failed to make PSO for compact\n";
         bufChars->release();
         bufOffsets->release();
+        bufLengths->release();
         bufPattern->release();
         return std::nullopt;
     }
@@ -910,11 +879,12 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_filter);
         enc->setBuffer(bufChars, 0, 0);
-        enc->setBuffer(bufOffsets, 0, 1);   // Arrow-style N+1
-        enc->setBuffer(mask, 0, 2);
-        enc->setBuffer(bufPattern, 0, 3);
-        enc->setBytes(&patternLen, sizeof(patternLen), 4);
-        enc->setBytes(&rc, sizeof(rc), 5);
+        enc->setBuffer(bufOffsets, 0, 1);
+        enc->setBuffer(bufLengths, 0, 2);
+        enc->setBuffer(mask, 0, 3);
+        enc->setBuffer(bufPattern, 0, 4);
+        enc->setBytes(&patternLen, sizeof(patternLen), 5);
+        enc->setBytes(&rc, sizeof(rc), 6);
         dispatch1D(enc, rowCount);
         enc->endEncoding();
         cmd->commit();
@@ -923,6 +893,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
 
     bufChars->release();
     bufOffsets->release();
+    bufLengths->release();
     bufPattern->release();
     
     auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -953,228 +924,6 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
     outCnt->release();
     return res;
 }
-
-// ---- Arrow-style flat-string filter overloads ----
-// These operate directly on persistent FlatStringColumn Metal buffers,
-// avoiding the per-call flatten+upload from vector<string>.
-
-std::optional<FilterResult> GpuOps::filterStringFlat(const std::string& colName,
-                                                      const FlatStringColumn& flat,
-                                                      engine::expr::CompOp op,
-                                                      const std::string& pattern) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-    if (!flat.valid()) return std::nullopt;
-
-    uint32_t rowCount = flat.rowCount;
-    if (rowCount == 0) return FilterResult{nullptr, 0};
-    if (std::getenv("GPUDB_DEBUG_OPS")) {
-        std::cerr << "[Exec] GPU filterStringFlat: col=" << colName << " rows=" << rowCount << " pattern=" << pattern << "\n";
-    }
-
-    // Process pattern
-    std::string rawPattern = pattern;
-    if (!rawPattern.empty() && rawPattern.front() == '%') rawPattern.erase(0, 1);
-    if (!rawPattern.empty() && rawPattern.back() == '%') rawPattern.pop_back();
-
-    std::vector<std::string> segments;
-    {
-        std::string seg;
-        for (char c : rawPattern) {
-            if (c == '%') { if (!seg.empty()) { segments.push_back(seg); seg.clear(); } }
-            else seg += c;
-        }
-        if (!seg.empty()) segments.push_back(seg);
-    }
-
-    bool useMultiContains = (segments.size() > 1);
-    MTL::Buffer* bufPattern = nullptr;
-    MTL::Buffer* bufPatOffsets = nullptr;
-    MTL::Buffer* bufPatLengths = nullptr;
-    uint32_t patternLen = 0;
-    uint32_t numSegments = static_cast<uint32_t>(segments.size());
-
-    if (useMultiContains) {
-        std::vector<char> packedPat;
-        std::vector<uint32_t> patOffsets, patLens;
-        for (const auto& seg : segments) {
-            patOffsets.push_back(static_cast<uint32_t>(packedPat.size()));
-            patLens.push_back(static_cast<uint32_t>(seg.size()));
-            packedPat.insert(packedPat.end(), seg.begin(), seg.end());
-        }
-        bufPattern = store.device()->newBuffer(packedPat.data(), packedPat.size(), MTL::ResourceStorageModeShared);
-        bufPatOffsets = store.device()->newBuffer(patOffsets.data(), patOffsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-        bufPatLengths = store.device()->newBuffer(patLens.data(), patLens.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    } else {
-        std::string singlePat = segments.empty() ? "" : segments[0];
-        patternLen = static_cast<uint32_t>(singlePat.size());
-        bufPattern = patternLen > 0 ? store.device()->newBuffer(singlePat.data(), patternLen, MTL::ResourceStorageModeShared)
-                                     : store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
-    }
-
-    uint32_t rc = rowCount;
-    const char* kernelName = useMultiContains ? "ops::filter_string_multi_contains" : "ops::filter_string_contains";
-    if (!useMultiContains) {
-        switch(op) {
-            case engine::expr::CompOp::EQ: kernelName = "ops::filter_string_eq"; break;
-            case engine::expr::CompOp::NE: kernelName = "ops::filter_string_ne"; break;
-            case engine::expr::CompOp::LT: kernelName = "ops::filter_string_lt"; break;
-            case engine::expr::CompOp::LE: kernelName = "ops::filter_string_le"; break;
-            case engine::expr::CompOp::GT: kernelName = "ops::filter_string_gt"; break;
-            case engine::expr::CompOp::GE: kernelName = "ops::filter_string_ge"; break;
-            default: break;
-        }
-    }
-
-    auto p_filter = makePSO(store.device(), store.library(), kernelName);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) {
-        bufPattern->release();
-        if (bufPatOffsets) bufPatOffsets->release();
-        if (bufPatLengths) bufPatLengths->release();
-        return std::nullopt;
-    }
-
-    auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
-
-    auto filterStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(flat.chars, 0, 0);
-        enc->setBuffer(flat.offsets, 0, 1);  // Arrow N+1
-        enc->setBuffer(mask, 0, 2);
-        if (useMultiContains) {
-            enc->setBuffer(bufPattern, 0, 3);
-            enc->setBuffer(bufPatOffsets, 0, 4);
-            enc->setBuffer(bufPatLengths, 0, 5);
-            enc->setBytes(&numSegments, sizeof(numSegments), 6);
-            enc->setBytes(&rc, sizeof(rc), 7);
-        } else {
-            enc->setBuffer(bufPattern, 0, 3);
-            enc->setBytes(&patternLen, sizeof(patternLen), 4);
-            enc->setBytes(&rc, sizeof(rc), 5);
-        }
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto filterEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record(kernelName, "filter_flat",
-        std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), rowCount);
-
-    bufPattern->release();
-    if (bufPatOffsets) bufPatOffsets->release();
-    if (bufPatLengths) bufPatLengths->release();
-
-    // Flip mask for NOTLIKE multi-segment
-    if (useMultiContains && op == engine::expr::CompOp::NE) {
-        uint8_t* maskPtr = (uint8_t*)mask->contents();
-        for (uint32_t i = 0; i < rowCount; ++i) maskPtr[i] = maskPtr[i] ? 0 : 1;
-    }
-
-    // Compact
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&rc, sizeof(rc), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    mask->release();
-    FilterResult res;
-    res.indices = outIdx;
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-    outCnt->release();
-    (void)colName;
-    return res;
-}
-
-std::optional<FilterResult> GpuOps::filterStringPrefixFlat(const std::string& colName,
-                                                            const FlatStringColumn& flat,
-                                                            const std::string& pattern,
-                                                            bool invert) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-    if (!flat.valid()) return std::nullopt;
-
-    uint32_t rowCount = flat.rowCount;
-    if (rowCount == 0) return FilterResult{nullptr, 0};
-
-    std::string rawPattern = pattern;
-    if (!rawPattern.empty() && rawPattern.back() == '%') rawPattern.pop_back();
-    uint32_t patternLen = static_cast<uint32_t>(rawPattern.size());
-    MTL::Buffer* bufPattern = patternLen > 0
-        ? store.device()->newBuffer(rawPattern.data(), patternLen, MTL::ResourceStorageModeShared)
-        : store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
-
-    uint32_t rc = rowCount;
-    const char* kernelName = invert ? "ops::filter_string_not_prefix" : "ops::filter_string_prefix";
-
-    auto p_filter = makePSO(store.device(), store.library(), kernelName);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) { bufPattern->release(); return std::nullopt; }
-
-    auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    std::memset(mask->contents(), 0, rowCount);
-
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(flat.chars, 0, 0);
-        enc->setBuffer(flat.offsets, 0, 1);
-        enc->setBuffer(mask, 0, 2);
-        enc->setBuffer(bufPattern, 0, 3);
-        enc->setBytes(&patternLen, sizeof(patternLen), 4);
-        enc->setBytes(&rc, sizeof(rc), 5);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    bufPattern->release();
-
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&rc, sizeof(rc), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    mask->release();
-    FilterResult res;
-    res.indices = outIdx;
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-    outCnt->release();
-    (void)colName;
-    return res;
-}
-
-// ---- end flat-string filter overloads ----
 
 JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys, 
                                      MTL::Buffer* buildIndices, 

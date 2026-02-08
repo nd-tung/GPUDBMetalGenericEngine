@@ -1,0 +1,125 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+p_partkey|s_suppkey|s_nationkey|ps_suppkey|s_acctbal|ps_supplycost|s_name|n_name|p_mfgr|s_address|s_phone|s_comment|
+1389|8890|19|8890|9990.05|608.75|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+3889|8890|19|8890|9990.05|311.13|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+6389|8890|19|8890|9990.05|170.52|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+8889|8890|19|8890|9990.05|748.53|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+11386|8890|19|8890|9990.05|905.53|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+13887|8890|19|8890|9990.05|886.48|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+16388|8890|19|8890|9990.05|63.58|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+18889|8890|19|8890|9990.05|123.79|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+21383|8890|19|8890|9990.05|858.40|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+23885|8890|19|8890|9990.05|460.79|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+26387|8890|19|8890|9990.05|442.35|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+28889|8890|19|8890|9990.05|839.95|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+31380|8890|19|8890|9990.05|859.02|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+33883|8890|19|8890|9990.05|102.63|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+36386|8890|19|8890|9990.05|254.82|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+38889|8890|19|8890|9990.05|99.33|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+41377|8890|19|8890|9990.05|84.39|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+43881|8890|19|8890|9990.05|145.64|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+46385|8890|19|8890|9990.05|748.20|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+48889|8890|19|8890|9990.05|340.99|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+51374|8890|19|8890|9990.05|846.57|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+53879|8890|19|8890|9990.05|885.84|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+56384|8890|19|8890|9990.05|959.34|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+58889|8890|19|8890|9990.05|890.84|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+61371|8890|19|8890|9990.05|836.24|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+63877|8890|19|8890|9990.05|398.07|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+66383|8890|19|8890|9990.05|394.31|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+68889|8890|19|8890|9990.05|517.31|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+71368|8890|19|8890|9990.05|10.27|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+73875|8890|19|8890|9990.05|513.78|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+76382|8890|19|8890|9990.05|112.71|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+78889|8890|19|8890|9990.05|278.38|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+81365|8890|19|8890|9990.05|315.89|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+83873|8890|19|8890|9990.05|364.79|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+86381|8890|19|8890|9990.05|218.55|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+88889|8890|19|8890|9990.05|455.36|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+91362|8890|19|8890|9990.05|440.32|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+93871|8890|19|8890|9990.05|62.24|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+96380|8890|19|8890|9990.05|996.37|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+98889|8890|19|8890|9990.05|216.38|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+101359|8890|19|8890|9990.05|692.07|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+103869|8890|19|8890|9990.05|529.03|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+106379|8890|19|8890|9990.05|578.92|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+108889|8890|19|8890|9990.05|735.11|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+111356|8890|19|8890|9990.05|765.39|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+113867|8890|19|8890|9990.05|801.62|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+116378|8890|19|8890|9990.05|248.81|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+118889|8890|19|8890|9990.05|717.08|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+121353|8890|19|8890|9990.05|852.02|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+123865|8890|19|8890|9990.05|302.09|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+126377|8890|19|8890|9990.05|126.73|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+128889|8890|19|8890|9990.05|1.25|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+131350|8890|19|8890|9990.05|893.73|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+133863|8890|19|8890|9990.05|925.29|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+136376|8890|19|8890|9990.05|695.43|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+138889|8890|19|8890|9990.05|391.99|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+141347|8890|19|8890|9990.05|389.51|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+143861|8890|19|8890|9990.05|528.24|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+146375|8890|19|8890|9990.05|814.34|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+148889|8890|19|8890|9990.05|522.44|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+151344|8890|19|8890|9990.05|378.82|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+153859|8890|19|8890|9990.05|745.91|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+156374|8890|19|8890|9990.05|895.71|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+158889|8890|19|8890|9990.05|272.70|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+161341|8890|19|8890|9990.05|882.69|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+163857|8890|19|8890|9990.05|790.13|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+166373|8890|19|8890|9990.05|354.19|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+168889|8890|19|8890|9990.05|307.27|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+171338|8890|19|8890|9990.05|427.54|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+173855|8890|19|8890|9990.05|22.09|Supplier#000008890|ROMANIA|Manufacturer#1|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+176372|8890|19|8890|9990.05|682.35|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+178889|8890|19|8890|9990.05|173.48|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+181335|8890|19|8890|9990.05|359.92|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+183853|8890|19|8890|9990.05|225.39|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+186371|8890|19|8890|9990.05|479.47|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+188889|8890|19|8890|9990.05|996.57|Supplier#000008890|ROMANIA|Manufacturer#3|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+191332|8890|19|8890|9990.05|893.69|Supplier#000008890|ROMANIA|Manufacturer#5|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+193851|8890|19|8890|9990.05|991.74|Supplier#000008890|ROMANIA|Manufacturer#2|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+196370|8890|19|8890|9990.05|252.31|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+198889|8890|19|8890|9990.05|198.79|Supplier#000008890|ROMANIA|Manufacturer#4|6lmM3OrUukwhKXY0zqypO2qEsgj|29-208-398-4306|ts. unusual deposits haggle furiously along the even|
+1374|8875|19|8875|9984.69|781.22|Supplier#000008875|ROMANIA|Manufacturer#1|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+3874|8875|19|8875|9984.69|550.24|Supplier#000008875|ROMANIA|Manufacturer#1|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+6374|8875|19|8875|9984.69|971.84|Supplier#000008875|ROMANIA|Manufacturer#5|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+8874|8875|19|8875|9984.69|321.16|Supplier#000008875|ROMANIA|Manufacturer#3|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+11371|8875|19|8875|9984.69|671.91|Supplier#000008875|ROMANIA|Manufacturer#3|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+13872|8875|19|8875|9984.69|774.45|Supplier#000008875|ROMANIA|Manufacturer#3|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+16373|8875|19|8875|9984.69|734.14|Supplier#000008875|ROMANIA|Manufacturer#3|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+18874|8875|19|8875|9984.69|867.40|Supplier#000008875|ROMANIA|Manufacturer#5|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+21368|8875|19|8875|9984.69|133.55|Supplier#000008875|ROMANIA|Manufacturer#5|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+23870|8875|19|8875|9984.69|437.35|Supplier#000008875|ROMANIA|Manufacturer#5|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+26372|8875|19|8875|9984.69|893.75|Supplier#000008875|ROMANIA|Manufacturer#2|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+28874|8875|19|8875|9984.69|388.79|Supplier#000008875|ROMANIA|Manufacturer#2|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+31365|8875|19|8875|9984.69|975.03|Supplier#000008875|ROMANIA|Manufacturer#1|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+33868|8875|19|8875|9984.69|293.19|Supplier#000008875|ROMANIA|Manufacturer#1|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+36371|8875|19|8875|9984.69|749.77|Supplier#000008875|ROMANIA|Manufacturer#1|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+38874|8875|19|8875|9984.69|725.03|Supplier#000008875|ROMANIA|Manufacturer#2|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+41362|8875|19|8875|9984.69|236.31|Supplier#000008875|ROMANIA|Manufacturer#2|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+43866|8875|19|8875|9984.69|26.71|Supplier#000008875|ROMANIA|Manufacturer#5|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+46370|8875|19|8875|9984.69|289.98|Supplier#000008875|ROMANIA|Manufacturer#1|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+48874|8875|19|8875|9984.69|808.51|Supplier#000008875|ROMANIA|Manufacturer#3|hRdOqKqyU,sHq|29-132-904-4395|ong the bold pinto beans are furiously blithely slow|
+---------------------------------------------------
+Planning time: 20.97 ms
+Data Load Time (Disk+Upload): 1234.62 ms
+GPU kernels time: 18.69 ms
+CPU postprocess time: 390.54 ms
+Total Internal Pipeline time: 1643.85 ms
+Total Host Execution time: 1649.69 ms
+Total Wall time (Plan+Exec): 1670.66 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  filter_flat    :    7.663 ms (40.996%) [2 calls]
+  gather         :    2.673 ms (14.302%) [4 calls]
+  groupby        :    1.236 ms (6.614%) [3 calls]
+  hash_join_probe_u32:    6.313 ms (33.772%) [11 calls]
+  sort           :    0.807 ms (4.317%) [5 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 18.692 ms
+  Kernel invocations: 25

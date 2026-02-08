@@ -1,6 +1,5 @@
 #include "GpuExecutorPriv.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
 #include <iostream>
 #include <map>
 #include <set>
@@ -446,15 +445,10 @@ void IRGpuLoader::loadTables(
                             
                             auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, actualCol);
                             if (!rawStrings.empty()) {
-                                // Build flat Arrow-style column for GPU use
-                                auto& cstore = ColumnStoreGPU::instance();
                                 if (inst.instanceNum == 1) {
                                     ctx.stringCols[colName] = rawStrings;
-                                    ctx.flatStringColsGPU[colName] = makeFlatStringColumn(cstore.device(), rawStrings);
                                 }
-                                std::string suffixed = colName + "_" + std::to_string(inst.instanceNum);
-                                ctx.stringCols[suffixed] = std::move(rawStrings);
-                                ctx.flatStringColsGPU[suffixed] = makeFlatStringColumn(cstore.device(), ctx.stringCols[suffixed]);
+                                ctx.stringCols[colName + "_" + std::to_string(inst.instanceNum)] = std::move(rawStrings);
                             }
                         }
                     }
@@ -504,13 +498,9 @@ void IRGpuLoader::loadTables(
                     auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, actualCol);
                     if (!rawStrings.empty()) {
                         ctx.stringCols[colName] = std::move(rawStrings);
-                        // Build flat Arrow-style column for GPU use
-                        auto& cstore = ColumnStoreGPU::instance();
-                        ctx.flatStringColsGPU[colName] = makeFlatStringColumn(cstore.device(), ctx.stringCols[colName]);
                         if (debug) {
-                            std::cerr << "[Exec] Loaded raw strings + flat GPU column for " << tableName << "." << colName 
-                                      << " (" << ctx.stringCols[colName].size() << " rows, "
-                                      << ctx.flatStringColsGPU[colName].totalChars << " chars)\n";
+                            std::cerr << "[Exec] Loaded raw strings for " << tableName << "." << colName 
+                                      << " (" << ctx.stringCols[colName].size() << " rows)\n";
                         }
                     }
                 }

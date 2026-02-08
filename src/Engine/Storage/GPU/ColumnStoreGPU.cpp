@@ -1,10 +1,8 @@
 // GPU column staging implementation
 #include "ColumnStoreGPU.hpp"
-#include "GpuExecutorPriv.hpp"
 #include <Metal/Metal.hpp>
 #include <Foundation/Foundation.hpp>
 #include <chrono>
-#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -117,48 +115,6 @@ GPUColumn* ColumnStoreGPU::getColumn(const std::string& name) {
     auto it = m_columns.find(name);
     if (it == m_columns.end()) return nullptr;
     return &it->second;
-}
-
-FlatStringColumn ColumnStoreGPU::stageFlatStringColumn(const std::string& name,
-                                                        const std::vector<std::string>& data) {
-    initialize();
-    FlatStringColumn result;
-    if (!m_device || data.empty()) return result;
-
-    // Check cache
-    auto it = m_flatStrings.find(name);
-    if (it != m_flatStrings.end() && it->second.rowCount == data.size()) {
-        // Reuse cached buffers
-        result.offsets    = it->second.offsets;
-        result.chars      = it->second.chars;
-        result.rowCount   = static_cast<uint32_t>(it->second.rowCount);
-        result.totalChars = static_cast<uint32_t>(it->second.totalChars);
-        result.offsets->retain();
-        result.chars->retain();
-        return result;
-    }
-
-    // Build Arrow-style flat layout
-    result = makeFlatStringColumn(m_device, data);
-    if (!result.valid()) return result;
-
-    // Cache the buffers (retain for the cache's own reference)
-    GPUFlatStringColumn cached;
-    cached.name       = name;
-    cached.rowCount   = result.rowCount;
-    cached.totalChars = result.totalChars;
-    cached.offsets    = result.offsets;   cached.offsets->retain();
-    cached.chars      = result.chars;     cached.chars->retain();
-
-    // Release old cache entry if any
-    if (it != m_flatStrings.end()) {
-        if (it->second.offsets) it->second.offsets->release();
-        if (it->second.chars)   it->second.chars->release();
-        m_flatStrings.erase(it);
-    }
-    m_flatStrings.emplace(name, cached);
-
-    return result;
 }
 
 } // namespace engine

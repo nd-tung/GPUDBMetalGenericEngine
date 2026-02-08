@@ -1,0 +1,121 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar sum((l_extendedprice * (1.00 - l_discount))): 3083843.00
+---------------------------------------------------
+Planning time: 20.30 ms
+Data Load Time (Disk+Upload): 17790.17 ms
+GPU kernels time: 48.02 ms
+CPU postprocess time: 427.92 ms
+Total Internal Pipeline time: 18266.11 ms
+Total Host Execution time: 18266.81 ms
+Total Wall time (Plan+Exec): 18287.11 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :   11.939 ms (24.865%) [28 calls]
+  filter         :   22.898 ms (47.689%) [28 calls]
+  gather         :    4.701 ms (9.790%) [17 calls]
+  hash_join_probe_u32:    8.477 ms (17.656%) [18 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 48.015 ms
+  Kernel invocations: 91
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                8.578        6001215        699.568
+ops::compact_indices                 0.868        6001215       6914.177
+ops::filter_string_eq                1.345        6001215       4462.421
+ops::compact_indices                 0.709        6001215       8467.813
+ops::filter_string_eq                2.210        6001215       2715.994
+ops::compact_indices                 1.595        6001215       3762.616
+hash_join_probe_write_multi          2.502        1500048        599.540
+ops::gather_col_u32                  1.042         214377        205.678
+ops::filter_string_eq                1.600        6001215       3751.639
+ops::compact_indices                 1.931        6001215       3107.425
+hash_join_probe_write_multi          0.815         858104       1052.296
+ops::gather_col_u32                  0.883         214377        242.759
+ops::filter_string_eq                2.050        6001215       2926.827
+ops::compact_indices                 1.348        6001215       4452.075
+hash_join_probe_write_multi          1.879         200000        106.451
+ops::filter_le_f32                   0.748         214377        286.632
+ops::compact_indices                 0.254         214377        844.559
+ops::filter_le_u32_indexed           0.224          47244        210.754
+ops::compact_indices_indexed         0.228          47244        206.795
+ops::filter_string_eq                0.289         214377        742.431
+ops::compact_indices                 0.257         214377        834.152
+hash_join_probe_write_multi          0.228           8725         38.345
+ops::gather_col_u32                  0.203            181          0.893
+ops::filter_string_eq                0.253         214377        849.018
+ops::compact_indices                 0.238         214377        902.484
+hash_join_probe_write_multi          0.212           5121         24.146
+ops::gather_col_u32                  0.190              5          0.026
+ops::filter_string_eq                0.836         214377        256.393
+ops::compact_indices                 0.773         214377        277.331
+hash_join_probe_write_multi          0.221           5563         25.125
+ops::gather_col_u32                  0.190              5          0.026
+ops::filter_string_eq                0.270         214377        793.011
+ops::compact_indices                 0.247         214377        867.776
+hash_join_probe_write_multi          0.229           5387         23.550
+ops::gather_col_u32                  0.193              8          0.041
+ops::filter_string_eq                0.254         214377        844.004
+ops::compact_indices                 0.235         214377        912.083
+hash_join_probe_write_multi          0.231           5324         23.006
+ops::gather_col_u32                  0.193              7          0.036
+ops::filter_ge_f32                   0.233         214377        918.264
+ops::compact_indices                 0.236         214377        908.377
+ops::filter_le_f32_indexed           0.220         175772        800.025
+ops::compact_indices_indexed         0.229         175772        769.102
+ops::filter_le_u32_indexed           0.210          46782        223.258
+ops::compact_indices_indexed         0.209          46782        223.615
+ops::filter_string_eq                0.586         214377        365.935
+ops::compact_indices                 0.239         214377        897.133
+hash_join_probe_write_multi          0.423           8537         20.174
+ops::gather_col_u32                  0.253            422          1.666
+ops::filter_string_eq                0.224         214377        955.615
+ops::compact_indices                 0.199         214377       1078.176
+hash_join_probe_write_multi          0.200           5438         27.196
+ops::gather_col_u32                  0.179              6          0.034
+ops::filter_string_eq                0.229         214377        937.339
+ops::compact_indices                 0.198         214377       1083.396
+hash_join_probe_write_multi          0.199           5499         27.616
+ops::gather_col_u32                  0.171             10          0.059
+ops::filter_string_eq                0.224         214377        956.152
+ops::compact_indices                 0.199         214377       1075.920
+hash_join_probe_write_multi          0.205           5395         26.338
+ops::gather_col_u32                  0.171             12          0.070
+ops::filter_string_eq                0.682         214377        314.259
+ops::compact_indices                 0.203         214377       1054.315
+hash_join_probe_write_multi          0.195           5233         26.847
+ops::gather_col_u32                  0.176             12          0.068
+ops::filter_ge_f32                   0.193         214377       1110.043
+ops::compact_indices                 0.185         214377       1159.321
+ops::filter_le_f32_indexed           0.181         133273        735.133
+ops::compact_indices_indexed         0.185         133273        720.722
+ops::filter_le_u32_indexed           0.166          47267        284.597
+ops::compact_indices_indexed         0.175          47267        270.419
+ops::filter_string_eq                0.223         214377        962.048
+ops::compact_indices                 0.197         214377       1087.286
+hash_join_probe_write_multi          0.192           8534         44.535
+ops::gather_col_u32                  0.172            542          3.157
+ops::filter_string_eq                0.223         214377        962.770
+ops::compact_indices                 0.205         214377       1045.104
+hash_join_probe_write_multi          0.192           5326         27.752
+ops::gather_col_u32                  0.167             15          0.090
+ops::filter_string_eq                0.221         214377        971.680
+ops::compact_indices                 0.205         214377       1046.804
+hash_join_probe_write_multi          0.187           5579         29.881
+ops::gather_col_u32                  0.178             11          0.062
+ops::filter_string_eq                0.199         214377       1078.399
+ops::compact_indices                 0.197         214377       1086.598
+hash_join_probe_write_multi          0.182           5404         29.767
+ops::gather_col_u32                  0.169             11          0.065
+ops::filter_string_eq                0.228         214377        939.735
+ops::compact_indices                 0.195         214377       1099.132
+hash_join_probe_write_multi          0.186           5265         28.294
+ops::gather_col_u32                  0.173             19          0.110
+─────────────────────────────────────────────────────────────────
+TOTAL: 48.015 ms

@@ -425,7 +425,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             for (auto& [name, vec] : ctx.u32Cols) vec.clear();
             for (auto& [name, vec] : ctx.f32Cols) vec.clear();
             for (auto& [name, vec] : ctx.stringCols) vec.clear();
-            ctx.flatStringColsGPU.clear();
             for (auto& [name, buf] : ctx.u32ColsGPU) {
                 // Don't release — may be shared; just null out
                 buf = nullptr;
@@ -943,14 +942,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
     
     GpuOps::sync(); // Ensure all async gathers complete
 
-    // Rebuild flat string columns from gathered data
-    if (!outCtx.stringCols.empty()) {
-        auto& cstore = ColumnStoreGPU::instance();
-        for (const auto& [name, vec] : outCtx.stringCols) {
-            outCtx.flatStringColsGPU[name] = makeFlatStringColumn(cstore.device(), vec);
-        }
-    }
-
     if (debug) {
         std::cerr << "[Exec] Join: After string gather, outCtx.stringCols sizes:\n";
         for (const auto& [name, vec] : outCtx.stringCols) {
@@ -1079,16 +1070,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             unmatchedBuf->release();
             outCtx.rowCount = totalCount;
             resCount = totalCount;
-
-            // Rebuild flat string columns after LEFT JOIN append
-            if (!outCtx.stringCols.empty()) {
-                auto& cstoreL = ColumnStoreGPU::instance();
-                outCtx.flatStringColsGPU.clear();
-                for (const auto& [name2, vec2] : outCtx.stringCols) {
-                    outCtx.flatStringColsGPU[name2] = makeFlatStringColumn(cstoreL.device(), vec2);
-                }
-            }
-
             if (debug) std::cerr << "[Exec] Left Join: total output rows = " << totalCount << "\n";
         }
     }
@@ -1253,16 +1234,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             unmatchedBuf->release();
             outCtx.rowCount = totalCount;
             resCount = totalCount;
-
-            // Rebuild flat string columns after RIGHT JOIN append
-            if (!outCtx.stringCols.empty()) {
-                auto& cstoreR = ColumnStoreGPU::instance();
-                outCtx.flatStringColsGPU.clear();
-                for (const auto& [name2, vec2] : outCtx.stringCols) {
-                    outCtx.flatStringColsGPU[name2] = makeFlatStringColumn(cstoreR.device(), vec2);
-                }
-            }
-
             if (debug) std::cerr << "[Exec] Right Join: total output rows = " << totalCount << "\n";
         }
     }
@@ -1376,12 +1347,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                                     }
                                     vec = std::move(compacted);
                                 }
-                            }
-                            // Rebuild flat string columns after compaction
-                            auto& cstorePJ = ColumnStoreGPU::instance();
-                            outCtx.flatStringColsGPU.clear();
-                            for (const auto& [nm, vc] : outCtx.stringCols) {
-                                outCtx.flatStringColsGPU[nm] = makeFlatStringColumn(cstorePJ.device(), vc);
                             }
                         }
                         
@@ -2819,10 +2784,7 @@ bool GpuExecutor::orchestrateJoin(
                                     }
                                     // Strip string cols that exist on left
                                     for (auto it2 = rightCtx.stringCols.begin(); it2 != rightCtx.stringCols.end(); ) {
-                                        if (currentCtx.stringCols.find(it2->first) != currentCtx.stringCols.end()) {
-                                            rightCtx.flatStringColsGPU.erase(it2->first);
-                                            it2 = rightCtx.stringCols.erase(it2);
-                                        }
+                                        if (currentCtx.stringCols.find(it2->first) != currentCtx.stringCols.end()) it2 = rightCtx.stringCols.erase(it2);
                                         else ++it2;
                                     }
                                     if (debug) {
