@@ -1,0 +1,402 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'volume' -> 'l_extendedprice * (1 - l_discount)'
+[Planner]   'l_year' -> 'extract(year from l_shipdate)'
+[Planner]   'extract(yearfroml_shipdate)' -> 'l_year'
+[Planner]   'cust_nation' -> 'n2.n_name'
+[Planner]   'sum(volume)' -> 'revenue'
+[Planner]   'n2.n_name' -> 'cust_nation'
+[Planner]   'supp_nation' -> 'n1.n_name'
+[Planner]   'l_extendedprice*(1-l_discount)' -> 'volume'
+[Planner]   'n1.n_name' -> 'supp_nation'
+[Planner]   'revenue' -> 'sum(volume)'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: ORDER_BY
+[Planner] Traversing: ORDER_BY
+[Planner] Entering children traversal block. Name: order_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node FILTER
+[Planner] processing filter node info
+[Planner] captured filter: ((n_name = 'GERMANY') OR (n_name = 'FRANCE'))
+[Planner] descending to child
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table nation
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_nationkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6092158320
+[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
+Expression: ((n_name = 'GERMANY') OR (n_name = 'FRANCE'))
+[Planner] DEBUG FILTER CHILD PROJS: n_nationkey, n_name, 
+[Planner] Node FILTER output projections: n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: c_custkey
+[Planner] Proj: c_nationkey
+DEBUG: Scan table determined as: 'customer'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
+[Planner] Generating Scan: customer at index 0 Plan: 6092187928
+[Planner] Node SEQ_SCAN  output projections: c_custkey, c_nationkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 'c_nationkey = n_nationkey'
+[Planner] ChildProjs size: 4
+  #0: c_custkey
+  #1: c_nationkey
+  #2: n_nationkey
+  #3: n_name
+[Planner] Resolved Condition: 'c_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+[Planner] Join Key Analysis: l => customer, r => nation
+[Planner] Captured RHS Table: nation
+[Planner] RHS Tables: nation, 
+[Planner] Checking matchesRHS: customer
+[Planner] Checking matchesRHS: nation
+[Planner] Node HASH_JOIN output projections: c_custkey, c_nationkey, n_nationkey, n_name, 
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node FILTER
+[Planner] processing filter node info
+[Planner] captured filter: ((n_name = 'FRANCE') OR (n_name = 'GERMANY'))
+[Planner] descending to child
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table nation
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_nationkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6092152976
+[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
+Expression: ((n_name = 'FRANCE') OR (n_name = 'GERMANY'))
+[Planner] DEBUG FILTER CHILD PROJS: n_nationkey, n_name, 
+[Planner] Node FILTER output projections: n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: s_suppkey
+[Planner] Proj: s_nationkey
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Generating Scan: supplier at index 3 Plan: 6092187928
+[Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 4
+  #0: s_suppkey
+  #1: s_nationkey
+  #2: n_nationkey
+  #3: n_name
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+[Planner] Join Key Analysis: l => supplier, r => nation
+[Planner] Captured RHS Table: nation
+[Planner] RHS Tables: nation, 
+[Planner] Checking matchesRHS: supplier
+[Planner] Checking matchesRHS: nation
+[Planner] Node HASH_JOIN output projections: s_suppkey, s_nationkey, n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_suppkey
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_shipdate
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 6 Plan: 6092187928
+[Planner] Node SEQ_SCAN  output projections: l_suppkey, l_orderkey, l_shipdate, l_extendedprice, l_discount, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
+[Planner] Pre-resolved Condition: 'l_suppkey = s_suppkey'
+[Planner] ChildProjs size: 9
+  #0: l_suppkey
+  #1: l_orderkey
+  #2: l_shipdate
+  #3: l_extendedprice
+  #4: l_discount
+  #5: s_suppkey
+  #6: s_nationkey
+  #7: n_nationkey
+  #8: n_name
+[Planner] Resolved Condition: 'l_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
+[Planner] Join Key Analysis: l => lineitem, r => supplier
+[Planner] Captured RHS Table: tmpl_join_5
+[Planner] RHS Tables: tmpl_join_5, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: supplier
+[Planner] Node HASH_JOIN output projections: l_suppkey, l_orderkey, l_shipdate, l_extendedprice, l_discount, s_suppkey, s_nationkey, n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_custkey
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 9 Plan: 6092187928
+[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_custkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_8'
+[Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
+[Planner] ChildProjs size: 11
+  #0: o_orderkey
+  #1: o_custkey
+  #2: l_suppkey
+  #3: l_orderkey
+  #4: l_shipdate
+  #5: l_extendedprice
+  #6: l_discount
+  #7: s_suppkey
+  #8: s_nationkey
+  #9: n_nationkey
+  #10: n_name
+[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_8'
+[Planner] Join Key Analysis: l => orders, r => lineitem
+[Planner] Captured RHS Table: tmpl_join_8
+[Planner] RHS Tables: tmpl_join_8, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: lineitem
+[Planner] Node HASH_JOIN output projections: o_orderkey, o_custkey, l_suppkey, l_orderkey, l_shipdate, l_extendedprice, l_discount, s_suppkey, s_nationkey, n_nationkey, n_name, 
+[Planner] Renamed duplicate column: n_nationkey -> n_nationkey_1
+[Planner] Renamed duplicate column: n_name -> n_name_1
+[Planner] Qualified mapping: n2.n_name -> n_name_1
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
+[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
+[Planner] ChildProjs size: 15
+  #0: o_orderkey
+  #1: o_custkey
+  #2: l_suppkey
+  #3: l_orderkey
+  #4: l_shipdate
+  #5: l_extendedprice
+  #6: l_discount
+  #7: s_suppkey
+  #8: s_nationkey
+  #9: n_nationkey
+  #10: n_name
+  #11: c_custkey
+  #12: c_nationkey
+  #13: n_nationkey_1
+  #14: n_name_1
+[Planner] Resolved Condition: 'o_custkey = c_custkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
+[Planner] Join Key Analysis: l => orders, r => customer
+[Planner] Captured RHS Table: tmpl_join_2
+[Planner] RHS Tables: tmpl_join_2, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: customer
+[Planner] Node HASH_JOIN output projections: o_orderkey, o_custkey, l_suppkey, l_orderkey, l_shipdate, l_extendedprice, l_discount, s_suppkey, s_nationkey, n_nationkey, n_name, c_custkey, c_nationkey, n_nationkey_1, n_name_1, 
+Expression: (((n_name = 'FRANCE') AND (n_name = 'GERMANY')) OR ((n_name = 'GERMANY') AND (n_name = 'FRANCE')))
+[Planner] DEBUG FILTER CHILD PROJS: o_orderkey, o_custkey, l_suppkey, l_orderkey, l_shipdate, l_extendedprice, l_discount, s_suppkey, s_nationkey, n_nationkey, n_name, c_custkey, c_nationkey, n_nationkey_1, n_name_1, 
+[Planner] Node FILTER output projections: o_orderkey, o_custkey, l_suppkey, l_orderkey, l_shipdate, l_extendedprice, l_discount, s_suppkey, s_nationkey, n_nationkey, n_name, c_custkey, c_nationkey, n_nationkey_1, n_name_1, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: supp_nation
+[Planner] Proj: cust_nation
+[Planner] Proj: l_year
+[Planner] Proj: volume
+[Planner] Projection: resolving alias 'supp_nation' -> 'n1.n_name'
+[Planner] Projection: resolving alias 'cust_nation' -> 'n2.n_name'
+[Planner] Projection: using qualified mapping 'n2.n_name' -> 'n_name_1'
+[Planner] Projection: resolving alias 'l_year' -> 'extract(year from l_shipdate)'
+[Planner] Projection: resolving alias 'volume' -> 'l_extendedprice * (1 - l_discount)'
+[Planner] Forcing keep of global column: l_orderkey
+[Planner] Forcing keep of global column: c_custkey
+[Planner] Forcing keep of global column: n_nationkey
+[Planner] Forcing keep of global column: n_name
+[Planner] Forcing keep of global column: s_nationkey
+[Planner] Forcing keep of global column: o_custkey
+[Planner] Forcing keep of global column: l_discount
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Forcing keep of global column: l_shipdate
+[Planner] Forcing keep of global column: c_nationkey
+[Planner] Forcing keep of global column: s_suppkey
+[Planner] Forcing keep of global column: l_suppkey
+[Planner] Forcing keep of global column: o_orderkey
+[Planner] Node PROJECTION output projections: supp_nation, cust_nation, l_year, volume, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: supp_nation
+[Planner] Proj: cust_nation
+[Planner] Proj: l_year
+[Planner] Proj: volume
+[Planner] Node PROJECTION output projections: supp_nation, cust_nation, l_year, volume, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: supp_nation
+[Planner] Proj: cust_nation
+[Planner] Proj: l_year
+[Planner] Proj: volume
+[Planner] Node PROJECTION output projections: supp_nation, cust_nation, l_year, volume, 
+[Planner] Parsing agg string: 'sum(#3)'
+[Planner] Resolved agg: sum(volume)
+[Planner] inputExpr 'volume' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(volume)'
+[Planner] Found alias for agg: revenue
+[Planner] Pushing spec with outputName='revenue'
+[Planner] Node HASH_GROUP_BY output projections: supp_nation, cust_nation, l_year, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: supp_nation
+[Planner] Proj: cust_nation
+[Planner] Proj: l_year
+[Planner] Proj: revenue
+[Planner] Node PROJECTION output projections: supp_nation, cust_nation, l_year, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: supp_nation
+[Planner] Proj: cust_nation
+[Planner] Proj: l_year
+[Planner] Proj: revenue
+[Planner] Node PROJECTION output projections: supp_nation, cust_nation, l_year, revenue, 
+[Planner] Node ORDER_BY output projections: supp_nation, cust_nation, l_year, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: supp_nation
+[Planner] Proj: cust_nation
+[Planner] Proj: l_year
+[Planner] Proj: revenue
+[Planner] Node PROJECTION output projections: supp_nation, cust_nation, l_year, revenue, 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (123 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_year|revenue|supp_nation|cust_nation|
+1995|54639724.00|FRANCE|GERMANY|
+1996|54633088.00|FRANCE|GERMANY|
+1995|52531752.00|GERMANY|FRANCE|
+1996|52520528.00|GERMANY|FRANCE|
+---------------------------------------------------
+Planning time: 22.61 ms
+Data Load Time (Disk+Upload): 11207.76 ms
+GPU kernels time: 28.13 ms
+CPU postprocess time: 54.23 ms
+Total Internal Pipeline time: 11290.13 ms
+Total Host Execution time: 11290.28 ms
+Total Wall time (Plan+Exec): 11312.89 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    6.453 ms (22.937%) [11 calls]
+  filter         :   11.105 ms (39.472%) [11 calls]
+  gather         :    6.743 ms (23.969%) [13 calls]
+  groupby        :    0.407 ms (1.445%) [1 calls]
+  hash_join_probe_u32:    3.426 ms (12.177%) [7 calls]
+  sort           :    0.000 ms (0.000%) [3 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 28.134 ms
+  Kernel invocations: 46
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_le_u32                   6.650         150000         22.557
+ops::compact_indices                 0.977         150000        153.525
+ops::filter_string_eq                0.769             25          0.033
+ops::compact_indices                 0.928             25          0.027
+ops::filter_string_eq                0.850             25          0.029
+ops::compact_indices                 0.962             25          0.026
+ops::gather_col_u32                  0.897         149999        167.223
+ops::gather_col_u32                  0.851         149999        176.305
+ops::gather_col_u32                  0.740              2          0.003
+ops::gather_col_u32                  0.965              2          0.002
+hash_join_probe_write_multi          0.461         149999        325.554
+ops::filter_string_eq                0.228             25          0.110
+ops::compact_indices                 0.226             25          0.111
+ops::filter_string_eq                0.231             25          0.108
+ops::compact_indices                 0.226             25          0.111
+ops::gather_col_u32                  0.236              2          0.008
+ops::gather_col_u32                  0.240              2          0.008
+hash_join_probe_write_multi          0.283          10000         35.351
+ops::filter_ge_u32                   1.282        6001215       4680.069
+ops::compact_indices                 0.988        6001215       6076.921
+ops::filter_le_u32_indexed           0.352        3426687       9732.611
+ops::compact_indices_indexed         1.155        3426687       2966.723
+ops::gather_col_u32                  0.586        1828450       3121.777
+ops::gather_col_u32                  0.507        1828450       3605.820
+ops::gather_col_u32                  0.373        1828450       4905.298
+ops::gather_col_f32                  0.503        1828450       3631.775
+ops::gather_col_f32                  0.488        1828450       3749.705
+hash_join_probe_write_multi          1.657        1828450       1103.220
+hash_join_probe_write_multi          0.351        1500000       4274.515
+hash_join_probe_write_multi          0.318         145703        458.546
+ops::filter_string_eq                0.196          11723         59.697
+ops::compact_indices                 0.178          11723         65.860
+ops::filter_string_eq                0.179          11723         65.537
+ops::compact_indices                 0.190          11723         61.592
+hash_join_probe_write_multi          0.171           5833         34.203
+ops::gather_col_u32                  0.164           3014         18.364
+ops::filter_string_eq                0.188          11723         62.232
+ops::compact_indices                 0.184          11723         63.827
+ops::filter_string_eq                0.179          11723         65.583
+ops::compact_indices                 0.440          11723         26.658
+hash_join_probe_write_multi          0.186           5890         31.723
+ops::gather_col_u32                  0.194           2910         14.981
+ops::groupby_agg_multi_key_ty        0.407           5924         14.572
+block_sort_kv_u64                    0.000              4          0.000
+block_sort_kv_u64                    0.000              4          0.000
+block_sort_kv_u64                    0.000              4          0.000
+─────────────────────────────────────────────────────────────────
+TOTAL: 28.134 ms

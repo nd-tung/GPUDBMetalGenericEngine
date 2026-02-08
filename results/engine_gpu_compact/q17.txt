@@ -1,0 +1,48 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar avg_yearly: 348406.09
+---------------------------------------------------
+Planning time: 20.99 ms
+Data Load Time (Disk+Upload): 6197.55 ms
+GPU kernels time: 27.59 ms
+CPU postprocess time: 50.65 ms
+Total Internal Pipeline time: 6275.79 ms
+Total Host Execution time: 6276.13 ms
+Total Wall time (Plan+Exec): 6297.12 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    1.872 ms (6.786%) [2 calls]
+  filter         :    8.002 ms (29.006%) [2 calls]
+  gather         :    2.717 ms (9.847%) [4 calls]
+  groupby        :    0.641 ms (2.323%) [3 calls]
+  hash_join_probe_u32:   14.357 ms (52.039%) [6 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 27.589 ms
+  Kernel invocations: 17
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                7.137         200000         28.024
+ops::compact_indices                 0.877         200000        228.018
+ops::filter_string_eq                0.866         200000        231.002
+ops::compact_indices                 0.995         200000        201.013
+hash_join_probe_write_multi          0.942           5043          5.352
+ops::gather_col_u32                  0.243            204          0.841
+ops::gather_col_u32                  0.783            204          0.260
+ops::gather_col_u32                  0.799            204          0.255
+ops::gather_col_u32                  0.891            204          0.229
+hash_join_probe_write_multi          6.303        6001215        952.171
+hash_join_probe_write_multi          6.519        6001215        920.544
+ops::groupby_agg_multi_key_ty        0.283           6088         21.503
+ops::ht_mark_valid                   0.174          16384         94.004
+ops::ht_extract_compact              0.184            204          1.111
+hash_join_probe_write_multi          0.189            204          1.079
+hash_join_probe_write_multi          0.205           6088         29.649
+hash_join_probe_write_multi          0.198           6088         30.683
+─────────────────────────────────────────────────────────────────
+TOTAL: 27.589 ms

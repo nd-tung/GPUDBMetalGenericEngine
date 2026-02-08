@@ -12,10 +12,8 @@
 #include <cmath>
 #include <variant>
 #include "IR.hpp"
-#include "IRv2.hpp"
 #include "Planner.hpp"
-#include "PlannerV2.hpp"
-#include "IRGpuExecutorV2.hpp"
+#include "GpuExecutor.hpp"
 #include "Schema.hpp"
 #include "ExprEval.hpp"
 #include "DuckDBAdapter.hpp"
@@ -43,44 +41,44 @@ static int runEngineSQL(const std::string& sql) {
 
     // V2 Planner: Full SQL support (Q1-Q22)
     auto t_plan_start = std::chrono::high_resolution_clock::now();
-    PlanV2 planV2 = PlannerV2::fromSQL(sql);
+    Plan plan = Planner::fromSQL(sql);
     auto t_plan_end = std::chrono::high_resolution_clock::now();
     double plan_ms = std::chrono::duration<double, std::milli>(t_plan_end - t_plan_start).count();
     
     if (env_truthy("GPUDB_DEBUG_PLAN")) {
-        std::cerr << "[V2] Plan nodes: " << planV2.nodes.size() << "\n";
-        for (size_t i = 0; i < planV2.nodes.size(); ++i) {
-            const auto& n = planV2.nodes[i];
+        std::cerr << "[Exec] Plan nodes: " << plan.nodes.size() << "\n";
+        for (size_t i = 0; i < plan.nodes.size(); ++i) {
+            const auto& n = plan.nodes[i];
             std::cerr << "  [" << i << "] ";
             switch (n.type) {
-                case IRNodeV2::Type::Scan: 
+                case IRNode::Type::Scan: 
                     std::cerr << "Scan table=" << n.asScan().table; 
                     if (n.asScan().filter) std::cerr << " [HAS_FILTER]";
                     break;
-                case IRNodeV2::Type::Filter: std::cerr << "Filter pred=" << n.asFilter().predicateStr; break;
-                case IRNodeV2::Type::Join: std::cerr << "Join type=" << joinTypeName(n.asJoin().type) << " cond=" << n.asJoin().conditionStr; break;
-                case IRNodeV2::Type::GroupBy: std::cerr << "GroupBy keys=" << n.asGroupBy().keys.size() 
+                case IRNode::Type::Filter: std::cerr << "Filter pred=" << n.asFilter().predicateStr; break;
+                case IRNode::Type::Join: std::cerr << "Join type=" << joinTypeName(n.asJoin().type) << " cond=" << n.asJoin().conditionStr; break;
+                case IRNode::Type::GroupBy: std::cerr << "GroupBy keys=" << n.asGroupBy().keys.size() 
                                                        << " aggs=" << n.asGroupBy().aggSpecs.size(); break;
-                case IRNodeV2::Type::Aggregate: std::cerr << "Aggregate " << n.asAggregate().exprStr; break;
-                case IRNodeV2::Type::OrderBy: std::cerr << "OrderBy cols=" << n.asOrderBy().columns.size(); break;
-                case IRNodeV2::Type::Limit: std::cerr << "Limit " << n.asLimit().count; break;
-                case IRNodeV2::Type::Project: std::cerr << "Project cols=" << n.asProject().exprs.size(); break;
+                case IRNode::Type::Aggregate: std::cerr << "Aggregate " << n.asAggregate().exprStr; break;
+                case IRNode::Type::OrderBy: std::cerr << "OrderBy cols=" << n.asOrderBy().columns.size(); break;
+                case IRNode::Type::Limit: std::cerr << "Limit " << n.asLimit().count; break;
+                case IRNode::Type::Project: std::cerr << "Project cols=" << n.asProject().exprs.size(); break;
                 default: std::cerr << "Unknown"; break;
             }
             std::cerr << "\n";
         }
     }
     
-    if (!planV2.isValid()) {
-        std::cerr << "[V2] Plan parse error: " << planV2.parseError << std::endl;
+    if (!plan.isValid()) {
+        std::cerr << "[Exec] Plan parse error: " << plan.parseError << std::endl;
         return 1;
     }
     
     // Execute with V2 executor (uses GPU Native Executor)
-    // auto result = GPUNativeExecutor::execute(planV2, g_dataset_path);
-    std::cout << "[Main] Using IRGpuExecutorV2 generic executor.\n";
+    // auto result = GPUNativeExecutor::execute(plan, g_dataset_path);
+    std::cout << "[Main] Using GpuExecutor generic executor.\n";
     auto t_exec_start = std::chrono::high_resolution_clock::now();
-    auto result = IRGpuExecutorV2::execute(planV2, g_dataset_path);
+    auto result = GpuExecutor::execute(plan, g_dataset_path);
     auto t_exec_end = std::chrono::high_resolution_clock::now();
     double exec_ms = std::chrono::duration<double, std::milli>(t_exec_end - t_exec_start).count();
     
@@ -111,7 +109,7 @@ static int runEngineSQL(const std::string& sql) {
         std::cout << std::endl;
         
         // Print rows
-        const size_t rows_to_print = std::min<std::size_t>(t.rowCount, 10);
+        const size_t rows_to_print = t.rowCount;
         for (size_t i = 0; i < rows_to_print; ++i) {
             if (!t.order.empty()) {
                 for (const auto& ref : t.order) {

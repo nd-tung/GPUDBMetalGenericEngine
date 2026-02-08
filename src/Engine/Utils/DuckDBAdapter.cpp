@@ -69,10 +69,8 @@ static std::string strip_trailing_semicolon(std::string s) {
 }
 
 std::string DuckDBAdapter::explainJSON(const std::string& sql) {
-    // Use the persistent DuckDB database file if it exists.
-    // This is CRITICAL: using :memory: with views causes DuckDB to incorrectly
-    // transform ">= X AND < Y" into "BETWEEN X AND Y" (which is >= X AND <= Y).
-    // The persistent database preserves the correct predicate semantics.
+    // Use persistent DuckDB database to preserve correct predicate semantics
+    // (:memory: with views incorrectly transforms >= AND < into BETWEEN).
     const std::string q = escape_for_double_quoted_shell_arg(strip_sql_comments(sql));
 
     std::string datasetPath = "data/SF-1/";
@@ -89,8 +87,7 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
     if (dbExists) {
         // Use persistent database - correct predicate semantics
         std::ostringstream oss;
-        // PRAGMA disable_optimizer to avoid Delim Joins which we don't support well yet
-        // Also enable verify_parallelism to force parallelism logic if needed
+        // Disable deliminator optimizer to avoid unsupported Delim Joins
         oss << "duckdb \"" << dbPath << "\" -json "
             << "-c \"PRAGMA disabled_optimizers='deliminator'; EXPLAIN (FORMAT JSON) " << q << ";\" 2>&1";
         
@@ -102,7 +99,6 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
     }
     
     // Fallback to :memory: with views (may have BETWEEN transformation issue)
-    // Note: datasetPath already defined above
 
     // TPC-H table paths
     const std::string lineitemPath = datasetPath + "lineitem.tbl";
@@ -245,12 +241,10 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
 
 double DuckDBAdapter::runScalarDouble(const std::string& sql) {
     std::ostringstream oss;
-    // Note: running against :memory: without data will not produce actual values.
-    // This is kept for future use when populating :memory: with COPY ...
+    // Runs query against :memory: (no data loaded)
     oss << "duckdb :memory: -c \".read schema.sql\" -c \"" << sql << ";\" 2>/dev/null";
     std::string out = run_cmd_capture(oss.str());
-    // Try to find the last numeric token in the output
-    // DuckDB prints a header row by default; we keep it simple for MVP by scanning tokens.
+    // Parse the last numeric token from output
     double val = std::nan("");
     std::istringstream iss(out);
     std::string tok;

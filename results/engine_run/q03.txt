@@ -1,0 +1,191 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'revenue' -> 'sum(l_extendedprice * (1 - l_discount))'
+[Planner]   'sum(l_extendedprice*(1-l_discount))' -> 'revenue'
+[Planner] Traversing node: TOP_N
+[Planner] Traversing: TOP_N
+[Planner] Entering children traversal block. Name: top_n Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node FILTER
+[Planner] processing filter node info
+[Planner] captured filter: (c_custkey <= 149999)
+[Planner] descending to child
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table customer
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: c_custkey
+DEBUG: Scan table determined as: 'customer'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
+[Planner] Generating Scan: customer at index 0 Plan: 6170744032
+[Planner] Node SEQ_SCAN  output projections: c_custkey, 
+Expression: (c_custkey <= 149999)
+[Planner] DEBUG FILTER CHILD PROJS: c_custkey, 
+[Planner] Node FILTER output projections: c_custkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_custkey
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_orderdate
+[Planner] Proj: o_shippriority
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 0 Plan: 6170765624
+[Planner] Node SEQ_SCAN  output projections: o_custkey, o_orderkey, o_orderdate, o_shippriority, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
+[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
+[Planner] ChildProjs size: 5
+  #0: o_custkey
+  #1: o_orderkey
+  #2: o_orderdate
+  #3: o_shippriority
+  #4: c_custkey
+[Planner] Resolved Condition: 'o_custkey = c_custkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
+[Planner] Join Key Analysis: l => orders, r => customer
+[Planner] Captured RHS Table: customer
+[Planner] RHS Tables: customer, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: customer
+[Planner] Node HASH_JOIN output projections: o_custkey, o_orderkey, o_orderdate, o_shippriority, c_custkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 3 Plan: 6170765624
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_extendedprice, l_discount, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
+[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
+[Planner] ChildProjs size: 8
+  #0: l_orderkey
+  #1: l_extendedprice
+  #2: l_discount
+  #3: o_custkey
+  #4: o_orderkey
+  #5: o_orderdate
+  #6: o_shippriority
+  #7: c_custkey
+[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
+[Planner] Join Key Analysis: l => lineitem, r => orders
+[Planner] Captured RHS Table: tmpl_join_2
+[Planner] RHS Tables: tmpl_join_2, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: l_orderkey, l_extendedprice, l_discount, o_custkey, o_orderkey, o_orderdate, o_shippriority, c_custkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+[Planner] Proj: o_custkey
+[Planner] Proj: o_orderkey
+[Planner] Forcing keep of global column: o_shippriority
+[Planner] Forcing keep of global column: o_orderdate
+[Planner] Forcing keep of global column: c_custkey
+[Planner] Node PROJECTION output projections: l_orderkey, l_extendedprice, l_discount, o_custkey, o_orderkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: o_orderdate
+[Planner] Proj: o_shippriority
+[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
+[Planner] Forcing keep of global column: o_orderkey
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Forcing keep of global column: l_discount
+[Planner] Forcing keep of global column: o_custkey
+[Planner] Node PROJECTION output projections: l_orderkey, o_orderdate, o_shippriority, (l_extendedprice * (1.00 - l_discount)), 
+[Planner] Parsing agg string: 'sum(#3)'
+[Planner] Resolved agg: sum((l_extendedprice * (1.00 - l_discount)))
+[Planner] inputExpr '(l_extendedprice * (1.00 - l_discount))' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum((l_extendedprice*(1-l_discount)))'
+[Planner] Found alias with reduced parens: 'sum(l_extendedprice*(1-l_discount))'
+[Planner] Found alias for agg: revenue
+[Planner] Pushing spec with outputName='revenue'
+[Planner] Node HASH_GROUP_BY output projections: l_orderkey, o_orderdate, o_shippriority, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: o_orderdate
+[Planner] Proj: o_shippriority
+[Planner] Proj: revenue
+[Planner] Node PROJECTION output projections: l_orderkey, o_orderdate, o_shippriority, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: revenue
+[Planner] Proj: o_orderdate
+[Planner] Proj: o_shippriority
+[Planner] Node PROJECTION output projections: l_orderkey, revenue, o_orderdate, o_shippriority, 
+[Planner] ORDER BY looking up alias: 'sum((l_extendedprice*(1-l_discount)))'
+[Planner] Node TOP_N output projections: l_orderkey, revenue, o_orderdate, o_shippriority, 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (124 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_orderkey|o_orderdate|o_shippriority|revenue|
+2456423|1995-03-05|0|406181.00|
+3459808|1995-03-04|0|405838.72|
+492164|1995-02-19|0|390324.06|
+1188320|1995-03-09|0|384537.94|
+2435712|1995-02-26|0|378673.06|
+4878020|1995-03-12|0|378376.81|
+5521732|1995-03-13|0|375153.91|
+2628192|1995-02-22|0|373133.28|
+993600|1995-03-05|0|371407.47|
+2300070|1995-03-13|0|367371.16|
+---------------------------------------------------
+Planning time: 20.62 ms
+Data Load Time (Disk+Upload): 10362.73 ms
+GPU kernels time: 27.61 ms
+CPU postprocess time: 54.90 ms
+Total Internal Pipeline time: 10445.24 ms
+Total Host Execution time: 10445.44 ms
+Total Wall time (Plan+Exec): 10466.05 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    3.502 ms (12.685%) [4 calls]
+  filter         :    9.571 ms (34.668%) [4 calls]
+  gather         :   10.866 ms (39.361%) [11 calls]
+  groupby        :    0.817 ms (2.958%) [3 calls]
+  hash_join_probe_u32:    2.559 ms (9.268%) [3 calls]
+  sort           :    0.292 ms (1.059%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 27.607 ms
+  Kernel invocations: 27

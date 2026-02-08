@@ -1,0 +1,22 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar avg_yearly: 0.00
+---------------------------------------------------
+Planning time: 19.99 ms
+Data Load Time (Disk+Upload): 6253.26 ms
+GPU kernels time: 48.49 ms
+CPU postprocess time: 1768.14 ms
+Total Internal Pipeline time: 8069.89 ms
+Total Host Execution time: 8113.52 ms
+Total Wall time (Plan+Exec): 8133.51 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  groupby        :   38.065 ms (78.499%) [3 calls]
+  hash_join_probe_u32:   10.426 ms (21.501%) [5 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 48.491 ms
+  Kernel invocations: 8

@@ -1,0 +1,26 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_returnflag|l_linestatus|sum_qty|sum_base_price|sum_disc_price|sum_charge|avg_qty|avg_price|avg_disc|count_order|
+A|F|37734000.00|56586924032.00|0.00|0.00|25.52|38273.36|0.05|1478493.00|
+N|F|991417.00|1487505920.00|0.00|0.00|25.52|38284.50|0.05|38854.00|
+N|O|76633448.00|114934939648.00|0.00|0.00|25.50|38247.93|0.05|3004998.00|
+R|F|37720048.00|56567902208.00|0.00|0.00|25.51|38250.76|0.05|1478870.00|
+---------------------------------------------------
+Planning time: 19.57 ms
+Data Load Time (Disk+Upload): 14596.05 ms
+GPU kernels time: 283.14 ms
+CPU postprocess time: 225.18 ms
+Total Internal Pipeline time: 15104.37 ms
+Total Host Execution time: 15104.42 ms
+Total Wall time (Plan+Exec): 15123.99 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  groupby        :  279.506 ms (98.715%) [3 calls]
+  sort           :    3.637 ms (1.285%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 283.143 ms
+  Kernel invocations: 5

@@ -19,7 +19,7 @@ double eval_rpn(const std::vector<Token>& rpn, std::size_t rowIndex, const RowGe
 
 std::set<std::string> collect_idents(const std::string& s);
 
-// Very small predicate evaluator supporting conjunctions of simple comparisons connected by AND.
+// Predicate evaluator for conjunctions of simple comparisons connected by AND.
 // Supported clause forms:
 //   <ident> <op> <number>
 //   <ident> <op> DATE 'YYYY-MM-DD'
