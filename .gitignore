@@ -1,0 +1,18 @@
+# Data files
+*.tbl
+*.duckdb
+data/
+
+# Build artifacts
+build/
+
+# Results
+results/
+
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
