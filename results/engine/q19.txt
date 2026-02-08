@@ -1,0 +1,232 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'revenue' -> 'sum(l_extendedprice* (1 - l_discount))'
+[Planner]   'sum(l_extendedprice*(1-l_discount))' -> 'revenue'
+[Planner] Traversing node: UNGROUPED_AGGREGATE
+[Planner] Traversing: UNGROUPED_AGGREGATE
+[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node PROJECTION
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+[Planner] Proj: l_shipmode
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 0 Plan: 6138079512
+[Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, l_shipmode, l_extendedprice, l_discount, 
+Expression: ((l_shipmode = 'AIR') OR (l_shipmode = 'AIR REG'))
+[Planner] DEBUG FILTER CHILD PROJS: l_partkey, l_quantity, l_shipmode, l_extendedprice, l_discount, 
+[Planner] Node FILTER output projections: l_partkey, l_quantity, l_shipmode, l_extendedprice, l_discount, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+[Planner] Forcing keep of global column: l_shipmode
+[Planner] Node PROJECTION output projections: l_partkey, l_quantity, l_extendedprice, l_discount, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_partkey
+[Planner] Proj: p_brand
+[Planner] Proj: p_container
+[Planner] Proj: p_size
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 4 Plan: 6138079512
+[Planner] Node SEQ_SCAN  output projections: p_partkey, p_brand, p_container, p_size, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
+[Planner] Pre-resolved Condition: 'p_partkey = l_partkey'
+[Planner] ChildProjs size: 8
+  #0: p_partkey
+  #1: p_brand
+  #2: p_container
+  #3: p_size
+  #4: l_partkey
+  #5: l_quantity
+  #6: l_extendedprice
+  #7: l_discount
+[Planner] Resolved Condition: 'p_partkey = l_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_3'
+[Planner] Join Key Analysis: l => part, r => lineitem
+[Planner] Captured RHS Table: tmpl_join_3
+[Planner] RHS Tables: tmpl_join_3, 
+[Planner] Checking matchesRHS: part
+[Planner] Checking matchesRHS: lineitem
+[Planner] Node HASH_JOIN output projections: p_partkey, p_brand, p_container, p_size, l_partkey, l_quantity, l_extendedprice, l_discount, 
+Expression: (((l_quantity <= 11.00) AND (p_size <= 5) AND (p_brand = 'Brand#12') AND ((p_container = 'SM CASE') OR (p_container = 'SM BOX') OR (p_container = 'SM PACK') OR (p_container = 'SM PKG'))) OR ((l_quantity >= 10.00) AND (l_quantity <= 20.00) AND (p_size <= 10) AND (p_brand = 'Brand#23') AND ((p_container = 'MED BAG') OR (p_container = 'MED BOX') OR (p_container = 'MED PKG') OR (p_container = 'MED PACK'))) OR ((l_quantity >= 20.00) AND (l_quantity <= 30.00) AND (p_size <= 15) AND (p_brand = 'Brand#34') AND ((p_container = 'LG CASE') OR (p_container = 'LG BOX') OR (p_container = 'LG PACK') OR (p_container = 'LG PKG'))))
+[Planner] DEBUG FILTER CHILD PROJS: p_partkey, p_brand, p_container, p_size, l_partkey, l_quantity, l_extendedprice, l_discount, 
+DEBUG: Parsing string containing CASE: ''SM CASE''
+DEBUG: Is Start? 0
+DEBUG: Is End? 0
+DEBUG: Parsing string containing CASE: ''LG CASE''
+DEBUG: Is Start? 0
+DEBUG: Is End? 0
+[Planner] Node FILTER output projections: p_partkey, p_brand, p_container, p_size, l_partkey, l_quantity, l_extendedprice, l_discount, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+[Planner] Forcing keep of global column: l_discount
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Forcing keep of global column: p_size
+[Planner] Forcing keep of global column: p_container
+[Planner] Forcing keep of global column: p_brand
+[Planner] Forcing keep of global column: p_partkey
+[Planner] Node PROJECTION output projections: l_partkey, l_quantity, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
+[Planner] Forcing keep of global column: l_quantity
+[Planner] Forcing keep of global column: l_partkey
+[Planner] Node PROJECTION output projections: (l_extendedprice * (1.00 - l_discount)), 
+[Planner] Processing aggregate: 'sum((l_extendedprice * (1.00 - l_discount)))'
+[Planner] Node UNGROUPED_AGGREGATE output projections: sum((l_extendedprice * (1.00 - l_discount))), 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (123 KB source).
+GpuOps::gatherU32: Input or Indices buffer is NULL
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar sum((l_extendedprice * (1.00 - l_discount))): 3083843.25
+---------------------------------------------------
+Planning time: 20.98 ms
+Data Load Time (Disk+Upload): 17802.65 ms
+GPU kernels time: 48.46 ms
+CPU postprocess time: 423.20 ms
+Total Internal Pipeline time: 18274.31 ms
+Total Host Execution time: 18275.02 ms
+Total Wall time (Plan+Exec): 18296.00 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :   14.377 ms (29.664%) [28 calls]
+  filter         :   24.057 ms (49.639%) [28 calls]
+  gather         :    4.412 ms (9.103%) [17 calls]
+  hash_join_probe_u32:    5.619 ms (11.594%) [18 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 48.465 ms
+  Kernel invocations: 91
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                8.332        6001215        720.283
+ops::compact_indices                 0.759        6001215       7908.917
+ops::filter_string_eq                1.347        6001215       4455.106
+ops::compact_indices                 2.258        6001215       2657.512
+ops::filter_string_eq                1.604        6001215       3740.531
+ops::compact_indices                 1.051        6001215       5712.500
+hash_join_probe_write_multi          1.576        1500048        951.958
+ops::gather_col_u32                  0.859         214377        249.614
+ops::filter_string_eq                1.542        6001215       3892.997
+ops::compact_indices                 1.351        6001215       4442.738
+hash_join_probe_write_multi          0.750         858104       1144.774
+ops::gather_col_u32                  0.846         214377        253.500
+ops::filter_string_eq                1.560        6001215       3847.140
+ops::compact_indices                 1.071        6001215       5603.375
+hash_join_probe_write_multi          0.267         200000        749.999
+ops::filter_le_f32                   0.743         214377        288.529
+ops::compact_indices                 0.900         214377        238.131
+ops::filter_le_u32_indexed           0.741          47244         63.743
+ops::compact_indices_indexed         0.230          47244        205.223
+ops::filter_string_eq                0.275         214377        778.961
+ops::compact_indices                 0.251         214377        854.231
+hash_join_probe_write_multi          0.245           8725         35.661
+ops::gather_col_u32                  0.200            181          0.905
+ops::filter_string_eq                0.272         214377        788.995
+ops::compact_indices                 0.897         214377        239.071
+hash_join_probe_write_multi          0.223           5121         23.016
+ops::gather_col_u32                  0.194              5          0.026
+ops::filter_string_eq                0.766         214377        279.911
+ops::compact_indices                 2.020         214377        106.143
+hash_join_probe_write_multi          0.236           5563         23.597
+ops::gather_col_u32                  0.213              5          0.023
+ops::filter_string_eq                0.271         214377        789.721
+ops::compact_indices                 0.245         214377        874.562
+hash_join_probe_write_multi          0.214           5387         25.217
+ops::gather_col_u32                  0.200              8          0.040
+ops::filter_string_eq                0.243         214377        881.303
+ops::compact_indices                 0.215         214377        998.649
+hash_join_probe_write_multi          0.186           5324         28.643
+ops::gather_col_u32                  0.176              7          0.040
+ops::filter_ge_f32                   0.196         214377       1095.622
+ops::compact_indices                 0.200         214377       1072.555
+ops::filter_le_f32_indexed           0.179         175772        983.571
+ops::compact_indices_indexed         0.180         175772        974.481
+ops::filter_le_u32_indexed           0.169          46782        276.817
+ops::compact_indices_indexed         0.172          46782        272.648
+ops::filter_string_eq                1.730         214377        123.882
+ops::compact_indices                 0.208         214377       1032.311
+hash_join_probe_write_multi          0.181           8537         47.253
+ops::gather_col_u32                  0.168            422          2.513
+ops::filter_string_eq                0.224         214377        959.001
+ops::compact_indices                 0.198         214377       1080.665
+hash_join_probe_write_multi          0.196           5438         27.763
+ops::gather_col_u32                  0.178              6          0.034
+ops::filter_string_eq                0.234         214377        917.447
+ops::compact_indices                 0.217         214377        987.344
+hash_join_probe_write_multi          0.195           5499         28.254
+ops::gather_col_u32                  0.178             10          0.056
+ops::filter_string_eq                0.230         214377        933.938
+ops::compact_indices                 0.208         214377       1032.311
+hash_join_probe_write_multi          0.197           5395         27.450
+ops::gather_col_u32                  0.163             12          0.074
+ops::filter_string_eq                1.443         214377        148.516
+ops::compact_indices                 0.193         214377       1109.566
+hash_join_probe_write_multi          0.195           5233         26.773
+ops::gather_col_u32                  0.171             12          0.070
+ops::filter_ge_f32                   0.200         214377       1073.678
+ops::compact_indices                 0.192         214377       1116.064
+ops::filter_le_f32_indexed           0.171         133273        777.859
+ops::compact_indices_indexed         0.179         133273        743.848
+ops::filter_le_u32_indexed           0.172          47267        275.542
+ops::compact_indices_indexed         0.165          47267        286.250
+ops::filter_string_eq                0.232         214377        924.872
+ops::compact_indices                 0.211         214377       1017.413
+hash_join_probe_write_multi          0.207           8534         41.202
+ops::gather_col_u32                  0.191            542          2.836
+ops::filter_string_eq                0.234         214377        915.488
+ops::compact_indices                 0.211         214377       1014.399
+hash_join_probe_write_multi          0.202           5326         26.405
+ops::gather_col_u32                  0.188             15          0.080
+ops::filter_string_eq                0.219         214377        980.009
+ops::compact_indices                 0.199         214377       1078.626
+hash_join_probe_write_multi          0.165           5579         33.846
+ops::gather_col_u32                  0.149             11          0.074
+ops::filter_string_eq                0.500         214377        428.968
+ops::compact_indices                 0.195         214377       1099.369
+hash_join_probe_write_multi          0.195           5404         27.725
+ops::gather_col_u32                  0.164             11          0.067
+ops::filter_string_eq                0.230         214377        932.074
+ops::compact_indices                 0.202         214377       1063.025
+hash_join_probe_write_multi          0.193           5265         27.303
+ops::gather_col_u32                  0.173             19          0.110
+─────────────────────────────────────────────────────────────────
+TOTAL: 48.465 ms

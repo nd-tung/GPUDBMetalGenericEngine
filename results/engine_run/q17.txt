@@ -1,0 +1,245 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'avg_yearly' -> 'sum(l_extendedprice) / 7.0'
+[Planner]   'sum(l_extendedprice)/7.0' -> 'avg_yearly'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: UNGROUPED_AGGREGATE
+[Planner] Traversing: UNGROUPED_AGGREGATE
+[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: LEFT_DELIM_JOIN
+[Planner] Traversing: LEFT_DELIM_JOIN
+[Planner] [TraverseNode] Logic for JOIN: LEFT_DELIM_JOIN
+[Planner] Entering children traversal block. Name: left_delim_join Children: 3
+[Planner] Checking LHS (kids[0]) for delim...
+[Planner] checkDelim visiting: hash_join
+[Planner] checkDelim visiting: seq_scan 
+[Planner] checkDelim visiting: seq_scan 
+[Planner] Result LHS: 0
+[Planner] Checking RHS (kids[1]) for delim...
+[Planner] checkDelim visiting: hash_join
+[Planner] checkDelim visiting: column_data_scan
+[Planner] checkDelim FOUND: column_data_scan
+[Planner] Result RHS: 1
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6099773832
+[Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Skipping capture for 'part' table to force full Traversal
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_partkey
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 0 Plan: 6099773832
+[Planner] Node SEQ_SCAN  output projections: p_partkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+[Planner] Proj: l_extendedprice
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 2 Plan: 6099773832
+[Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, l_extendedprice, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
+[Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
+[Planner] ChildProjs size: 4
+  #0: l_partkey
+  #1: l_quantity
+  #2: l_extendedprice
+  #3: p_partkey
+[Planner] Resolved Condition: 'l_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_1'
+[Planner] Join Key Analysis: l => lineitem, r => part
+[Planner] Captured RHS Table: tmpl_join_1
+[Planner] RHS Tables: tmpl_join_1, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: l_partkey, l_quantity, l_extendedprice, p_partkey, 
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_4 at index 4 Plan: 6099773832
+[Planner] Created Save Node with type: 10
+[Planner] CONFIRMED: Back node is Save.
+[Planner] Post-Emit Size: 5
+[Planner] Pushed DELIM context: tmpl_delim_lhs_4 (stack size=1)
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node PROJECTION
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node DELIM_SCAN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: DELIM_SCAN
+[Planner] Traversing: DELIM_SCAN
+[Planner] Entering children traversal block. Name: delim_scan Children: 0
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 5 Plan: 6099773832
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node DELIM_SCAN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: DELIM_SCAN
+[Planner] Traversing: DELIM_SCAN
+[Planner] Entering children traversal block. Name: delim_scan Children: 0
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 7 Plan: 6099773832
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 9 Plan: 6099773832
+[Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_8'
+[Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
+[Planner] ChildProjs size: 2
+  #0: l_partkey
+  #1: l_quantity
+[Planner] Resolved Condition: 'l_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_8'
+[Planner] Join Key Analysis: l => lineitem, r => part
+[Planner] Captured RHS Table: tmpl_join_8
+[Planner] RHS Tables: tmpl_join_8, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: l_partkey, l_quantity, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: p_partkey
+[Planner] Proj: l_quantity
+[Planner] Forcing keep of global column: l_partkey
+[Planner] Node PROJECTION output projections: p_partkey, l_quantity, 
+[Planner] Parsing agg string: 'avg(#1)'
+[Planner] Resolved agg: avg(l_quantity)
+[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'avg(l_quantity)'
+[Planner] No alias found for agg, using generated name: avg(l_quantity)
+[Planner] Pushing spec with outputName='avg(l_quantity)'
+[Planner] Node HASH_GROUP_BY output projections: p_partkey, avg(l_quantity), 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_6'
+[Planner] Pre-resolved Condition: '#0 IS NOT DISTINCT FROM p_partkey'
+[Planner] ChildProjs size: 2
+  #0: p_partkey
+  #1: avg(l_quantity)
+[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_6'
+[Planner] Join Key Analysis: l => part, r => part
+[Planner] Captured RHS Table: tmpl_join_6
+[Planner] RHS Tables: tmpl_join_6, 
+[Planner] Checking matchesRHS: part
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: p_partkey, avg(l_quantity), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: (0.2 * avg(l_quantity))
+[Planner] Proj: p_partkey
+[Planner] Node PROJECTION output projections: (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Traversing node: COLUMN_DATA_SCAN
+[Planner] Traversing: COLUMN_DATA_SCAN
+[Planner] Entering children traversal block. Name: column_data_scan Children: 0
+[Planner] DEBUG: COLUMN_DATA_SCAN found
+DEBUG: COLUMN_DATA_SCAN extra_info keys: 
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 16 Plan: 6099773832
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
+[Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+[Planner] ChildProjs size: 2
+  #0: (0.2 * avg(l_quantity))
+  #1: p_partkey
+[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_15'
+[Planner] Join Key Analysis: l => part, r => part
+[Planner] Captured RHS Table: tmpl_join_15
+[Planner] RHS Tables: tmpl_join_15, 
+[Planner] Checking matchesRHS: part
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Popping DELIM context: tmpl_delim_lhs_4
+[Planner] DELIM_JOIN condition: p_partkey IS NOT DISTINCT FROM p_partkey
+[Planner] Refined DELIM_JOIN condition: p_partkey = p_partkey -> p_partkey = p_partkey
+[Planner] DELIM_JOIN emitting join type: 1 (0=Inner, 1=Left, 4=Semi, 5=Anti)
+Expression: (CAST(l_quantity AS DOUBLE) < SUBQUERY)
+[Planner] DEBUG FILTER CHILD PROJS: l_partkey, l_quantity, l_extendedprice, p_partkey, (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Attempting to replace SUBQUERY in: (CAST(l_quantity AS DOUBLE) < SUBQUERY)
+[Planner]   Checking candidate: p_partkey
+[Planner]   Checking candidate: (0.2 * avg(l_quantity))
+[Planner] Replaced SUBQUERY with (0.2 * avg(l_quantity))
+[Planner] Node FILTER output projections: l_partkey, l_quantity, l_extendedprice, p_partkey, (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_quantity
+[Planner] Forcing keep of global column: p_partkey
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Forcing keep of global column: l_partkey
+[Planner] Node PROJECTION output projections: l_quantity, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_extendedprice
+[Planner] Forcing keep of global column: l_quantity
+[Planner] Node PROJECTION output projections: l_extendedprice, 
+[Planner] Processing aggregate: 'sum(l_extendedprice)'
+[Planner] Node UNGROUPED_AGGREGATE output projections: sum(l_extendedprice), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: avg_yearly
+[Planner] Projection: resolving alias 'avg_yearly' -> 'sum(l_extendedprice) / 7.0'
+[Planner] Node PROJECTION output projections: avg_yearly, 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (124 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar avg_yearly: 348406.06
+---------------------------------------------------
+Planning time: 20.15 ms
+Data Load Time (Disk+Upload): 6196.23 ms
+GPU kernels time: 26.04 ms
+CPU postprocess time: 54.11 ms
+Total Internal Pipeline time: 6276.38 ms
+Total Host Execution time: 6276.72 ms
+Total Wall time (Plan+Exec): 6296.87 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    1.684 ms (6.466%) [2 calls]
+  filter         :    7.099 ms (27.261%) [2 calls]
+  gather         :    2.071 ms (7.954%) [4 calls]
+  groupby        :    1.492 ms (5.730%) [3 calls]
+  hash_join_probe_u32:   13.694 ms (52.590%) [6 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 26.039 ms
+  Kernel invocations: 17

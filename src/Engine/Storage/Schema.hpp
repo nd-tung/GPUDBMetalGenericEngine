@@ -12,7 +12,6 @@ namespace engine {
 
 // ============================================================================
 // Generic column schema system
-// Replaces hardcoded kSchema with dynamic schema loading
 // ============================================================================
 
 enum class ColumnType {
@@ -214,8 +213,7 @@ public:
         buf << file.rdbuf();
         std::string content = buf.str();
         
-        // Simple parser for CREATE TABLE statements
-        // This is a basic implementation - can be expanded
+        // Parse CREATE TABLE statements
         // Format: CREATE TABLE name (col1 type1, col2 type2, ...);
         
         size_t pos = 0;

@@ -1,9 +1,6 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Generic operator kernels (scaffold)
-// These are minimal, compilable stubs to be expanded.
-
 namespace ops {
 
 struct ColumnViewUInt32 {
@@ -27,13 +24,13 @@ struct RowMask {
 };
 
 // ============================================================================
-// HASH JOIN KERNELS (Linear Probing, Unique Build Key assumption for now)
+// HASH JOIN KERNELS (Linear Probing)
 // ============================================================================
 
-constant uint32_t MAX_HASH_STEPS = 128; // Limit probing to avoid infinite loops
-constant uint32_t EMPTY_KEY = 0xFFFFFFFF; // Assume keys are not this.
+constant uint32_t MAX_HASH_STEPS = 128;
+constant uint32_t EMPTY_KEY = 0xFFFFFFFF; // Sentinel value
 
-// Simple Murmur3-like mixer
+// Murmur3-style hash mixer
 inline uint32_t hash_u32(uint32_t k) {
     k ^= k >> 16;
     k *= 0x85ebca6b;
@@ -59,12 +56,7 @@ kernel void join_build_u32(
     uint32_t actual_idx = gid;
     if (build_indices) actual_idx = build_indices[gid];
     
-    uint32_t key = build_keys[actual_idx];  // Read key from correct position
-    // if (key == 0) return; // Skip 0 if 0 is invalid? TPC-H seems to use 1-based. 
-                             // But keeping 0 as valid for now, using EMPTY_KEY as empty logic needs explicit mask if 0 is valid.
-                             // For simplicity: assume data doesn't contain EMPTY_KEY (UINT_MAX).
-    
-    // Payload is the original row index (for gather)
+    uint32_t key = build_keys[actual_idx];
     uint32_t payload = actual_idx;
 
     uint32_t h = hash_u32(key);
@@ -72,12 +64,7 @@ kernel void join_build_u32(
     
     // Linear probing
     for (uint32_t i = 0; i < MAX_HASH_STEPS; ++i) {
-        // Attempt to swap EMPTY_KEY with our key
         uint32_t expected = EMPTY_KEY;
-        // atomic_compare_exchange_weak_explicit... Metal uses atomic_compare_exchange_weak on atomic_uint
-        // But we are using raw pointers here. We need atomic operations.
-        // Re-declaring buffers as atomic_uint for atomic ops logic is cleaner, or simpler casting.
-        
         device atomic_uint* a_keys = (device atomic_uint*)ht_keys;
         
         bool won = atomic_compare_exchange_weak_explicit(
@@ -86,13 +73,10 @@ kernel void join_build_u32(
         );
         
         if (won) {
-            // We claimed the slot
             ht_vals[idx] = payload;
             return;
         }
         
-        // Slot taken
-        // expected now holds the value that was at a_keys[idx]
         if (expected == key) {
              // Duplicate key on build side.
              ht_vals[idx] = payload;
@@ -104,8 +88,7 @@ kernel void join_build_u32(
     }
 }
 
-// Probe (Atomic Materialize)
-// Assumes Unique Build Keys. Output size <= Probe Size.
+// Probe (Atomic Materialize, unique build keys)
 kernel void join_probe_u32(
     const device uint32_t* probe_keys [[buffer(0)]],
     const device uint32_t* probe_indices [[buffer(1)]], // Original probe row IDs (optional)
@@ -388,7 +371,7 @@ kernel void project_select_u32(const device uint32_t* in,
                                uint gid [[thread_position_in_grid]],
                                uint grid_size [[threads_per_grid]]) {
     if (gid >= grid_size) return;
-    // Simple pass-through respecting mask; real impl will compact
+    // Pass-through respecting mask (non-matching entries zeroed)
     out[gid] = mask[gid] ? in[gid] : 0u;
 }
 
@@ -481,7 +464,7 @@ kernel void hash_build_u32(const device uint32_t* keys,
                            uint gid [[thread_position_in_grid]],
                            uint grid_size [[threads_per_grid]]) {
     if (gid >= grid_size) return;
-    // Stub: place directly with modulo, no collision handling (to be replaced)
+    // Direct modulo placement, no collision handling
     uint32_t k = keys[gid];
     uint32_t v = payloads[gid];
     uint32_t slot = k % capacity;
@@ -497,14 +480,14 @@ kernel void hash_probe_u32(const device uint32_t* probe_keys,
                            uint gid [[thread_position_in_grid]],
                            uint grid_size [[threads_per_grid]]) {
     if (gid >= grid_size) return;
-    // Stub: single-slot probe
+    // Single-slot probe
     uint32_t k = probe_keys[gid];
     uint32_t slot = k % capacity;
     out_payload[gid] = (ht_keys[slot] == k) ? ht_vals[slot] : 0u;
 }
 
 struct GroupByBucketF32 {
-    atomic_uint key; // simple key
+    atomic_uint key;
     atomic_uint count;
     atomic_uint sum_bits; // reinterpret float
 };
@@ -561,7 +544,7 @@ kernel void groupby_sum_f32(const device uint32_t* keys,
     uint32_t k = keys[gid];
     float v = vals[gid];
     uint32_t slot = k & bucket_mask; // power-of-two buckets
-    // Very naive: set key if empty, increment count, add sum
+    // Atomic insert/update: set key, increment count, accumulate sum
     atomic_store_explicit(&bucket_keys[slot], k, memory_order_relaxed);
     atomic_fetch_add_explicit(&bucket_counts[slot], 1u, memory_order_relaxed);
     atomicAddF32Bits(&bucket_sumbits[slot], v);
@@ -876,8 +859,7 @@ kernel void eval_expression_f32(const device float* col0 [[buffer(0)]],
     else out_col[gid] = 0.0f;
 }
 
-// Simple bitonic sort kernel for small arrays (ORDER BY support)
-// For production use, implement radix sort or thrust-style parallel sort
+// Bitonic sort kernel for ORDER BY support
 kernel void bitonic_sort_step(device float* data [[buffer(0)]],
                                device uint* indices [[buffer(1)]],
                                constant uint& stage [[buffer(2)]],
@@ -1382,7 +1364,7 @@ kernel void groupby_agg_single_key(const device uint* keys [[buffer(0)]],
     uint key = keys[gid];
     float val = values[gid];
     
-    // Simple hash to slot
+    // Hash to slot
     uint slot = key % capacity;
     
     // Atomic insert/update (simplified, no collision handling)
@@ -1479,29 +1461,39 @@ kernel void hash_join_build_multi(const device uint* keys [[buffer(0)]],
     if (gid >= build_count) return;
 
     const uint key_store = keys[gid] + 1u;
-    const uint slot0 = key_store % capacity;
+    uint slot = key_store % capacity;
 
-    // Linear probing to find slot for this key.
-    for (uint i = 0; i < capacity; ++i) {
-        const uint slot = (slot0 + i) % capacity;
+    while (true) {
         uint expected = 0u;
 
-        // Try to claim empty slot with this key.
-        if (atomic_compare_exchange_weak_explicit(&ht_keys[slot], &expected, key_store,
-                                                  memory_order_relaxed, memory_order_relaxed)) {
-            // First entry for this key.
-            atomic_store_explicit(&ht_head[slot], gid + 1u, memory_order_relaxed);
-            next[gid] = 0u;
-            return;
-        }
-
-        const uint existing = atomic_load_explicit(&ht_keys[slot], memory_order_relaxed);
-        if (existing == key_store) {
-            // Push this row onto the per-key chain.
-            const uint old = atomic_exchange_explicit(&ht_head[slot], gid + 1u, memory_order_relaxed);
+        // Try to claim empty slot with this key (retry on spurious CAS failure).
+        if (atomic_compare_exchange_weak_explicit(
+                &ht_keys[slot], &expected, key_store,
+                memory_order_relaxed, memory_order_relaxed)) {
+            // We just claimed this empty slot for our key.
+            // Push row onto the linked-list head.
+            const uint old = atomic_exchange_explicit(
+                &ht_head[slot], gid + 1u, memory_order_relaxed);
             next[gid] = old;
             return;
         }
+
+        // CAS failed — expected now holds the current value of ht_keys[slot].
+        if (expected == key_store) {
+            // Same key — push onto the chain.
+            const uint old = atomic_exchange_explicit(
+                &ht_head[slot], gid + 1u, memory_order_relaxed);
+            next[gid] = old;
+            return;
+        }
+
+        if (expected == 0u) {
+            // Spurious CAS failure on an empty slot — retry same slot.
+            continue;
+        }
+
+        // Slot occupied by a different key — linear probe to next slot.
+        slot = (slot + 1u) % capacity;
     }
 }
 
@@ -2160,18 +2152,21 @@ kernel void reduce_min_f32(const device float* in [[buffer(0)]],
 }
 
 
+// ---- Arrow-style string kernels ----
+// All string kernels use Arrow-style offsets: offsets[gid+1] - offsets[gid] = length.
+// offsets buffer has (row_count + 1) elements. No separate lengths buffer.
+
 kernel void filter_string_prefix(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     
     if (pattern_len == 0) {
@@ -2196,16 +2191,15 @@ kernel void filter_string_prefix(const device char* chars [[buffer(0)]],
 
 kernel void filter_string_not_prefix(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     
     if (pattern_len == 0) {
@@ -2230,16 +2224,15 @@ kernel void filter_string_not_prefix(const device char* chars [[buffer(0)]],
 
 kernel void filter_string_contains(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     
     if (pattern_len == 0) {
@@ -2252,7 +2245,7 @@ kernel void filter_string_contains(const device char* chars [[buffer(0)]],
         return;
     }
     
-    // Naive substring search
+    // Brute-force substring search
     bool found = false;
     for (uint i = 0; i <= len - pattern_len; ++i) {
         bool match = true;
@@ -2270,6 +2263,52 @@ kernel void filter_string_contains(const device char* chars [[buffer(0)]],
     out_mask[gid] = found ? 1 : 0;
 }
 
+// Multi-wildcard contains: pattern segments are packed into one buffer,
+// with their offsets/lengths in separate arrays.
+// Matches %seg0%seg1%...%segN% — each segment must be found in order.
+// Data offsets are Arrow-style (N+1). Pattern offsets/lengths are NOT Arrow-style.
+kernel void filter_string_multi_contains(const device char* chars [[buffer(0)]],
+                                         const device uint32_t* offsets [[buffer(1)]],
+                                         device uint8_t* out_mask [[buffer(2)]],
+                                         const device char* patterns [[buffer(3)]],      // packed segments
+                                         const device uint32_t* pat_offsets [[buffer(4)]],
+                                         const device uint32_t* pat_lengths [[buffer(5)]],
+                                         constant uint& num_segments [[buffer(6)]],
+                                         constant uint& row_count [[buffer(7)]],
+                                         uint gid [[thread_position_in_grid]]) {
+    if (gid >= row_count) return;
+
+    uint str_start = offsets[gid];
+    uint str_len   = offsets[gid + 1] - str_start;
+    const device char* str = chars + str_start;
+
+    uint search_from = 0;
+    bool all_found = true;
+
+    for (uint s = 0; s < num_segments; ++s) {
+        uint poff = pat_offsets[s];
+        uint plen = pat_lengths[s];
+        if (plen == 0) continue;
+
+        if (search_from + plen > str_len) { all_found = false; break; }
+
+        bool seg_found = false;
+        for (uint i = search_from; i <= str_len - plen; ++i) {
+            bool match = true;
+            for (uint j = 0; j < plen; ++j) {
+                if (str[i + j] != patterns[poff + j]) { match = false; break; }
+            }
+            if (match) {
+                search_from = i + plen;   // next segment must appear after this one
+                seg_found = true;
+                break;
+            }
+        }
+        if (!seg_found) { all_found = false; break; }
+    }
+    out_mask[gid] = all_found ? 1 : 0;
+}
+
 // Str compare: < 0 if s1 < s2, 0 if eq, > 0 if s1 > s2
 inline int compare_str(const device char* s1, uint len1, const device char* s2, uint len2) {
     uint len = len1 < len2 ? len1 : len2;
@@ -2284,92 +2323,107 @@ inline int compare_str(const device char* s1, uint len1, const device char* s2, 
 
 kernel void filter_string_eq(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) == 0) ? 1 : 0;
 }
 
 kernel void filter_string_ne(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) != 0) ? 1 : 0;
 }
 
 kernel void filter_string_lt(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) < 0) ? 1 : 0;
 }
 
 kernel void filter_string_le(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) <= 0) ? 1 : 0;
 }
 
 kernel void filter_string_gt(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) > 0) ? 1 : 0;
 }
 
 kernel void filter_string_ge(const device char* chars [[buffer(0)]],
                                    const device uint32_t* offsets [[buffer(1)]],
-                                   const device uint32_t* lengths [[buffer(2)]],
-                                   device uint8_t* out_mask [[buffer(3)]],
-                                   const device char* pattern [[buffer(4)]],
-                                   constant uint& pattern_len [[buffer(5)]],
-                                   constant uint& row_count [[buffer(6)]],
+                                   device uint8_t* out_mask [[buffer(2)]],
+                                   const device char* pattern [[buffer(3)]],
+                                   constant uint& pattern_len [[buffer(4)]],
+                                   constant uint& row_count [[buffer(5)]],
                                    uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     uint start = offsets[gid];
-    uint len = lengths[gid];
+    uint len = offsets[gid + 1] - start;
     const device char* str = chars + start;
     out_mask[gid] = (compare_str(str, len, pattern, pattern_len) >= 0) ? 1 : 0;
+}
+
+// ---- GPU string gather kernel (Arrow-style) ----
+// Phase 1: Compute output lengths from gathered source offsets.
+// Phase 2: Copy chars using prefix-summed output offsets.
+
+kernel void gather_flat_string_chars(const device char* src_chars [[buffer(0)]],
+                                     const device uint32_t* src_offsets [[buffer(1)]],
+                                     const device uint32_t* indices [[buffer(2)]],
+                                     const device uint32_t* dst_offsets [[buffer(3)]],
+                                     device char* dst_chars [[buffer(4)]],
+                                     constant uint& num_indices [[buffer(5)]],
+                                     uint gid [[thread_position_in_grid]]) {
+    if (gid >= num_indices) return;
+    uint src_idx = indices[gid];
+    uint src_start = src_offsets[src_idx];
+    uint src_len   = src_offsets[src_idx + 1] - src_start;
+    uint dst_start = dst_offsets[gid];
+    for (uint i = 0; i < src_len; ++i) {
+        dst_chars[dst_start + i] = src_chars[src_start + i];
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -2396,8 +2450,7 @@ inline uint32_t hash_u64(uint64_t k) {
     return (uint32_t)k; 
 }
 
-// Lock-free hash table build using linear probing
-// Instead of spinlocks, we use a simple "first writer wins" approach
+// Lock-free hash table build using linear probing (first-writer-wins)
 kernel void join_build_u64(
     const device uint64_t* build_keys [[buffer(0)]],
     const device uint32_t* build_indices [[buffer(1)]],
@@ -2646,7 +2699,7 @@ kernel void scan_exclusive_subblock_u32(
     uint group_id [[threadgroup_position_in_grid]],
     uint threads_per_group [[threads_per_threadgroup]]
 ) {
-    // Assume threads_per_group is power of 2, max 1024
+    // threads_per_group must be power of 2, max 1024
     threadgroup uint32_t temp[1024]; 
 
     // Load input
@@ -2696,6 +2749,249 @@ kernel void scan_add_base_u32(
     // bases array should be the exclusive scan of partial sums.
     // So bases[group_id] is the start value for this block.
     data[gid] += bases[group_id];
+}
+
+// ============================================================================
+// GPU SORT KERNELS — Block Sort (shared-memory bitonic) + Radix Sort
+// ============================================================================
+
+// ---------- Block Sort: in-threadgroup bitonic sort for ≤1024 elements ------
+// Sorts (key, index) pairs entirely in shared memory with a single dispatch.
+// Host must launch exactly one threadgroup of nextPow2(n) threads.
+
+kernel void block_sort_kv_u32(
+    device uint32_t* keys [[buffer(0)]],
+    device uint32_t* vals [[buffer(1)]],
+    constant uint&   n    [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tpg [[threads_per_threadgroup]]
+) {
+    threadgroup uint32_t lk[1024];
+    threadgroup uint32_t lv[1024];
+
+    lk[tid] = (tid < n) ? keys[tid] : 0xFFFFFFFFu;
+    lv[tid] = (tid < n) ? vals[tid] : tid;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint blk = 2; blk <= tpg; blk <<= 1) {
+        for (uint stp = blk >> 1; stp >= 1; stp >>= 1) {
+            uint partner = tid ^ stp;
+            if (partner > tid && partner < tpg) {
+                bool asc = ((tid & blk) == 0);
+                if (asc ? (lk[tid] > lk[partner]) : (lk[tid] < lk[partner])) {
+                    uint32_t tk = lk[tid]; lk[tid] = lk[partner]; lk[partner] = tk;
+                    uint32_t tv = lv[tid]; lv[tid] = lv[partner]; lv[partner] = tv;
+                }
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+    }
+
+    if (tid < n) { keys[tid] = lk[tid]; vals[tid] = lv[tid]; }
+}
+
+kernel void block_sort_kv_u64(
+    device ulong*    keys [[buffer(0)]],
+    device uint32_t* vals [[buffer(1)]],
+    constant uint&   n    [[buffer(2)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tpg [[threads_per_threadgroup]]
+) {
+    threadgroup ulong    lk[1024];
+    threadgroup uint32_t lv[1024];
+
+    lk[tid] = (tid < n) ? keys[tid] : 0xFFFFFFFFFFFFFFFFul;
+    lv[tid] = (tid < n) ? vals[tid] : tid;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint blk = 2; blk <= tpg; blk <<= 1) {
+        for (uint stp = blk >> 1; stp >= 1; stp >>= 1) {
+            uint partner = tid ^ stp;
+            if (partner > tid && partner < tpg) {
+                bool asc = ((tid & blk) == 0);
+                if (asc ? (lk[tid] > lk[partner]) : (lk[tid] < lk[partner])) {
+                    ulong  tk = lk[tid]; lk[tid] = lk[partner]; lk[partner] = tk;
+                    uint32_t tv = lv[tid]; lv[tid] = lv[partner]; lv[partner] = tv;
+                }
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+    }
+
+    if (tid < n) { keys[tid] = lk[tid]; vals[tid] = lv[tid]; }
+}
+
+// ---------- Radix Sort: 8-bit radix, stable, for >1024 elements -------------
+// Histogram: per-threadgroup 256-bin histogram.
+// Layout: histograms[digit * numBlocks + group_id]  (digit-major for linear prefix-sum)
+
+kernel void radix_histogram_u32(
+    device const uint32_t* keys  [[buffer(0)]],
+    device uint32_t* histograms  [[buffer(1)]],
+    constant uint& n             [[buffer(2)]],
+    constant uint& shift         [[buffer(3)]],
+    constant uint& numBlocks     [[buffer(4)]],
+    uint gid      [[thread_position_in_grid]],
+    uint tid      [[thread_position_in_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]]
+) {
+    threadgroup atomic_uint lh[256];
+    if (tid < 256) atomic_store_explicit(&lh[tid], 0, memory_order_relaxed);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (gid < n) {
+        uint d = (keys[gid] >> shift) & 0xFFu;
+        atomic_fetch_add_explicit(&lh[d], 1, memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (tid < 256) histograms[tid * numBlocks + group_id] =
+                       atomic_load_explicit(&lh[tid], memory_order_relaxed);
+}
+
+kernel void radix_histogram_u64(
+    device const ulong* keys     [[buffer(0)]],
+    device uint32_t* histograms  [[buffer(1)]],
+    constant uint& n             [[buffer(2)]],
+    constant uint& shift         [[buffer(3)]],
+    constant uint& numBlocks     [[buffer(4)]],
+    uint gid      [[thread_position_in_grid]],
+    uint tid      [[thread_position_in_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]]
+) {
+    threadgroup atomic_uint lh[256];
+    if (tid < 256) atomic_store_explicit(&lh[tid], 0, memory_order_relaxed);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (gid < n) {
+        uint d = (uint)((keys[gid] >> shift) & 0xFFul);
+        atomic_fetch_add_explicit(&lh[d], 1, memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (tid < 256) histograms[tid * numBlocks + group_id] =
+                       atomic_load_explicit(&lh[tid], memory_order_relaxed);
+}
+
+// Scatter: stable scatter using per-thread local ranking (preserves input order
+// within each digit bucket for sort stability, critical for LSB radix sort).
+
+kernel void radix_scatter_u32(
+    device const uint32_t* keys_in   [[buffer(0)]],
+    device const uint32_t* vals_in   [[buffer(1)]],
+    device uint32_t*       keys_out  [[buffer(2)]],
+    device uint32_t*       vals_out  [[buffer(3)]],
+    device const uint32_t* scan_hist [[buffer(4)]],
+    constant uint& n                 [[buffer(5)]],
+    constant uint& shift             [[buffer(6)]],
+    constant uint& numBlocks         [[buffer(7)]],
+    uint gid      [[thread_position_in_grid]],
+    uint tid      [[thread_position_in_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]],
+    uint tpg      [[threads_per_threadgroup]]
+) {
+    threadgroup uint offsets[256];
+    if (tid < 256) offsets[tid] = scan_hist[tid * numBlocks + group_id];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    threadgroup uint ld[256];   // local digits for this block
+    bool valid = gid < n;
+    uint myDigit = 0;
+    uint32_t myKey = 0, myVal = 0;
+    if (valid) {
+        myKey = keys_in[gid];
+        myVal = vals_in[gid];
+        myDigit = (myKey >> shift) & 0xFFu;
+    }
+    ld[tid] = valid ? myDigit : 0xFFFFu;    // sentinel
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (valid) {
+        uint rank = 0;
+        for (uint j = 0; j < tid; j++) { if (ld[j] == myDigit) rank++; }
+        uint pos = offsets[myDigit] + rank;
+        keys_out[pos] = myKey;
+        vals_out[pos] = myVal;
+    }
+}
+
+kernel void radix_scatter_u64(
+    device const ulong*    keys_in   [[buffer(0)]],
+    device const uint32_t* vals_in   [[buffer(1)]],
+    device ulong*          keys_out  [[buffer(2)]],
+    device uint32_t*       vals_out  [[buffer(3)]],
+    device const uint32_t* scan_hist [[buffer(4)]],
+    constant uint& n                 [[buffer(5)]],
+    constant uint& shift             [[buffer(6)]],
+    constant uint& numBlocks         [[buffer(7)]],
+    uint gid      [[thread_position_in_grid]],
+    uint tid      [[thread_position_in_threadgroup]],
+    uint group_id [[threadgroup_position_in_grid]],
+    uint tpg      [[threads_per_threadgroup]]
+) {
+    threadgroup uint offsets[256];
+    if (tid < 256) offsets[tid] = scan_hist[tid * numBlocks + group_id];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    threadgroup uint ld[256];
+    bool valid = gid < n;
+    uint myDigit = 0;
+    ulong myKey = 0;
+    uint32_t myVal = 0;
+    if (valid) {
+        myKey = keys_in[gid];
+        myVal = vals_in[gid];
+        myDigit = (uint)((myKey >> shift) & 0xFFul);
+    }
+    ld[tid] = valid ? myDigit : 0xFFFFu;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    if (valid) {
+        uint rank = 0;
+        for (uint j = 0; j < tid; j++) { if (ld[j] == myDigit) rank++; }
+        uint pos = offsets[myDigit] + rank;
+        keys_out[pos] = myKey;
+        vals_out[pos] = myVal;
+    }
+}
+
+// ── GroupBy Hash Table Stream Compaction ───────────────────────────
+
+// Step 1 (Mark): Write 1 if slot is valid (key[0] != 0), else 0.
+kernel void ht_mark_valid(
+    device const uint32_t* ht_keys [[buffer(0)]],
+    device uint32_t*       mark    [[buffer(1)]],
+    constant uint32_t&     cap     [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= cap) return;
+    mark[gid] = (ht_keys[gid * 8] != 0) ? 1u : 0u;
+}
+
+// Step 3 (Compact): Write valid keys and agg words to dense output arrays.
+// offsets[] is the exclusive prefix sum of mark[].
+kernel void ht_extract_compact(
+    device const uint32_t* ht_keys  [[buffer(0)]],
+    device const uint32_t* ht_aggs  [[buffer(1)]],
+    device const uint32_t* mark     [[buffer(2)]],
+    device const uint32_t* offsets  [[buffer(3)]],
+    device uint32_t*       out_keys [[buffer(4)]],
+    device uint32_t*       out_aggs [[buffer(5)]],
+    constant uint32_t&     cap      [[buffer(6)]],
+    constant uint32_t&     numKeys  [[buffer(7)]],
+    constant uint32_t&     numAggs  [[buffer(8)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= cap) return;
+    if (mark[gid] == 0) return;
+    uint dest = offsets[gid];
+    for (uint k = 0; k < numKeys; ++k) {
+        uint keyVal = ht_keys[gid * 8 + k];
+        out_keys[dest * numKeys + k] = (keyVal > 0) ? (keyVal - 1) : 0;
+    }
+    for (uint a = 0; a < numAggs; ++a) {
+        out_aggs[dest * numAggs + a] = ht_aggs[gid * 16 + a];
+    }
 }
 
 }

@@ -1,0 +1,261 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'revenue' -> 'sum(l_extendedprice * (1 - l_discount))'
+[Planner]   'sum(l_extendedprice*(1-l_discount))' -> 'revenue'
+[Planner] Traversing node: TOP_N
+[Planner] Traversing: TOP_N
+[Planner] Entering children traversal block. Name: top_n Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table orders
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_custkey
+[Planner] Proj: o_orderkey
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 0 Plan: 6090708192
+[Planner] Node SEQ_SCAN  output projections: o_custkey, o_orderkey, 
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table nation
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_nationkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6090705520
+[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: c_custkey
+[Planner] Proj: c_nationkey
+[Planner] Proj: c_name
+[Planner] Proj: c_acctbal
+[Planner] Proj: c_phone
+[Planner] Proj: c_address
+[Planner] Proj: c_comment
+DEBUG: Scan table determined as: 'customer'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
+[Planner] Generating Scan: customer at index 0 Plan: 6090729784
+[Planner] Node SEQ_SCAN  output projections: c_custkey, c_nationkey, c_name, c_acctbal, c_phone, c_address, c_comment, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 'c_nationkey = n_nationkey'
+[Planner] ChildProjs size: 9
+  #0: c_custkey
+  #1: c_nationkey
+  #2: c_name
+  #3: c_acctbal
+  #4: c_phone
+  #5: c_address
+  #6: c_comment
+  #7: n_nationkey
+  #8: n_name
+[Planner] Resolved Condition: 'c_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+[Planner] Join Key Analysis: l => customer, r => nation
+[Planner] Captured RHS Table: nation
+[Planner] RHS Tables: nation, 
+[Planner] Checking matchesRHS: customer
+[Planner] Checking matchesRHS: nation
+[Planner] Node HASH_JOIN output projections: c_custkey, c_nationkey, c_name, c_acctbal, c_phone, c_address, c_comment, n_nationkey, n_name, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
+[Planner] Pre-resolved Condition: 'c_custkey = o_custkey'
+[Planner] ChildProjs size: 11
+  #0: c_custkey
+  #1: c_nationkey
+  #2: c_name
+  #3: c_acctbal
+  #4: c_phone
+  #5: c_address
+  #6: c_comment
+  #7: n_nationkey
+  #8: n_name
+  #9: o_custkey
+  #10: o_orderkey
+[Planner] Resolved Condition: 'c_custkey = o_custkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
+[Planner] Join Key Analysis: l => customer, r => orders
+[Planner] Captured RHS Table: orders
+[Planner] RHS Tables: orders, 
+[Planner] Checking matchesRHS: customer
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: c_custkey, c_nationkey, c_name, c_acctbal, c_phone, c_address, c_comment, n_nationkey, n_name, o_custkey, o_orderkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 4 Plan: 6090729784
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_extendedprice, l_discount, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
+[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
+[Planner] ChildProjs size: 14
+  #0: l_orderkey
+  #1: l_extendedprice
+  #2: l_discount
+  #3: c_custkey
+  #4: c_nationkey
+  #5: c_name
+  #6: c_acctbal
+  #7: c_phone
+  #8: c_address
+  #9: c_comment
+  #10: n_nationkey
+  #11: n_name
+  #12: o_custkey
+  #13: o_orderkey
+[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_3'
+[Planner] Join Key Analysis: l => lineitem, r => orders
+[Planner] Captured RHS Table: tmpl_join_3
+[Planner] RHS Tables: tmpl_join_3, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: l_orderkey, l_extendedprice, l_discount, c_custkey, c_nationkey, c_name, c_acctbal, c_phone, c_address, c_comment, n_nationkey, n_name, o_custkey, o_orderkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+[Planner] Proj: c_custkey
+[Planner] Proj: c_nationkey
+[Planner] Proj: c_name
+[Planner] Proj: c_acctbal
+[Planner] Proj: c_phone
+[Planner] Proj: c_address
+[Planner] Forcing keep of global column: o_orderkey
+[Planner] Forcing keep of global column: n_nationkey
+[Planner] Forcing keep of global column: c_comment
+[Planner] Forcing keep of global column: n_name
+[Planner] Forcing keep of global column: o_custkey
+[Planner] Node PROJECTION output projections: l_orderkey, l_extendedprice, l_discount, c_custkey, c_nationkey, c_name, c_acctbal, c_phone, c_address, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: c_custkey
+[Planner] Proj: c_name
+[Planner] Proj: c_acctbal
+[Planner] Proj: c_phone
+[Planner] Proj: n_name
+[Planner] Proj: c_address
+[Planner] Proj: c_comment
+[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
+[Planner] Forcing keep of global column: c_nationkey
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Forcing keep of global column: l_discount
+[Planner] Forcing keep of global column: l_orderkey
+[Planner] Node PROJECTION output projections: c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment, (l_extendedprice * (1.00 - l_discount)), 
+[Planner] Parsing agg string: 'sum(#7)'
+[Planner] Resolved agg: sum((l_extendedprice * (1.00 - l_discount)))
+[Planner] inputExpr '(l_extendedprice * (1.00 - l_discount))' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum((l_extendedprice*(1-l_discount)))'
+[Planner] Found alias with reduced parens: 'sum(l_extendedprice*(1-l_discount))'
+[Planner] Found alias for agg: revenue
+[Planner] Pushing spec with outputName='revenue'
+[Planner] Node HASH_GROUP_BY output projections: c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: c_custkey
+[Planner] Proj: c_name
+[Planner] Proj: c_acctbal
+[Planner] Proj: c_phone
+[Planner] Proj: n_name
+[Planner] Proj: c_address
+[Planner] Proj: c_comment
+[Planner] Proj: revenue
+[Planner] Node PROJECTION output projections: c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment, revenue, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: c_custkey
+[Planner] Proj: c_name
+[Planner] Proj: revenue
+[Planner] Proj: c_acctbal
+[Planner] Proj: n_name
+[Planner] Proj: c_address
+[Planner] Proj: c_phone
+[Planner] Proj: c_comment
+[Planner] Node PROJECTION output projections: c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment, 
+[Planner] ORDER BY looking up alias: 'sum((l_extendedprice*(1-l_discount)))'
+[Planner] Node TOP_N output projections: c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment, 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (124 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+c_custkey|revenue|c_acctbal|c_name|n_name|c_address|c_phone|c_comment|
+57040|734235.25|632.87|Customer#000057040|JAPAN|Eioyzjf4pp|22-895-641-3466|sits. slyly regular requests sleep alongside of the regular inst|
+143347|721002.69|2557.47|Customer#000143347|EGYPT|1aReFYv,Kw4|14-742-935-3718|ggle carefully enticing requests. final deposits use bold, bold pinto beans. ironic, idle re|
+60838|679127.31|2454.77|Customer#000060838|BRAZIL|64EaJ5vMAHWJlBOxJklpNc2RJiWE|12-913-494-9813|need to boost against the slyly regular account|
+101998|637029.56|3790.89|Customer#000101998|UNITED KINGDOM|01c9CILnNtfOQYmZj|33-593-865-6378|ress foxes wake slyly after the bold excuses. ironic platelets are furiously carefully bold theodolites|
+125341|633508.06|4983.51|Customer#000125341|GERMANY|S29ODD6bceU8QSuuEJznkNaK|17-582-695-5962|arefully even depths. blithely even excuses sleep furiously. foxes use except the dependencies. ca|
+25501|620269.75|7725.04|Customer#000025501|ETHIOPIA|W556MXuoiaYCCZamJI,Rn0B4ACUGdkQ8DZ|15-874-808-6793|he pending instructions wake carefully at the pinto beans. regular, final instructions along the slyly fina|
+115831|596423.88|5098.10|Customer#000115831|FRANCE|rFeBbEEyk dl ne7zV5fDrmiq1oK09wV7pxqCgIc|16-715-386-3788|l somas sleep. furiously final deposits wake blithely regular pinto b|
+84223|594998.06|528.65|Customer#000084223|UNITED KINGDOM|nAVZCs6BaWap rrM27N 2qBnzc5WBauxbA|33-442-824-8191|slyly final deposits haggle regular, pending dependencies. pending escapades wake|
+54289|585603.44|5583.02|Customer#000054289|IRAN|vXCxoCsU0Bad5JQI ,oobkZ|20-834-292-4707|ely special foxes are quickly finally ironic p|
+39922|584878.12|7321.11|Customer#000039922|GERMANY|Zgy4s50l2GKN4pLDPBU8m342gIw6R|17-147-757-8036|y final requests. furiously final foxes cajole blithely special platelets. f|
+6226|576783.75|2230.09|Customer#000006226|UNITED KINGDOM|8gPu8,NPGkfyQQ0hcIYUGPIBWc,ybP5g,|33-657-701-3391|ending platelets along the express deposits cajole carefully final|
+922|576767.56|3869.25|Customer#000000922|GERMANY|Az9RFaut7NkPnc5zSD2PwHgVwr4jRzq|17-945-916-9648|luffily fluffy deposits. packages c|
+147946|576455.12|2030.13|Customer#000147946|ALGERIA|iANyZHjqhyy7Ajah0pTrYyhJ|10-886-956-3143|ithely ironic deposits haggle blithely ironic requests. quickly regu|
+115640|569341.25|6436.10|Customer#000115640|ARGENTINA|Vtgfia9qI 7EpHgecU1X|11-411-543-4901|ost slyly along the patterns; pinto be|
+73606|568656.88|1785.67|Customer#000073606|JAPAN|xuR0Tro5yChDfOCrjkd2ol|22-437-653-6966|he furiously regular ideas. slowly|
+110246|566843.00|7763.35|Customer#000110246|VIETNAM|7KzflgX MDOq7sOkI|31-943-426-9837|egular deposits serve blithely above the fl|
+142549|563537.25|5085.99|Customer#000142549|INDONESIA|ChqEoK43OysjdHbtKCp6dKqjNyvvi9|19-955-562-2398|sleep pending courts. ironic deposits against the carefully unusual platelets cajole carefully express accounts.|
+146149|557255.00|1791.55|Customer#000146149|ROMANIA|s87fvzFQpU|29-744-164-6487|of the slyly silent accounts. quickly final accounts across the|
+52528|556397.38|551.79|Customer#000052528|ARGENTINA|NFztyTOR10UOJ|11-208-192-3205|deposits hinder. blithely pending asymptotes breach slyly regular re|
+23431|554269.56|3381.86|Customer#000023431|ROMANIA|HgiV0phqhaIa9aydNoIlb|29-915-458-2654|nusual, even instructions: furiously stealthy n|
+---------------------------------------------------
+Planning time: 20.62 ms
+Data Load Time (Disk+Upload): 12097.03 ms
+GPU kernels time: 31.78 ms
+CPU postprocess time: 355.80 ms
+Total Internal Pipeline time: 12484.62 ms
+Total Host Execution time: 12501.94 ms
+Total Wall time (Plan+Exec): 12522.56 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    3.902 ms (12.277%) [4 calls]
+  filter         :   10.529 ms (33.129%) [4 calls]
+  gather         :   12.061 ms (37.951%) [14 calls]
+  groupby        :    3.129 ms (9.845%) [3 calls]
+  hash_join_probe_u32:    1.833 ms (5.768%) [3 calls]
+  sort           :    0.327 ms (1.030%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 31.782 ms
+  Kernel invocations: 30

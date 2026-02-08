@@ -1,0 +1,201 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'order_count' -> 'count(*)'
+[Planner]   'count(*)' -> 'order_count'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: ORDER_BY
+[Planner] Traversing: ORDER_BY
+[Planner] Entering children traversal block. Name: order_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: RIGHT_DELIM_JOIN
+[Planner] Traversing: RIGHT_DELIM_JOIN
+[Planner] [TraverseNode] Logic for JOIN: RIGHT_DELIM_JOIN
+[Planner] Entering children traversal block. Name: right_delim_join Children: 3
+[Planner] Checking LHS (kids[0]) for delim...
+[Planner] checkDelim visiting: seq_scan 
+[Planner] Result LHS: 0
+[Planner] Checking RHS (kids[1]) for delim...
+[Planner] checkDelim visiting: hash_join
+[Planner] checkDelim visiting: projection
+[Planner] checkDelim visiting: hash_join
+[Planner] checkDelim visiting: projection
+[Planner] checkDelim visiting: filter
+[Planner] checkDelim visiting: seq_scan 
+[Planner] checkDelim visiting: delim_scan
+[Planner] checkDelim FOUND: delim_scan
+[Planner] Result RHS: 1
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6125840696
+[Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_orderpriority
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 0 Plan: 6125840696
+[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_orderpriority, 
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_1 at index 1 Plan: 6125840696
+[Planner] Created Save Node with type: 10
+[Planner] CONFIRMED: Back node is Save.
+[Planner] Post-Emit Size: 2
+[Planner] Pushed DELIM context: tmpl_delim_lhs_1 (stack size=1)
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node DUMMY_SCAN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: DUMMY_SCAN
+[Planner] Traversing: DUMMY_SCAN
+[Planner] Entering children traversal block. Name: dummy_scan Children: 0
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_1 at index 2 Plan: 6125840696
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node DELIM_SCAN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: DELIM_SCAN
+[Planner] Traversing: DELIM_SCAN
+[Planner] Entering children traversal block. Name: delim_scan Children: 0
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_1 at index 4 Plan: 6125840696
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_commitdate
+[Planner] Proj: l_receiptdate
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 6 Plan: 6125840696
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_commitdate, l_receiptdate, 
+Expression: (l_commitdate < l_receiptdate)
+[Planner] DEBUG FILTER CHILD PROJS: l_orderkey, l_commitdate, l_receiptdate, 
+[Planner] Node FILTER output projections: l_orderkey, l_commitdate, l_receiptdate, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Forcing keep of global column: l_commitdate
+[Planner] Forcing keep of global column: l_receiptdate
+[Planner] Node PROJECTION output projections: l_orderkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
+[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
+[Planner] ChildProjs size: 1
+  #0: l_orderkey
+[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
+[Planner] Join Key Analysis: l => lineitem, r => orders
+[Planner] Captured RHS Table: tmpl_join_5
+[Planner] RHS Tables: tmpl_join_5, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: l_orderkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderkey
+[Planner] Forcing keep of global column: l_orderkey
+[Planner] Node PROJECTION output projections: o_orderkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
+[Planner] Pre-resolved Condition: 'o_orderkey IS NOT DISTINCT FROM o_orderkey'
+[Planner] ChildProjs size: 1
+  #0: o_orderkey
+[Planner] Resolved Condition: 'o_orderkey IS NOT DISTINCT FROM o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_3'
+[Planner] Join Key Analysis: l => orders, r => orders
+[Planner] Captured RHS Table: tmpl_join_3
+[Planner] RHS Tables: tmpl_join_3, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: o_orderkey, 
+[Planner] Popping DELIM context: tmpl_delim_lhs_1
+[Planner] DELIM_JOIN condition: o_orderkey IS NOT DISTINCT FROM o_orderkey
+[Planner] Refined DELIM_JOIN condition: o_orderkey = o_orderkey -> o_orderkey = o_orderkey
+[Planner] DELIM_JOIN emitting join type: 5 (0=Inner, 1=Left, 4=Semi, 5=Anti)
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderkey
+[Planner] Forcing keep of global column: o_orderpriority
+[Planner] Node PROJECTION output projections: o_orderkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderpriority
+[Planner] Forcing keep of global column: o_orderkey
+[Planner] Node PROJECTION output projections: o_orderpriority, 
+[Planner] Parsing agg string: 'count_star()'
+[Planner] Resolved agg: count_star()
+[Planner] Looking up agg alias: 'count_star()'
+[Planner] Found alias for agg: order_count
+[Planner] Pushing spec with outputName='order_count'
+[Planner] Node HASH_GROUP_BY output projections: o_orderpriority, order_count, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderpriority
+[Planner] Proj: order_count
+[Planner] Node PROJECTION output projections: o_orderpriority, order_count, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderpriority
+[Planner] Proj: order_count
+[Planner] Node PROJECTION output projections: o_orderpriority, order_count, 
+[Planner] Node ORDER_BY output projections: o_orderpriority, order_count, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderpriority
+[Planner] Proj: order_count
+[Planner] Node PROJECTION output projections: o_orderpriority, order_count, 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (124 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+order_count|o_orderpriority|
+10594.00|1-URGENT|
+10476.00|2-HIGH|
+10410.00|3-MEDIUM|
+10556.00|4-NOT SPECIFIED|
+10487.00|5-LOW|
+---------------------------------------------------
+Planning time: 19.87 ms
+Data Load Time (Disk+Upload): 26946.13 ms
+GPU kernels time: 21.45 ms
+CPU postprocess time: 121.68 ms
+Total Internal Pipeline time: 27089.26 ms
+Total Host Execution time: 27091.52 ms
+Total Wall time (Plan+Exec): 27111.38 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    2.103 ms (9.802%) [2 calls]
+  filter         :    8.056 ms (37.559%) [2 calls]
+  gather         :    6.269 ms (29.228%) [9 calls]
+  groupby        :    1.978 ms (9.222%) [3 calls]
+  hash_join_probe_u32:    2.797 ms (13.039%) [3 calls]
+  sort           :    0.246 ms (1.149%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 21.449 ms
+  Kernel invocations: 21

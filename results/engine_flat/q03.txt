@@ -1,0 +1,37 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_orderkey|o_orderdate|o_shippriority|revenue|
+2543170|1992-01-01|0|0.00|
+1249954|1992-01-01|0|0.00|
+2862565|1992-01-01|0|0.00|
+3042913|1992-01-01|0|0.00|
+3583684|1992-01-01|0|0.00|
+1555776|1992-01-01|0|0.00|
+5663939|1992-01-01|0|0.00|
+5628998|1992-01-01|0|0.00|
+5188999|1992-01-01|0|0.00|
+2974083|1992-01-01|0|0.00|
+---------------------------------------------------
+Planning time: 19.52 ms
+Data Load Time (Disk+Upload): 10357.99 ms
+GPU kernels time: 22.94 ms
+CPU postprocess time: 100.42 ms
+Total Internal Pipeline time: 10481.35 ms
+Total Host Execution time: 10481.64 ms
+Total Wall time (Plan+Exec): 10501.16 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    0.851 ms (3.709%) [1 calls]
+  filter         :    7.077 ms (30.856%) [1 calls]
+  filter_flat    :    0.768 ms (3.349%) [1 calls]
+  gather         :    2.412 ms (10.515%) [3 calls]
+  groupby        :    7.356 ms (32.072%) [3 calls]
+  hash_join_probe_u32:    3.673 ms (16.016%) [3 calls]
+  sort           :    0.799 ms (3.483%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 22.935 ms
+  Kernel invocations: 14

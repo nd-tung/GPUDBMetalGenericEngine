@@ -1,0 +1,277 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner] Traversing node: TOP_N
+[Planner] Traversing: TOP_N
+[Planner] Entering children traversal block. Name: top_n Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table customer
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: c_custkey
+[Planner] Proj: c_name
+DEBUG: Scan table determined as: 'customer'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
+[Planner] Generating Scan: customer at index 0 Plan: 6096991248
+[Planner] Node SEQ_SCAN  output projections: c_custkey, c_name, 
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node PROJECTION
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_quantity
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 0 Plan: 6097004824
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_quantity, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_quantity
+[Planner] Node PROJECTION output projections: l_orderkey, l_quantity, 
+[Planner] Parsing agg string: 'sum_no_overflow(#1)'
+[Planner] Resolved agg: sum_no_overflow(l_quantity)
+[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(l_quantity)'
+[Planner] No alias found for agg, using generated name: sum(l_quantity)
+[Planner] Pushing spec with outputName='sum(l_quantity)'
+[Planner] Node HASH_GROUP_BY output projections: l_orderkey, sum(l_quantity), 
+Expression: (sum(l_quantity) > 300.00)
+[Planner] DEBUG FILTER CHILD PROJS: l_orderkey, sum(l_quantity), 
+[Planner] Node FILTER output projections: l_orderkey, sum(l_quantity), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Node PROJECTION output projections: l_orderkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_custkey
+[Planner] Proj: o_orderdate
+[Planner] Proj: o_totalprice
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 6 Plan: 6097004824
+[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
+[Planner] Pre-resolved Condition: 'o_orderkey = #0'
+[Planner] ChildProjs size: 5
+  #0: o_orderkey
+  #1: o_custkey
+  #2: o_orderdate
+  #3: o_totalprice
+  #4: l_orderkey
+[Planner] Fixing Join Indexing: Shifted 'o_orderkey = #0' to 'o_orderkey = #4'
+[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
+[Planner] Join Key Analysis: l => orders, r => lineitem
+[Planner] Captured RHS Table: tmpl_join_5
+[Planner] RHS Tables: tmpl_join_5, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: lineitem
+[Planner] Node HASH_JOIN output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, l_orderkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
+[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
+[Planner] ChildProjs size: 7
+  #0: o_orderkey
+  #1: o_custkey
+  #2: o_orderdate
+  #3: o_totalprice
+  #4: l_orderkey
+  #5: c_custkey
+  #6: c_name
+[Planner] Resolved Condition: 'o_custkey = c_custkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
+[Planner] Join Key Analysis: l => orders, r => customer
+[Planner] Captured RHS Table: customer
+[Planner] RHS Tables: customer, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: customer
+[Planner] Node HASH_JOIN output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, l_orderkey, c_custkey, c_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_quantity
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 10 Plan: 6097004824
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_quantity, 
+[Planner] Renamed duplicate column: l_orderkey -> l_orderkey_1
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_9'
+[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
+[Planner] ChildProjs size: 9
+  #0: l_orderkey
+  #1: l_quantity
+  #2: o_orderkey
+  #3: o_custkey
+  #4: o_orderdate
+  #5: o_totalprice
+  #6: l_orderkey_1
+  #7: c_custkey
+  #8: c_name
+[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_9'
+[Planner] Join Key Analysis: l => lineitem, r => orders
+[Planner] Captured RHS Table: tmpl_join_9
+[Planner] RHS Tables: tmpl_join_9, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: l_orderkey, l_quantity, o_orderkey, o_custkey, o_orderdate, o_totalprice, l_orderkey_1, c_custkey, c_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: c_name
+[Planner] Proj: c_custkey
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_orderdate
+[Planner] Proj: o_totalprice
+[Planner] Proj: l_quantity
+[Planner] Forcing keep of global column: o_custkey
+[Planner] Forcing keep of global column: l_orderkey
+[Planner] Node PROJECTION output projections: c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, l_quantity, 
+[Planner] Parsing agg string: 'sum(#5)'
+[Planner] Resolved agg: sum(#5)
+[Planner] Looking up agg alias: 'sum(l_quantity)'
+[Planner] No alias found for agg, using generated name: sum(l_quantity)
+[Planner] Pushing spec with outputName='sum(l_quantity)'
+[Planner] Node HASH_GROUP_BY output projections: c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity), 
+[Planner] Node TOP_N output projections: c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity), 
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (123 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+o_orderdate|o_orderdate|o_orderkey|o_orderkey|c_custkey|c_custkey|sum(l_quantity)|sum(l_quantity)|#5|o_totalprice|o_totalprice|o_totalprice|c_name|
+1994-04-07|1994-04-07|4722021|4722021|128120|128120|323.00|323.00|544089.06|544089.06|544089.06|544089.06|Customer#000128120|
+1997-02-12|1997-02-12|3043270|3043270|144617|144617|317.00|317.00|530604.44|530604.44|530604.44|530604.44|Customer#000144617|
+1997-04-13|1997-04-13|2232932|2232932|13940|13940|304.00|304.00|522720.62|522720.62|522720.62|522720.62|Customer#000013940|
+1996-09-30|1996-09-30|2199712|2199712|66790|66790|327.00|327.00|515531.81|515531.81|515531.81|515531.81|Customer#000066790|
+1997-07-03|1997-07-03|4745607|4745607|46435|46435|309.00|309.00|508048.00|508048.00|508048.00|508048.00|Customer#000046435|
+1993-07-28|1993-07-28|3883783|3883783|15272|15272|302.00|302.00|500241.34|500241.34|500241.34|500241.34|Customer#000015272|
+1994-06-12|1994-06-12|3342468|3342468|146608|146608|303.00|303.00|499794.59|499794.59|499794.59|499794.59|Customer#000146608|
+1992-03-16|1992-03-16|5984582|5984582|96103|96103|312.00|312.00|494398.78|494398.78|494398.78|494398.78|Customer#000096103|
+1992-11-15|1992-11-15|1474818|1474818|24341|24341|302.00|302.00|491348.25|491348.25|491348.25|491348.25|Customer#000024341|
+1997-05-23|1997-05-23|5489475|5489475|137446|137446|311.00|311.00|487763.25|487763.25|487763.25|487763.25|Customer#000137446|
+1994-11-04|1994-11-04|4267751|4267751|107590|107590|301.00|301.00|485141.38|485141.38|485141.38|485141.38|Customer#000107590|
+1996-12-09|1996-12-09|2366755|2366755|50008|50008|302.00|302.00|483891.25|483891.25|483891.25|483891.25|Customer#000050008|
+1996-08-07|1996-08-07|3767271|3767271|15619|15619|318.00|318.00|480083.97|480083.97|480083.97|480083.97|Customer#000015619|
+1992-09-12|1992-09-12|1436544|1436544|77260|77260|307.00|307.00|479499.44|479499.44|479499.44|479499.44|Customer#000077260|
+1996-10-10|1996-10-10|5746311|5746311|109379|109379|302.00|302.00|478064.12|478064.12|478064.12|478064.12|Customer#000109379|
+1997-02-09|1997-02-09|5832321|5832321|54602|54602|307.00|307.00|471220.09|471220.09|471220.09|471220.09|Customer#000054602|
+1994-07-03|1994-07-03|2096705|2096705|105995|105995|307.00|307.00|469692.59|469692.59|469692.59|469692.59|Customer#000105995|
+1992-05-31|1992-05-31|2942469|2942469|148885|148885|313.00|313.00|469630.44|469630.44|469630.44|469630.44|Customer#000148885|
+1993-05-19|1993-05-19|551136|551136|114586|114586|308.00|308.00|469605.59|469605.59|469605.59|469605.59|Customer#000114586|
+1996-09-06|1996-09-06|5296167|5296167|105260|105260|303.00|303.00|469360.56|469360.56|469360.56|469360.56|Customer#000105260|
+1997-02-02|1997-02-02|1263015|1263015|147197|147197|320.00|320.00|467149.66|467149.66|467149.66|467149.66|Customer#000147197|
+1996-07-04|1996-07-04|2745894|2745894|64483|64483|304.00|304.00|466991.34|466991.34|466991.34|466991.34|Customer#000064483|
+1996-05-31|1996-05-31|2761378|2761378|136573|136573|301.00|301.00|461282.72|461282.72|461282.72|461282.72|Customer#000136573|
+1994-04-12|1994-04-12|502886|502886|16384|16384|312.00|312.00|458378.91|458378.91|458378.91|458378.91|Customer#000016384|
+1996-06-20|1996-06-20|2869152|2869152|117919|117919|317.00|317.00|456815.91|456815.91|456815.91|456815.91|Customer#000117919|
+1993-11-24|1993-11-24|735366|735366|12251|12251|309.00|309.00|455107.25|455107.25|455107.25|455107.25|Customer#000012251|
+1995-06-14|1995-06-14|1971680|1971680|120098|120098|308.00|308.00|453451.22|453451.22|453451.22|453451.22|Customer#000120098|
+1992-08-07|1992-08-07|5007490|5007490|66098|66098|304.00|304.00|453436.16|453436.16|453436.16|453436.16|Customer#000066098|
+1997-02-05|1997-02-05|4290656|4290656|117076|117076|301.00|301.00|449545.84|449545.84|449545.84|449545.84|Customer#000117076|
+1997-06-07|1997-06-07|4720454|4720454|129379|129379|303.00|303.00|448665.78|448665.78|448665.78|448665.78|Customer#000129379|
+1994-11-07|1994-11-07|4702759|4702759|126865|126865|320.00|320.00|447606.66|447606.66|447606.66|447606.66|Customer#000126865|
+1993-12-30|1993-12-30|983201|983201|88876|88876|304.00|304.00|446717.47|446717.47|446717.47|446717.47|Customer#000088876|
+1995-01-17|1995-01-17|4806726|4806726|36619|36619|328.00|328.00|446704.09|446704.09|446704.09|446704.09|Customer#000036619|
+1996-12-29|1996-12-29|2806245|2806245|141823|141823|310.00|310.00|446269.12|446269.12|446269.12|446269.12|Customer#000141823|
+1993-08-13|1993-08-13|2662214|2662214|53029|53029|302.00|302.00|446144.50|446144.50|446144.50|446144.50|Customer#000053029|
+1995-01-25|1995-01-25|3037414|3037414|18188|18188|308.00|308.00|443807.22|443807.22|443807.22|443807.22|Customer#000018188|
+1995-10-21|1995-10-21|29158|29158|66533|66533|305.00|305.00|443576.50|443576.50|443576.50|443576.50|Customer#000066533|
+1995-06-29|1995-06-29|4134341|4134341|37729|37729|309.00|309.00|441082.97|441082.97|441082.97|441082.97|Customer#000037729|
+1998-01-04|1998-01-04|2329187|2329187|3566|3566|304.00|304.00|439803.38|439803.38|439803.38|439803.38|Customer#000003566|
+1994-05-22|1994-05-22|4527553|4527553|45538|45538|305.00|305.00|436275.31|436275.31|436275.31|436275.31|Customer#000045538|
+1995-11-04|1995-11-04|4739650|4739650|81581|81581|305.00|305.00|435405.91|435405.91|435405.91|435405.91|Customer#000081581|
+1997-09-20|1997-09-20|1544643|1544643|119989|119989|320.00|320.00|434568.25|434568.25|434568.25|434568.25|Customer#000119989|
+1998-07-03|1998-07-03|3861123|3861123|3680|3680|301.00|301.00|433525.97|433525.97|433525.97|433525.97|Customer#000003680|
+1995-12-15|1995-12-15|967334|967334|113131|113131|301.00|301.00|432957.75|432957.75|432957.75|432957.75|Customer#000113131|
+1995-09-24|1995-09-24|565574|565574|141098|141098|301.00|301.00|430986.69|430986.69|430986.69|430986.69|Customer#000141098|
+1997-01-22|1997-01-22|5200102|5200102|93392|93392|304.00|304.00|425487.50|425487.50|425487.50|425487.50|Customer#000093392|
+1994-05-12|1994-05-12|1845057|1845057|15631|15631|302.00|302.00|419879.59|419879.59|419879.59|419879.59|Customer#000015631|
+1996-09-17|1996-09-17|4439686|4439686|112987|112987|305.00|305.00|418161.50|418161.50|418161.50|418161.50|Customer#000112987|
+1998-02-12|1998-02-12|4259524|4259524|12599|12599|304.00|304.00|415200.62|415200.62|415200.62|415200.62|Customer#000012599|
+1996-03-05|1996-03-05|4478371|4478371|105410|105410|302.00|302.00|412754.50|412754.50|412754.50|412754.50|Customer#000105410|
+1994-05-30|1994-05-30|5156581|5156581|149842|149842|302.00|302.00|411329.34|411329.34|411329.34|411329.34|Customer#000149842|
+1994-03-21|1994-03-21|5849444|5849444|10129|10129|309.00|309.00|409129.84|409129.84|409129.84|409129.84|Customer#000010129|
+1996-10-19|1996-10-19|1742403|1742403|69904|69904|305.00|305.00|408513.00|408513.00|408513.00|408513.00|Customer#000069904|
+1997-04-09|1997-04-09|6882|6882|17746|17746|303.00|303.00|408446.94|408446.94|408446.94|408446.94|Customer#000017746|
+1998-03-15|1998-03-15|1481925|1481925|13072|13072|301.00|301.00|399195.47|399195.47|399195.47|399195.47|Customer#000013072|
+1994-02-07|1994-02-07|857959|857959|82441|82441|305.00|305.00|382579.75|382579.75|382579.75|382579.75|Customer#000082441|
+1994-01-30|1994-01-30|2995076|2995076|88703|88703|302.00|302.00|363812.12|363812.12|363812.12|363812.12|Customer#000088703|
+---------------------------------------------------
+Planning time: 20.43 ms
+Data Load Time (Disk+Upload): 5795.91 ms
+GPU kernels time: 28.08 ms
+CPU postprocess time: 196.15 ms
+Total Internal Pipeline time: 6020.14 ms
+Total Host Execution time: 6020.22 ms
+Total Wall time (Plan+Exec): 6040.65 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    0.482 ms (1.717%) [2 calls]
+  filter         :    2.852 ms (10.156%) [2 calls]
+  gather         :    0.405 ms (1.443%) [2 calls]
+  groupby        :   21.265 ms (75.734%) [2 calls]
+  hash_join_probe_u32:    2.556 ms (9.102%) [3 calls]
+  sort           :    0.519 ms (1.848%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 28.078 ms
+  Kernel invocations: 13
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::groupby_agg_multi_key_ty       20.394        6001215        294.266
+ops::filter_gt_f32                   2.648        1500000        566.492
+ops::compact_indices                 0.302        1500000       4961.417
+hash_join_probe_write_multi          1.179        1500000       1271.815
+ops::filter_le_u32                   0.204         150000        736.648
+ops::compact_indices                 0.180         150000        834.103
+ops::gather_col_u32                  0.201         149999        747.349
+ops::gather_col_u32                  0.204         149999        733.642
+hash_join_probe_write_multi          0.172             57          0.331
+hash_join_probe_write_multi          1.204        6001215       4984.398
+ops::groupby_agg_multi_key_ty        0.871            399          0.458
+block_sort_kv_u64                    0.000             57          0.000
+orderby_gpu_gather                   0.519            798          1.538
+─────────────────────────────────────────────────────────────────
+TOTAL: 28.078 ms
