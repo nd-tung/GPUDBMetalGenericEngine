@@ -2,7 +2,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <optional>
 #include <cstdint>
 #include "TypedExpr.hpp"
 
@@ -40,7 +39,6 @@ inline const char* joinTypeName(JoinType t) {
 struct OrderSpec {
     TypedExprPtr expr;
     bool ascending = true;
-    bool nullsFirst = false;
 };
 
 // --- IR Node types ---
@@ -54,12 +52,6 @@ struct IRScan {
     
     // Pushed-down filter (from DuckDB optimization)
     TypedExprPtr filter;
-    
-    // Estimated row count (from DuckDB stats)
-    std::optional<uint64_t> estimatedRows;
-
-    // For constant value lists (e.g. from IN clause optimization)
-    std::vector<int64_t> literalValues; // Using int64 to accommodate larger integers
 
     // True for DELIM_SCAN nodes (need deduplication on key columns).
     // False for COLUMN_DATA_SCAN nodes (need full data from saved pipeline).
@@ -83,6 +75,11 @@ struct IRProject {
 
 struct IRJoin {
     JoinType type = JoinType::Inner;
+    
+    // If true, this is a RIGHT variant (RIGHT_SEMI, RIGHT_ANTI)
+    // For RIGHT_ANTI: keep RIGHT rows not matching LEFT
+    // For RIGHT_SEMI: keep RIGHT rows matching LEFT
+    bool rightVariant = false;
     
     // Join condition as typed expression (e.g., left.key = right.key)
     TypedExprPtr condition;
@@ -141,7 +138,6 @@ struct IRAggregate {
     
     // Expression string
     std::string exprStr;
-    bool hasArithmeticExpr = false;
     
     // Index of this aggregate within a multi-aggregate operation (for UNGROUPED_AGGREGATE with multiple aggs)
     size_t aggIndex = 0;
@@ -150,10 +146,6 @@ struct IRAggregate {
 
 struct IRDistinct {
     std::vector<TypedExprPtr> exprs;
-};
-
-struct IRUnion {
-    bool all = false;  // UNION ALL vs UNION
 };
 
 struct IRSave {
@@ -173,7 +165,6 @@ struct IRNode {
         Limit,
         Aggregate,
         Distinct,
-        Union,
         Save
     } type;
 
@@ -188,23 +179,17 @@ struct IRNode {
         IRLimit,
         IRAggregate,
         IRDistinct,
-        IRUnion,
         IRSave
     > data;
 
     // Metadata from DuckDB
     std::string duckdbName;           // Original operator name from DuckDB
-    std::optional<uint64_t> estRows;  // Estimated output rows
-    std::optional<double> estCost;    // Estimated cost
-    
-    // Child node indices (for tree representation, not used in linear pipeline)
-    std::vector<size_t> children;
 
     // Constructors
     static IRNode scan(const std::string& table) {
         IRNode n;
         n.type = Type::Scan;
-        n.data = IRScan{table, "", {}, nullptr, std::nullopt, {}};
+        n.data = IRScan{table, "", {}, nullptr};
         return n;
     }
 
@@ -225,7 +210,7 @@ struct IRNode {
     static IRNode join(JoinType jt, TypedExprPtr cond, const std::string& condStr = "", const std::string& rTable = "", TypedExprPtr rFilter = nullptr) {
         IRNode n;
         n.type = Type::Join;
-        n.data = IRJoin{jt, cond, {}, {}, rTable, rFilter, condStr};
+        n.data = IRJoin{jt, false, cond, {}, {}, rTable, rFilter, condStr};
         return n;
     }
 
@@ -253,7 +238,7 @@ struct IRNode {
     static IRNode aggregate(AggFunc func, TypedExprPtr expr, const std::string& alias = "") {
         IRNode n;
         n.type = Type::Aggregate;
-        n.data = IRAggregate{func, expr, alias, "", false};
+        n.data = IRAggregate{func, expr, alias, ""};
         return n;
     }
 
@@ -299,8 +284,6 @@ struct Plan {
     std::vector<IRNode> nodes;  // Linear pipeline order
     
     // Metadata
-    std::string originalSQL;
-    bool parsedFromJSON = false;
     std::string parseError;
     
     // Schema information inferred from query
@@ -312,28 +295,9 @@ struct Plan {
     
     // Output schema
     std::vector<std::string> outputColumns;
-    std::vector<DataType> outputTypes;
     
     // Check if plan is valid
     bool isValid() const { return !nodes.empty() && parseError.empty(); }
-    
-    // Find first node of a type
-    const IRNode* findFirst(IRNode::Type t) const {
-        for (const auto& n : nodes) if (n.type == t) return &n;
-        return nullptr;
-    }
-    
-    // Count nodes of a type
-    size_t countType(IRNode::Type t) const {
-        size_t c = 0;
-        for (const auto& n : nodes) if (n.type == t) ++c;
-        return c;
-    }
 };
-
-// --- IR conversion utilities ---
-
-// Convert legacy IR nodes to V2 format
-inline IRNode upgradeNode(const struct IRNode& legacy);  // Forward declaration
 
 } // namespace engine

@@ -1,6 +1,5 @@
 #include "GpuExecutor.hpp"
 #include "GpuExecutorPriv.hpp"
-#include "Relation.hpp"
 #include "Operators.hpp"
 
 #include <iostream>
@@ -232,8 +231,58 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     // Look for integer column (u32 or f32)
                     std::vector<uint32_t> results;
                     bool found = false;
-                    
-                    // Helper to find actual column key in map (and also check GPU)
+
+                    // ── M11: GPU fast-path for YEAR extraction ──────────────
+                    // Try to run extractYearU32 directly on GPU without downloading
+                    auto tryGpuYear = [&](const std::string& target) -> bool {
+                        MTL::Buffer* gpuBuf = nullptr;
+                        if (ctx.u32ColsGPU.count(target)) gpuBuf = ctx.u32ColsGPU.at(target);
+                        if (!gpuBuf && ctx.columnAliases.count(target)) {
+                            std::string alias = ctx.columnAliases.at(target);
+                            if (ctx.u32ColsGPU.count(alias)) gpuBuf = ctx.u32ColsGPU.at(alias);
+                        }
+                        if (!gpuBuf) {
+                            // Fuzzy search on GPU keys
+                            for (const auto& [k, buf] : ctx.u32ColsGPU) {
+                                if (k.size() > target.size() && k.rfind(target, 0) == 0) {
+                                    char nextChar = k[target.size()];
+                                    if (nextChar == '_' || k.find("_rhs_") != std::string::npos) {
+                                        gpuBuf = buf; break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!gpuBuf || gpuBuf->length() < sizeof(uint32_t)) return false;
+
+                        uint32_t gpuCount = (uint32_t)(gpuBuf->length() / sizeof(uint32_t));
+                        MTL::Buffer* inputBuf = gpuBuf;
+                        bool ownInput = false;
+
+                        // Gather by activeRows if needed
+                        if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && ctx.activeRowsCountGPU != gpuCount) {
+                            inputBuf = GpuOps::gatherU32(gpuBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                            gpuCount = ctx.activeRowsCountGPU;
+                            ownInput = true;
+                        }
+
+                        MTL::Buffer* yearBuf = GpuOps::extractYearU32(inputBuf, gpuCount);
+                        if (ownInput) inputBuf->release();
+                        if (!yearBuf) return false;
+
+                        // Download to CPU
+                        results.resize(gpuCount);
+                        std::memcpy(results.data(), yearBuf->contents(), gpuCount * sizeof(uint32_t));
+                        yearBuf->release();
+
+                        if (debug) std::cerr << "[Exec] Project: YEAR GPU-computed " << gpuCount << " results for " << outName << "\n";
+                        return true;
+                    };
+
+                    found = tryGpuYear(colName);
+                    // ── End GPU fast-path ────────────────────────────────────
+
+                    if (!found) {
+                    // CPU fallback: find column in CPU maps or download from GPU
                     auto findKeyAndFetch = [&](const std::string& target) -> std::string {
                         // First try CPU
                         if (ctx.u32Cols.count(target) && !ctx.u32Cols.at(target).empty()) return target;
@@ -338,6 +387,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                              }
                         }
                     }
+                    } // end if (!found) — CPU fallback
                     
                     if (found) {
                         if(debug) std::cerr << "[Exec] Project: YEAR computed " << results.size() << " results for " << outName << " (Input table: " << ctx.currentTable << ")\n";

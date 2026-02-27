@@ -2,39 +2,23 @@
 #include <fstream>
 #include <vector>
 #include <string>
-#include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <iomanip>
-#include <set>
 #include <filesystem>
 #include <sstream>
-#include <cmath>
-#include <variant>
 #include "IR.hpp"
 #include "Planner.hpp"
 #include "GpuExecutor.hpp"
 #include "Schema.hpp"
-#include "ExprEval.hpp"
 #include "DuckDBAdapter.hpp"
 #include "KernelTimer.hpp"
+#include "GpuExecutorPriv.hpp"  // for env_truthy
 
 static std::string g_dataset_path = "data/SF-1/";
-
-static bool env_truthy(const char* name) {
-    const char* v = std::getenv(name);
-    if (!v) return false;
-    std::string s(v);
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-    return (s == "1" || s == "true" || s == "on" || s == "yes");
-}
 
 static int runEngineSQL(const std::string& sql) {
     using namespace engine;
     std::cout << "--- Running (Engine Host) ---" << std::endl;
-
-    std::string query_lower = sql;
-    std::transform(query_lower.begin(), query_lower.end(), query_lower.begin(), ::tolower);
 
     // Initialize schema registry for TPC-H
     SchemaRegistry::instance().initTPCH();
@@ -75,7 +59,6 @@ static int runEngineSQL(const std::string& sql) {
     }
     
     // Execute with V2 executor (uses GPU Native Executor)
-    // auto result = GPUNativeExecutor::execute(plan, g_dataset_path);
     std::cout << "[Main] Using GpuExecutor generic executor.\n";
     auto t_exec_start = std::chrono::high_resolution_clock::now();
     auto result = GpuExecutor::execute(plan, g_dataset_path);

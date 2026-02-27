@@ -9,9 +9,6 @@
 #include <set>
 #include <map>
 #include <unordered_map>
-#include <variant>
-
-namespace MTL { class Buffer; }
 
 namespace engine {
 
@@ -27,6 +24,16 @@ struct EvalContext {
     
     // Raw string columns for pattern matching (LIKE, CONTAINS)
     std::unordered_map<std::string, std::vector<std::string>> stringCols;
+
+    // Pre-flattened string columns (Arrow-style GPU buffers, created at load time)
+    struct FlatStringCol {
+        MTL::Buffer* chars   = nullptr;  // raw character bytes
+        MTL::Buffer* offsets = nullptr;  // uint32_t[rowCount] start offset per string
+        MTL::Buffer* lengths = nullptr;  // uint32_t[rowCount] length per string
+        uint32_t rowCount   = 0;
+        uint32_t totalBytes = 0;
+    };
+    std::unordered_map<std::string, FlatStringCol> flatStringCols;
     
     // Column aliases: maps alias -> canonical name
     // e.g., "supplier_no" -> "l_suppkey" for CTE aliasing
@@ -39,10 +46,6 @@ struct EvalContext {
     MTL::Buffer* activeRowsGPU = nullptr;
     uint32_t activeRowsCountGPU = 0;
     
-    // Join mapping (for join results)
-    std::vector<uint32_t> leftIndices;
-    std::vector<uint32_t> rightIndices;
-    
     // Row count
     size_t rowCount = 0;
 
@@ -51,6 +54,10 @@ struct EvalContext {
     
     // Which table is "current" for column lookups
     std::string currentTable;
+    
+    // Columns originating from DELIM_SCAN (correlation keys)
+    // These should be prioritized during join column name collision resolution
+    std::unordered_set<std::string> isDelimCorrelation;
 };
 
 struct ScanInstance {
@@ -95,14 +102,6 @@ inline std::string trim_copy(std::string s) {
     return s.substr(first, last - first + 1);
 }
 
-inline std::string lower_compact(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-    s.erase(std::remove_if(s.begin(), s.end(), [](unsigned char ch) {
-        return std::isspace(ch) != 0;
-    }), s.end());
-    return s;
-}
-
 inline std::string base_ident(std::string s) {
     s = trim_copy(std::move(s));
     while (!s.empty() && s.front() == '(' && s.back() == ')') {
@@ -112,11 +111,6 @@ inline std::string base_ident(std::string s) {
     auto dot = s.rfind('.');
     if (dot != std::string::npos && dot + 1 < s.size()) s = s.substr(dot + 1);
     return trim_copy(std::move(s));
-}
-
-inline std::string resolveColumnAlias(const std::string& col) {
-    if (col == "supplier_no") return "l_suppkey";
-    return col;
 }
 
 inline std::string tableForColumn(const std::string& col) {

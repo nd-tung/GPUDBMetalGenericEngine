@@ -1,5 +1,6 @@
 #include "GpuExecutorPriv.hpp"
 #include "Operators.hpp"
+#include "ColumnStoreGPU.hpp"
 #include <iostream>
 #include <map>
 #include <set>
@@ -8,6 +9,49 @@
 #include <chrono>
 
 namespace engine {
+
+// Helper: flatten a vector<string> into pre-computed Metal GPU buffers
+// and store in ctx.flatStringCols for zero-copy filter dispatch.
+static void flattenStringCol(EvalContext& ctx, const std::string& colName) {
+    auto it = ctx.stringCols.find(colName);
+    if (it == ctx.stringCols.end() || it->second.empty()) return;
+
+    auto& store = ColumnStoreGPU::instance();
+    if (!store.device()) return;
+
+    const auto& data = it->second;
+    uint32_t rowCount = static_cast<uint32_t>(data.size());
+
+    std::vector<uint32_t> offsets(rowCount);
+    std::vector<uint32_t> lengths(rowCount);
+    size_t totalChars = 0;
+    for (const auto& s : data) totalChars += s.size();
+
+    std::vector<char> chars;
+    chars.reserve(totalChars);
+
+    size_t currentOffset = 0;
+    for (size_t i = 0; i < rowCount; ++i) {
+        offsets[i] = static_cast<uint32_t>(currentOffset);
+        lengths[i] = static_cast<uint32_t>(data[i].size());
+        chars.insert(chars.end(), data[i].begin(), data[i].end());
+        currentOffset += data[i].size();
+    }
+
+    EvalContext::FlatStringCol flat;
+    flat.rowCount   = rowCount;
+    flat.totalBytes = static_cast<uint32_t>(totalChars);
+
+    if (!chars.empty())
+        flat.chars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
+    else
+        flat.chars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
+
+    flat.offsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    flat.lengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+
+    ctx.flatStringCols[colName] = flat;
+}
 
 std::map<size_t, ScanInstance> buildScanInstanceMap(const Plan& plan) {
     std::map<size_t, ScanInstance> result;
@@ -447,8 +491,11 @@ void IRGpuLoader::loadTables(
                             if (!rawStrings.empty()) {
                                 if (inst.instanceNum == 1) {
                                     ctx.stringCols[colName] = rawStrings;
+                                    flattenStringCol(ctx, colName);
                                 }
-                                ctx.stringCols[colName + "_" + std::to_string(inst.instanceNum)] = std::move(rawStrings);
+                                std::string suffixed = colName + "_" + std::to_string(inst.instanceNum);
+                                ctx.stringCols[suffixed] = std::move(rawStrings);
+                                flattenStringCol(ctx, suffixed);
                             }
                         }
                     }
@@ -498,9 +545,11 @@ void IRGpuLoader::loadTables(
                     auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, actualCol);
                     if (!rawStrings.empty()) {
                         ctx.stringCols[colName] = std::move(rawStrings);
+                        flattenStringCol(ctx, colName);
                         if (debug) {
                             std::cerr << "[Exec] Loaded raw strings for " << tableName << "." << colName 
-                                      << " (" << ctx.stringCols[colName].size() << " rows)\n";
+                                      << " (" << ctx.stringCols[colName].size() << " rows, flat="
+                                      << ctx.flatStringCols.count(colName) << ")\n";
                         }
                     }
                 }

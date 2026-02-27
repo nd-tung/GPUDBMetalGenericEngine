@@ -3,8 +3,6 @@
 #include "Operators.hpp"
 
 #include <iostream>
-#include <algorithm>
-#include <cmath>
 #include <limits>
 
 namespace engine {

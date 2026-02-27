@@ -3,3 +3,4 @@ data/
 *.o
 *.dSYM
 .DS_Store
+task.md

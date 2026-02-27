@@ -7,8 +7,6 @@
 
 #include <Metal/Metal.hpp>
 
-#include "JoinMap.hpp"
-
 namespace engine {
 
 // GPU relation abstraction: typed columns + rowCount.
@@ -26,13 +24,6 @@ struct RelationGPU {
     std::unordered_map<std::string, MTL::Buffer*> u32cols;
     std::unordered_map<std::string, MTL::Buffer*> f32cols;
 
-    struct JoinMapping {
-        std::unique_ptr<RelationGPU> left;
-        std::unique_ptr<RelationGPU> right;
-        JoinMapGPU map;
-    };
-    std::unique_ptr<JoinMapping> join;
-
     RelationGPU() = default;
     RelationGPU(const RelationGPU&) = delete;
     RelationGPU& operator=(const RelationGPU&) = delete;
@@ -42,7 +33,6 @@ struct RelationGPU {
         indices = other.indices;
         u32cols = std::move(other.u32cols);
         f32cols = std::move(other.f32cols);
-        join = std::move(other.join);
         other.rowCount = 0;
         other.indices = nullptr;
         other.u32cols.clear();
@@ -56,7 +46,6 @@ struct RelationGPU {
         indices = other.indices;
         u32cols = std::move(other.u32cols);
         f32cols = std::move(other.f32cols);
-        join = std::move(other.join);
         other.rowCount = 0;
         other.indices = nullptr;
         other.u32cols.clear();
@@ -67,11 +56,6 @@ struct RelationGPU {
     ~RelationGPU() { releaseAll(); }
 
     void releaseAll() {
-        if (join) {
-            if (join->map.leftRow) join->map.leftRow->release();
-            if (join->map.rightRow) join->map.rightRow->release();
-            join.reset();
-        }
         if (indices) indices->release();
         indices = nullptr;
         for (auto& [_, b] : u32cols) if (b) b->release();

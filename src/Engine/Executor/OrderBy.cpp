@@ -1,7 +1,6 @@
 #include "GpuExecutor.hpp"
 #include "GpuExecutorPriv.hpp"
 #include "Operators.hpp"
-#include "Relation.hpp"
 #include "ColumnStoreGPU.hpp"
 #include "KernelTimer.hpp"
 
@@ -10,7 +9,6 @@
 #include <vector>
 #include <algorithm>
 #include <numeric>
-#include <tuple>
 #include <unordered_map>
 #include <cstring>
 
@@ -136,29 +134,33 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
     }
 
     auto buildRankU32 = [&](const std::vector<uint32_t>& col, bool asc) -> std::vector<uint32_t> {
-        std::vector<uint32_t> rank(n);
+        // GPU path: upload, optionally invert for DESC, download
+        auto& s = ColumnStoreGPU::instance();
+        MTL::Buffer* srcBuf = s.device()->newBuffer(col.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
         if (asc) {
-            rank = col;
+            std::vector<uint32_t> rank(n);
+            std::memcpy(rank.data(), srcBuf->contents(), n * sizeof(uint32_t));
+            srcBuf->release();
+            return rank;
         } else {
-            for (uint32_t i = 0; i < n; ++i) rank[i] = ~col[i];
+            MTL::Buffer* inv = GpuOps::invertU32(srcBuf, n);
+            srcBuf->release();
+            std::vector<uint32_t> rank(n);
+            std::memcpy(rank.data(), inv->contents(), n * sizeof(uint32_t));
+            inv->release();
+            return rank;
         }
-        return rank;
     };
 
     auto buildRankF32 = [&](const std::vector<float>& col, bool asc) -> std::vector<uint32_t> {
-        // IEEE 754 float -> u32 for ordering:
-        // Negative: flip all bits. Positive: flip sign bit.
+        // GPU path: upload f32, convert to sort key u32 on GPU, download
+        auto& s = ColumnStoreGPU::instance();
+        MTL::Buffer* srcBuf = s.device()->newBuffer(col.data(), n * sizeof(float), MTL::ResourceStorageModeShared);
+        MTL::Buffer* keyBuf = GpuOps::floatToSortKeyU32(srcBuf, n, !asc);
+        srcBuf->release();
         std::vector<uint32_t> rank(n);
-        for (uint32_t i = 0; i < n; ++i) {
-            uint32_t bits;
-            std::memcpy(&bits, &col[i], sizeof(bits));
-            if (bits & 0x80000000u) {
-                bits = ~bits;
-            } else {
-                bits ^= 0x80000000u;
-            }
-            rank[i] = asc ? bits : ~bits;
-        }
+        std::memcpy(rank.data(), keyBuf->contents(), n * sizeof(uint32_t));
+        keyBuf->release();
         return rank;
     };
 
@@ -213,15 +215,20 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
 
         if (sortCols.size() <= 2) {
             // Pack into u64: primary key in upper 32 bits, secondary in lower 32.
-            // For a single key, secondary is 0 everywhere.
-            std::vector<uint64_t> keys64(n);
-            for (uint32_t i = 0; i < n; ++i) {
-                uint64_t hi = (uint64_t)ranks[0][i];
-                uint64_t lo = (sortCols.size() > 1) ? (uint64_t)ranks[1][i] : 0;
-                keys64[i] = (hi << 32) | lo;
+            MTL::Buffer* rank0Buf = store.device()->newBuffer(
+                ranks[0].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            MTL::Buffer* rank1Buf = nullptr;
+            if (sortCols.size() > 1) {
+                rank1Buf = store.device()->newBuffer(
+                    ranks[1].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            } else {
+                // Zero-filled secondary key
+                rank1Buf = store.device()->newBuffer(n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memset(rank1Buf->contents(), 0, n * sizeof(uint32_t));
             }
-            MTL::Buffer* keyBuf = store.device()->newBuffer(
-                keys64.data(), n * sizeof(uint64_t), MTL::ResourceStorageModeShared);
+            MTL::Buffer* keyBuf = GpuOps::packU32ToU64(rank0Buf, rank1Buf, n);
+            rank0Buf->release();
+            rank1Buf->release();
 
             GpuOps::radixSortU64(keyBuf, idxBuf, n);
             keyBuf->release();
@@ -229,13 +236,15 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
             // 3+ keys: stable LSD radix sort (least-significant-digit first).
             // Embed position in low 32 bits of u64 key to ensure stability.
             for (int k = (int)sortCols.size() - 1; k >= 0; --k) {
-                std::vector<uint32_t> curIdx(n);
-                std::memcpy(curIdx.data(), idxBuf->contents(), n * sizeof(uint32_t));
-                std::vector<uint64_t> keys64(n);
-                for (uint32_t i = 0; i < n; ++i)
-                    keys64[i] = ((uint64_t)ranks[k][curIdx[i]] << 32) | (uint64_t)i;
-                MTL::Buffer* keyBuf = store.device()->newBuffer(
-                    keys64.data(), n * sizeof(uint64_t), MTL::ResourceStorageModeShared);
+                // GPU: gather rank values at current permutation, pack with position
+                MTL::Buffer* rankBuf = store.device()->newBuffer(
+                    ranks[k].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                MTL::Buffer* gatheredRank = GpuOps::gatherU32(rankBuf, idxBuf, n, true);
+                rankBuf->release();
+                MTL::Buffer* posBuf = GpuOps::iotaU32(n);
+                MTL::Buffer* keyBuf = GpuOps::packU32ToU64(gatheredRank, posBuf, n);
+                gatheredRank->release();
+                posBuf->release();
                 GpuOps::radixSortU64(keyBuf, idxBuf, n);
                 keyBuf->release();
             }

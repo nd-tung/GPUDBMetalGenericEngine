@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -377,21 +376,6 @@ static const std::map<std::string, std::map<std::string, ColMeta>> kSchema = {
     }},
 };
 
-uint32_t GpuOps::encodeStringForColumn(const std::string& table, const std::string& col, const std::string& val) {
-    auto itT = kSchema.find(table);
-    if (itT == kSchema.end()) return 0;
-    auto itC = itT->second.find(col);
-    if (itC == itT->second.end()) return 0;
-    
-    ColMeta::Kind k = itC->second.kind;
-    if (k == ColMeta::Kind::StrHashU32) {
-        return fnv1a32(val);
-    } else if (k == ColMeta::Kind::StrCharU32) {
-        return val.empty() ? 0 : (uint32_t)(unsigned char)val[0];
-    }
-    return 0; 
-}
-
 RelationGPU GpuOps::scanTable(const std::string& dataset_path,
                                    const std::string& table,
                                    const std::vector<std::string>& neededCols) {
@@ -578,7 +562,10 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
 std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
                                                           const std::vector<std::string>& data,
                                                           engine::expr::CompOp op,
-                                                          const std::string& pattern) {
+                                                          const std::string& pattern,
+                                                          MTL::Buffer* preChars,
+                                                          MTL::Buffer* preOffsets,
+                                                          MTL::Buffer* preLengths) {
     auto& store = ColumnStoreGPU::instance();
     if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
 
@@ -589,40 +576,47 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
         std::cerr << "[Exec] GPU filterString: rowCount=" << rowCount << " pattern=" << pattern << "\n";
     }
     
-    // Flatten
-    std::vector<uint32_t> offsets(rowCount);
-    std::vector<uint32_t> lengths(rowCount);
-    
-    // First pass: calculate total size
-    size_t totalChars = 0;
-    for (const auto& s : data) {
-        totalChars += s.size();
-    }
-    
-    std::vector<char> chars;
-    chars.reserve(totalChars);
-    
-    // Second pass: fill
-    size_t currentOffset = 0;
-    for (size_t i = 0; i < rowCount; ++i) {
-        offsets[i] = static_cast<uint32_t>(currentOffset);
-        lengths[i] = static_cast<uint32_t>(data[i].size());
-        if (!data[i].empty()) {
-            chars.insert(chars.end(), data[i].begin(), data[i].end());
-        }
-        currentOffset += data[i].size();
-    }
-    
-    // 2. Upload to GPU
-    MTL::Buffer* bufChars = nullptr;
-    if (!chars.empty()) {
-        bufChars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
-    } else {
-        bufChars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
-    }
+    // Use pre-flattened GPU buffers when available (Phase 1 Arrow-style)
+    bool ownBufs = (preChars == nullptr);
+    MTL::Buffer* bufChars   = preChars;
+    MTL::Buffer* bufOffsets = preOffsets;
+    MTL::Buffer* bufLengths = preLengths;
 
-    auto bufOffsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto bufLengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    if (ownBufs) {
+        // Flatten
+        std::vector<uint32_t> offsets(rowCount);
+        std::vector<uint32_t> lengths(rowCount);
+        
+        // First pass: calculate total size
+        size_t totalChars = 0;
+        for (const auto& s : data) {
+            totalChars += s.size();
+        }
+        
+        std::vector<char> chars;
+        chars.reserve(totalChars);
+        
+        // Second pass: fill
+        size_t currentOffset = 0;
+        for (size_t i = 0; i < rowCount; ++i) {
+            offsets[i] = static_cast<uint32_t>(currentOffset);
+            lengths[i] = static_cast<uint32_t>(data[i].size());
+            if (!data[i].empty()) {
+                chars.insert(chars.end(), data[i].begin(), data[i].end());
+            }
+            currentOffset += data[i].size();
+        }
+        
+        // 2. Upload to GPU
+        if (!chars.empty()) {
+            bufChars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
+        } else {
+            bufChars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
+        }
+
+        bufOffsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        bufLengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    }
     
     // 3. Process Pattern — detect multi-wildcard LIKE (e.g. %Customer%Complaints%)
     std::string rawPattern = pattern;
@@ -678,8 +672,9 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     uint32_t rc = static_cast<uint32_t>(rowCount);
 
     // 4. Dispatch Kernel
-    if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] GPU filterString: dispatching kernel " << totalChars << " chars"
+    if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] GPU filterString: dispatching kernel rowCount=" << rowCount
                                                    << (useMultiContains ? " (multi-contains, " + std::to_string(numSegments) + " segments)" : "")
+                                                   << (ownBufs ? " [flatten]" : " [flat-precomp]")
                                                    << "\n";
     
     const char* kernelName = useMultiContains ? "ops::filter_string_multi_contains" : "ops::filter_string_contains";
@@ -699,9 +694,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
     
     if (!p_filter || !p_compact) {
-        bufChars->release();
-        bufOffsets->release();
-        bufLengths->release();
+        if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
         bufPattern->release();
         if (bufPatOffsets) bufPatOffsets->release();
         if (bufPatLengths) bufPatLengths->release();
@@ -746,19 +739,14 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     KernelTimer::instance().record(kernelName, "filter", 
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), rowCount);
 
-    bufChars->release();
-    bufOffsets->release();
-    bufLengths->release();
+    if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
     bufPattern->release();
     if (bufPatOffsets) bufPatOffsets->release();
     if (bufPatLengths) bufPatLengths->release();
     
     // 4b. Flip mask for NOTLIKE with multi-segment pattern
     if (useMultiContains && op == engine::expr::CompOp::NE) {
-        uint8_t* maskPtr = (uint8_t*)mask->contents();
-        for (size_t i = 0; i < rowCount; ++i) {
-            maskPtr[i] = maskPtr[i] ? 0 : 1;
-        }
+        flipMaskU8(mask, (uint32_t)rowCount);
         if (std::getenv("GPUDB_DEBUG_OPS"))
             std::cerr << "[Exec] GPU filterString: flipped mask for NOTLIKE multi-contains\n";
     }
@@ -803,7 +791,10 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
 std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colName,
                                                           const std::vector<std::string>& data,
                                                           const std::string& pattern,
-                                                          bool invert) {
+                                                          bool invert,
+                                                          MTL::Buffer* preChars,
+                                                          MTL::Buffer* preOffsets,
+                                                          MTL::Buffer* preLengths) {
     auto& store = ColumnStoreGPU::instance();
     if (!store.device() || !store.library() || !store.queue()) {
         std::cerr << "[GpuOps] Device/Lib/Queue invalid\n";
@@ -817,30 +808,37 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
         std::cerr << "[GpuOps] filterStringPrefix pattern='" << pattern << "' invert=" << invert << " rowCount=" << rowCount << "\n";
     }
     
-    std::vector<uint32_t> offsets(rowCount);
-    std::vector<uint32_t> lengths(rowCount);
-    size_t totalChars = 0;
-    for (const auto& s : data) totalChars += s.size();
-    
-    std::vector<char> chars;
-    chars.reserve(totalChars);
-    
-    size_t currentOffset = 0;
-    for (size_t i = 0; i < rowCount; ++i) {
-        offsets[i] = static_cast<uint32_t>(currentOffset);
-        lengths[i] = static_cast<uint32_t>(data[i].size());
-        if (!data[i].empty()) {
-            chars.insert(chars.end(), data[i].begin(), data[i].end());
-        }
-        currentOffset += data[i].size();
-    }
-    
-    MTL::Buffer* bufChars = nullptr;
-    if (!chars.empty()) bufChars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
-    else bufChars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
+    // Use pre-flattened GPU buffers when available (Phase 1 Arrow-style)
+    bool ownBufs = (preChars == nullptr);
+    MTL::Buffer* bufChars   = preChars;
+    MTL::Buffer* bufOffsets = preOffsets;
+    MTL::Buffer* bufLengths = preLengths;
 
-    auto bufOffsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto bufLengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    if (ownBufs) {
+        std::vector<uint32_t> offsets(rowCount);
+        std::vector<uint32_t> lengths(rowCount);
+        size_t totalChars = 0;
+        for (const auto& s : data) totalChars += s.size();
+        
+        std::vector<char> chars;
+        chars.reserve(totalChars);
+        
+        size_t currentOffset = 0;
+        for (size_t i = 0; i < rowCount; ++i) {
+            offsets[i] = static_cast<uint32_t>(currentOffset);
+            lengths[i] = static_cast<uint32_t>(data[i].size());
+            if (!data[i].empty()) {
+                chars.insert(chars.end(), data[i].begin(), data[i].end());
+            }
+            currentOffset += data[i].size();
+        }
+        
+        if (!chars.empty()) bufChars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
+        else bufChars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
+
+        bufOffsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        bufLengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    }
     
     std::string rawPattern = pattern;
     if (!rawPattern.empty() && rawPattern.back() == '%') rawPattern.pop_back();
@@ -864,9 +862,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
     if (!p_filter || !p_compact) {
         if(!p_filter) std::cerr << "[GpuOps] Failed to make PSO for " << kernelName << "\n";
         if(!p_compact) std::cerr << "[GpuOps] Failed to make PSO for compact\n";
-        bufChars->release();
-        bufOffsets->release();
-        bufLengths->release();
+        if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
         bufPattern->release();
         return std::nullopt;
     }
@@ -891,9 +887,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
         cmd->waitUntilCompleted();
     }
 
-    bufChars->release();
-    bufOffsets->release();
-    bufLengths->release();
+    if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
     bufPattern->release();
     
     auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -998,14 +992,9 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
         cmd->waitUntilCompleted();
     }
     
-    // 4. Compute prefix sum (offsets) on CPU and get total count
-    uint32_t* counts = (uint32_t*)bufCounts->contents();
-    std::vector<uint32_t> offsets(probeCount);
-    uint32_t totalPairs = 0;
-    for (uint32_t i = 0; i < probeCount; ++i) {
-        offsets[i] = totalPairs;
-        totalPairs += counts[i];
-    }
+    // 4. GPU exclusive prefix sum on counts → offsets, returns total
+    uint64_t totalPairs64 = scanInPlace(bufCounts, probeCount);
+    uint32_t totalPairs = static_cast<uint32_t>(totalPairs64);
     
     if (debug) std::cerr << "[GPU] joinHashMulti: buildCount=" << buildCount 
                          << " probeCount=" << probeCount << " totalPairs=" << totalPairs << "\n";
@@ -1016,15 +1005,15 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
         return {emptyBuf, store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared), 0};
     }
     
-    // 5. Write Phase — write matched pairs
-    auto bufOffsets = store.device()->newBuffer(offsets.data(), probeCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    // 5. Write Phase — write matched pairs (bufCounts now holds exclusive prefix sums = offsets)
+    MTL::Buffer* bufOffsets = bufCounts;  // reuse in-place — scanInPlace converted counts → offsets
     auto outProbeIndices = store.device()->newBuffer(totalPairs * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     auto outBuildIndices = store.device()->newBuffer(totalPairs * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     
     auto p_write = makePSO(store.device(), store.library(), "ops::hash_join_probe_write_multi");
     if (!p_write) {
-        bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufCounts->release();
-        bufOffsets->release(); outProbeIndices->release(); outBuildIndices->release();
+        bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufOffsets->release();
+        outProbeIndices->release(); outBuildIndices->release();
         return {nullptr, nullptr, 0};
     }
     
@@ -1054,8 +1043,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     bufHTKeys->release();
     bufHTHead->release();
     bufNext->release();
-    bufCounts->release();
-    bufOffsets->release();
+    bufOffsets->release();  // bufCounts was reused as bufOffsets
     
     return {outBuildIndices, outProbeIndices, totalPairs};
 }
@@ -1526,21 +1514,6 @@ MTL::Buffer* GpuOps::castU32ToF32(MTL::Buffer* in, uint32_t count) {
     return out;
 }
 
-RelationGPU GpuOps::applySelection(RelationGPU&& rel, const FilterResult& sel) {
-    RelationGPU out;
-    out.rowCount = sel.count;
-
-    for (auto& [name, buf] : rel.u32cols) {
-        out.u32cols[name] = gatherU32(buf, sel.indices, sel.count);
-    }
-    for (auto& [name, buf] : rel.f32cols) {
-        out.f32cols[name] = gatherF32(buf, sel.indices, sel.count);
-    }
-
-    // old relation buffers are released by its destructor on move-out
-    return out;
-}
-
 static uint32_t nextPow2(uint32_t v) {
     if (v == 0) return 1;
     v--;
@@ -1550,458 +1523,6 @@ static uint32_t nextPow2(uint32_t v) {
     v |= v >> 8;
     v |= v >> 16;
     return v + 1;
-}
-
-std::optional<JoinMapGPU> GpuOps::hashJoinU32(MTL::Buffer* leftKey,
-                                                   uint32_t leftCount,
-                                                   MTL::Buffer* rightKey,
-                                                   uint32_t rightCount) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-
-    auto p_build = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
-    auto p_count = makePSO(store.device(), store.library(), "ops::hash_join_probe_count_multi");
-    auto p_write = makePSO(store.device(), store.library(), "ops::hash_join_probe_write_multi");
-    if (!p_build || !p_count || !p_write) {
-        return std::nullopt;
-    }
-
-    uint32_t cap = nextPow2(std::max<uint32_t>(8u, rightCount * 2u));
-    auto ht_keys = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto ht_head = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto next = store.device()->newBuffer(static_cast<size_t>(rightCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(ht_keys->contents(), 0, cap * sizeof(uint32_t));
-    std::memset(ht_head->contents(), 0, cap * sizeof(uint32_t));
-    if (rightCount > 0) {
-        std::memset(next->contents(), 0, static_cast<size_t>(rightCount) * sizeof(uint32_t));
-    }
-
-    auto buildStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_build);
-        enc->setBuffer(rightKey, 0, 0);
-        enc->setBuffer(ht_keys, 0, 1);
-        enc->setBuffer(ht_head, 0, 2);
-        enc->setBuffer(next, 0, 3);
-        enc->setBytes(&cap, sizeof(cap), 4);
-        enc->setBytes(&rightCount, sizeof(rightCount), 5);
-        dispatch1D(enc, rightCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto buildEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::hash_join_build_multi", "join_build",
-        std::chrono::duration<double, std::milli>(buildEnd - buildStart).count(), rightCount);
-
-    auto counts = store.device()->newBuffer(static_cast<size_t>(leftCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    if (!counts) {
-        ht_keys->release(); ht_head->release(); next->release();
-        return std::nullopt;
-    }
-    if (leftCount > 0) {
-        std::memset(counts->contents(), 0, static_cast<size_t>(leftCount) * sizeof(uint32_t));
-    }
-
-    auto probeCountStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_count);
-        enc->setBuffer(leftKey, 0, 0);
-        enc->setBuffer(ht_keys, 0, 1);
-        enc->setBuffer(ht_head, 0, 2);
-        enc->setBuffer(next, 0, 3);
-        enc->setBuffer(counts, 0, 4);
-        enc->setBytes(&cap, sizeof(cap), 5);
-        enc->setBytes(&leftCount, sizeof(leftCount), 6);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto probeCountEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::hash_join_probe_count_multi", "join_probe",
-        std::chrono::duration<double, std::milli>(probeCountEnd - probeCountStart).count(), leftCount);
-
-    // Prefix sum counts on GPU.
-    auto offsets = store.device()->newBuffer(static_cast<size_t>(leftCount) * sizeof(uint32_t), MTL::ResourceStorageModePrivate);
-    if (!offsets) {
-        counts->release();
-        ht_keys->release(); ht_head->release(); next->release();
-        return std::nullopt;
-    }
-
-    // Initialize offsets with counts for in-place scan
-    if (leftCount > 0) {
-        auto cmd = store.queue()->commandBuffer();
-        auto blit = cmd->blitCommandEncoder();
-        blit->copyFromBuffer(counts, 0, offsets, 0, static_cast<size_t>(leftCount) * sizeof(uint32_t));
-        blit->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    
-    // Perform in-place scan on offsets
-    uint64_t total64 = scanInPlace(offsets, leftCount);
-
-    if (total64 > 0xFFFFFFFFull) {
-        offsets->release();
-        counts->release();
-        ht_keys->release(); ht_head->release(); next->release();
-        return std::nullopt;
-    }
-    const uint32_t outCount = static_cast<uint32_t>(total64);
-    if (outCount == 0) {
-        offsets->release();
-        counts->release();
-        ht_keys->release(); ht_head->release(); next->release();
-        JoinMapGPU jm;
-        jm.leftRow = nullptr;
-        jm.rightRow = nullptr;
-        jm.count = 0;
-        return jm;
-    }
-
-    auto out_left = store.device()->newBuffer(static_cast<size_t>(outCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto out_right = store.device()->newBuffer(static_cast<size_t>(outCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    if (!out_left || !out_right) {
-        if (out_left) out_left->release();
-        if (out_right) out_right->release();
-        offsets->release();
-        counts->release();
-        ht_keys->release(); ht_head->release(); next->release();
-        return std::nullopt;
-    }
-
-    auto probeWriteStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_write);
-        enc->setBuffer(leftKey, 0, 0);
-        enc->setBuffer(ht_keys, 0, 1);
-        enc->setBuffer(ht_head, 0, 2);
-        enc->setBuffer(next, 0, 3);
-        enc->setBuffer(offsets, 0, 4);
-        enc->setBuffer(out_left, 0, 5);
-        enc->setBuffer(out_right, 0, 6);
-        enc->setBytes(&cap, sizeof(cap), 7);
-        enc->setBytes(&leftCount, sizeof(leftCount), 8);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto probeWriteEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::hash_join_probe_write_multi", "join_write",
-        std::chrono::duration<double, std::milli>(probeWriteEnd - probeWriteStart).count(), leftCount);
-
-    offsets->release();
-    counts->release();
-    ht_keys->release(); ht_head->release(); next->release();
-
-    JoinMapGPU jm;
-    jm.leftRow = out_left;
-    jm.rightRow = out_right;
-    jm.count = outCount;
-    return jm;
-}
-
-RelationGPU GpuOps::materializeJoin(RelationGPU&& left,
-                                         RelationGPU&& right,
-                                         const JoinMapGPU& map,
-                                         const std::vector<std::string>& keepLeftU32,
-                                         const std::vector<std::string>& keepLeftF32,
-                                         const std::vector<std::string>& keepRightU32,
-                                         const std::vector<std::string>& keepRightF32) {
-    RelationGPU out;
-    out.rowCount = map.count;
-
-    for (const auto& c : keepLeftU32) {
-        if (auto it = left.u32cols.find(c); it != left.u32cols.end()) {
-            out.u32cols[c] = gatherU32(it->second, map.leftRow, map.count);
-        }
-    }
-    for (const auto& c : keepLeftF32) {
-        if (auto it = left.f32cols.find(c); it != left.f32cols.end()) {
-            out.f32cols[c] = gatherF32(it->second, map.leftRow, map.count);
-        }
-    }
-    for (const auto& c : keepRightU32) {
-        if (auto it = right.u32cols.find(c); it != right.u32cols.end()) {
-            out.u32cols[c] = gatherU32(it->second, map.rightRow, map.count);
-        }
-    }
-    for (const auto& c : keepRightF32) {
-        if (auto it = right.f32cols.find(c); it != right.f32cols.end()) {
-            out.f32cols[c] = gatherF32(it->second, map.rightRow, map.count);
-        }
-    }
-
-    return out;
-}
-
-MTL::Buffer* GpuOps::computeRevenue(MTL::Buffer* extendedprice,
-                                         MTL::Buffer* discount,
-                                         uint32_t rowCount) {
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "ops::compute_revenue_ep_disc");
-    if (!p) return nullptr;
-
-    auto out = store.device()->newBuffer(rowCount * sizeof(float), MTL::ResourceStorageModeShared);
-    auto start = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(extendedprice, 0, 0);
-        enc->setBuffer(discount, 0, 1);
-        enc->setBuffer(out, 0, 2);
-        enc->setBytes(&rowCount, sizeof(rowCount), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compute_revenue_ep_disc", "compute",
-        std::chrono::duration<double, std::milli>(end - start).count(), rowCount);
-    return out;
-}
-
-MTL::Buffer* GpuOps::computeCharge(MTL::Buffer* extendedprice,
-                                         MTL::Buffer* discount,
-                                         MTL::Buffer* tax,
-                                         uint32_t rowCount) {
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "ops::compute_charge_ep_disc_tax");
-    if (!p) return nullptr;
-
-    auto out = store.device()->newBuffer(rowCount * sizeof(float), MTL::ResourceStorageModeShared);
-    auto start = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(extendedprice, 0, 0);
-        enc->setBuffer(discount, 0, 1);
-        enc->setBuffer(tax, 0, 2);
-        enc->setBuffer(out, 0, 3);
-        enc->setBytes(&rowCount, sizeof(rowCount), 4);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compute_charge_ep_disc_tax", "compute",
-        std::chrono::duration<double, std::milli>(end - start).count(), rowCount);
-    return out;
-}
-
-MTL::Buffer* GpuOps::copyAddU32(MTL::Buffer* in, uint32_t count, uint32_t add) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !in) return nullptr;
-    auto out = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    if (!out) return nullptr;
-
-    const auto* src = reinterpret_cast<const uint32_t*>(in->contents());
-    auto* dst = reinterpret_cast<uint32_t*>(out->contents());
-    for (uint32_t i = 0; i < count; ++i) {
-        dst[i] = src[i] + add;
-    }
-    return out;
-}
-
-std::optional<GroupByHashTable> GpuOps::groupBySumMultiKey(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                   MTL::Buffer* aggF32,
-                                                                   uint32_t rowCount) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-
-    auto p = makePSO(store.device(), store.library(), "ops::groupby_agg_multi_key");
-    if (!p) return std::nullopt;
-
-    uint32_t numKeys = static_cast<uint32_t>(keyColsU32.size());
-    if (numKeys == 0 || numKeys > 4) { return std::nullopt; }
-
-    uint32_t cap = nextPow2(std::max<uint32_t>(1024u, rowCount * 2u));
-    auto ht_keys = store.device()->newBuffer(static_cast<size_t>(cap) * 4 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto ht_aggs = store.device()->newBuffer(static_cast<size_t>(cap) * 8 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(ht_keys->contents(), 0, static_cast<size_t>(cap) * 4 * sizeof(uint32_t));
-    std::memset(ht_aggs->contents(), 0, static_cast<size_t>(cap) * 8 * sizeof(uint32_t));
-
-    const uint32_t numAggs = 1;
-
-    // Provide 4 key buffers and 8 agg buffers per kernel signature.
-    MTL::Buffer* k0 = keyColsU32.size() > 0 ? keyColsU32[0] : keyColsU32[0];
-    MTL::Buffer* k1 = keyColsU32.size() > 1 ? keyColsU32[1] : keyColsU32[0];
-    MTL::Buffer* k2 = keyColsU32.size() > 2 ? keyColsU32[2] : keyColsU32[0];
-    MTL::Buffer* k3 = keyColsU32.size() > 3 ? keyColsU32[3] : keyColsU32[0];
-
-    auto start = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(k0, 0, 0);
-        enc->setBuffer(k1, 0, 1);
-        enc->setBuffer(k2, 0, 2);
-        enc->setBuffer(k3, 0, 3);
-
-        // agg buffers
-        enc->setBuffer(aggF32, 0, 4);
-        enc->setBuffer(aggF32, 0, 5);
-        enc->setBuffer(aggF32, 0, 6);
-        enc->setBuffer(aggF32, 0, 7);
-        enc->setBuffer(aggF32, 0, 8);
-        enc->setBuffer(aggF32, 0, 9);
-        enc->setBuffer(aggF32, 0, 10);
-        enc->setBuffer(aggF32, 0, 11);
-
-        enc->setBuffer(ht_keys, 0, 12);
-        enc->setBuffer(ht_aggs, 0, 13);
-        enc->setBytes(&cap, sizeof(cap), 14);
-        enc->setBytes(&rowCount, sizeof(rowCount), 15);
-        enc->setBytes(&numKeys, sizeof(numKeys), 16);
-        enc->setBytes(&numAggs, sizeof(numAggs), 17);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::groupby_agg_multi_key", "groupby",
-        std::chrono::duration<double, std::milli>(end - start).count(), rowCount);
-
-    GroupByHashTable g;
-    g.ht_keys = ht_keys;
-    g.ht_aggs = ht_aggs;
-    g.capacity = cap;
-    return g;
-}
-
-std::optional<GroupByHashTable> GpuOps::groupBySumCountMultiKey(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                         MTL::Buffer* aggF32,
-                                                                         uint32_t rowCount) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-
-    auto p = makePSO(store.device(), store.library(), "ops::groupby_agg_multi_key");
-    if (!p) return std::nullopt;
-
-    uint32_t numKeys = static_cast<uint32_t>(keyColsU32.size());
-    if (numKeys == 0 || numKeys > 4) { return std::nullopt; }
-
-    uint32_t cap = nextPow2(std::max<uint32_t>(1024u, rowCount * 2u));
-    auto ht_keys = store.device()->newBuffer(static_cast<size_t>(cap) * 4 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto ht_aggs = store.device()->newBuffer(static_cast<size_t>(cap) * 8 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(ht_keys->contents(), 0, static_cast<size_t>(cap) * 4 * sizeof(uint32_t));
-    std::memset(ht_aggs->contents(), 0, static_cast<size_t>(cap) * 8 * sizeof(uint32_t));
-
-    const uint32_t numAggs = 2;
-
-    MTL::Buffer* k0 = keyColsU32.size() > 0 ? keyColsU32[0] : keyColsU32[0];
-    MTL::Buffer* k1 = keyColsU32.size() > 1 ? keyColsU32[1] : keyColsU32[0];
-    MTL::Buffer* k2 = keyColsU32.size() > 2 ? keyColsU32[2] : keyColsU32[0];
-    MTL::Buffer* k3 = keyColsU32.size() > 3 ? keyColsU32[3] : keyColsU32[0];
-
-    auto start = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(k0, 0, 0);
-        enc->setBuffer(k1, 0, 1);
-        enc->setBuffer(k2, 0, 2);
-        enc->setBuffer(k3, 0, 3);
-
-        // agg buffers (kernel reads agg0 for SUM; COUNT is handled internally when numAggs>=2).
-        enc->setBuffer(aggF32, 0, 4);
-        enc->setBuffer(aggF32, 0, 5);
-        enc->setBuffer(aggF32, 0, 6);
-        enc->setBuffer(aggF32, 0, 7);
-        enc->setBuffer(aggF32, 0, 8);
-        enc->setBuffer(aggF32, 0, 9);
-        enc->setBuffer(aggF32, 0, 10);
-        enc->setBuffer(aggF32, 0, 11);
-
-        enc->setBuffer(ht_keys, 0, 12);
-        enc->setBuffer(ht_aggs, 0, 13);
-        enc->setBytes(&cap, sizeof(cap), 14);
-        enc->setBytes(&rowCount, sizeof(rowCount), 15);
-        enc->setBytes(&numKeys, sizeof(numKeys), 16);
-        enc->setBytes(&numAggs, sizeof(numAggs), 17);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::groupby_agg_multi_key_sumcount", "groupby",
-        std::chrono::duration<double, std::milli>(end - start).count(), rowCount);
-
-    GroupByHashTable g;
-    g.ht_keys = ht_keys;
-    g.ht_aggs = ht_aggs;
-    g.capacity = cap;
-    return g;
-}
-
-std::optional<GroupByHashTable> GpuOps::groupByCountMultiKey(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                      uint32_t rowCount) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-
-    auto p = makePSO(store.device(), store.library(), "ops::groupby_count_multi_key");
-    if (!p) return std::nullopt;
-
-    uint32_t numKeys = static_cast<uint32_t>(keyColsU32.size());
-    if (numKeys == 0 || numKeys > 4) { return std::nullopt; }
-
-    uint32_t cap = nextPow2(std::max<uint32_t>(1024u, rowCount * 2u));
-    auto ht_keys = store.device()->newBuffer(static_cast<size_t>(cap) * 4 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    // Use 16-slot stride to match groupByAggMultiKeyTyped (extraction code expects 16-slot layout)
-    auto ht_aggs = store.device()->newBuffer(static_cast<size_t>(cap) * 16 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(ht_keys->contents(), 0, static_cast<size_t>(cap) * 4 * sizeof(uint32_t));
-    std::memset(ht_aggs->contents(), 0, static_cast<size_t>(cap) * 16 * sizeof(uint32_t));
-
-    MTL::Buffer* k0 = keyColsU32.size() > 0 ? keyColsU32[0] : keyColsU32[0];
-    MTL::Buffer* k1 = keyColsU32.size() > 1 ? keyColsU32[1] : keyColsU32[0];
-    MTL::Buffer* k2 = keyColsU32.size() > 2 ? keyColsU32[2] : keyColsU32[0];
-    MTL::Buffer* k3 = keyColsU32.size() > 3 ? keyColsU32[3] : keyColsU32[0];
-
-    auto start = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(k0, 0, 0);
-        enc->setBuffer(k1, 0, 1);
-        enc->setBuffer(k2, 0, 2);
-        enc->setBuffer(k3, 0, 3);
-        enc->setBuffer(ht_keys, 0, 4);
-        enc->setBuffer(ht_aggs, 0, 5);
-        enc->setBytes(&cap, sizeof(cap), 6);
-        enc->setBytes(&rowCount, sizeof(rowCount), 7);
-        enc->setBytes(&numKeys, sizeof(numKeys), 8);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::groupby_count_multi_key", "groupby",
-        std::chrono::duration<double, std::milli>(end - start).count(), rowCount);
-
-    GroupByHashTable g;
-    g.ht_keys = ht_keys;
-    g.ht_aggs = ht_aggs;
-    g.capacity = cap;
-    return g;
 }
 
 std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vector<MTL::Buffer*>& keyColsU32,
@@ -2390,60 +1911,6 @@ std::optional<FilterResult> GpuOps::filterColColF32(
 }
 
 
-MTL::Buffer* GpuOps::cmpColColU32Mask(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count, int op) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* lib = ColumnStoreGPU::instance().library();
-    auto* cmd = ColumnStoreGPU::instance().queue()->commandBuffer();
-    auto* enc = cmd->computeCommandEncoder();
-    
-    auto* pso = makePSO(dev, lib, "ops::cmp_col_col_u32_mask");
-    if(!pso) { enc->endEncoding(); return nullptr; }
-    
-    enc->setComputePipelineState(pso);
-    enc->setBuffer(colA, 0, 0);
-    enc->setBuffer(colB, 0, 1);
-    
-    auto* outMask = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    enc->setBuffer(outMask, 0, 2);
-    
-    enc->setBytes(&count, sizeof(uint32_t), 3);
-    enc->setBytes(&op, sizeof(int), 4);
-    
-    dispatch1D(enc, count);
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    return outMask;
-}
-
-MTL::Buffer* GpuOps::cmpColLitU32Mask(MTL::Buffer* colA, uint32_t valB, uint32_t count, int op) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* lib = ColumnStoreGPU::instance().library();
-    auto* cmd = ColumnStoreGPU::instance().queue()->commandBuffer();
-    auto* enc = cmd->computeCommandEncoder();
-    
-    auto* pso = makePSO(dev, lib, "ops::cmp_col_lit_u32_mask");
-    if(!pso) { enc->endEncoding(); return nullptr; }
-
-    enc->setComputePipelineState(pso);
-    enc->setBuffer(colA, 0, 0);
-    enc->setBytes(&valB, sizeof(uint32_t), 1);
-    
-    auto* outMask = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    enc->setBuffer(outMask, 0, 2);
-    
-    enc->setBytes(&count, sizeof(uint32_t), 3);
-    enc->setBytes(&op, sizeof(int), 4);
-    
-    dispatch1D(enc, count);
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    return outMask;
-}
-
 MTL::Buffer* GpuOps::logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
     auto* dev = ColumnStoreGPU::instance().device();
     auto* lib = ColumnStoreGPU::instance().library();
@@ -2461,57 +1928,6 @@ MTL::Buffer* GpuOps::logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t c
     enc->setBuffer(outMask, 0, 2);
     
     enc->setBytes(&count, sizeof(uint32_t), 3);
-    
-    dispatch1D(enc, count);
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    return outMask;
-}
-
-MTL::Buffer* GpuOps::logicAndU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* lib = ColumnStoreGPU::instance().library();
-    auto* cmd = ColumnStoreGPU::instance().queue()->commandBuffer();
-    auto* enc = cmd->computeCommandEncoder();
-    
-    auto* pso = makePSO(dev, lib, "ops::logic_and_u32");
-    if(!pso) { enc->endEncoding(); return nullptr; }
-    
-    enc->setComputePipelineState(pso);
-    enc->setBuffer(colA, 0, 0);
-    enc->setBuffer(colB, 0, 1);
-    
-    auto* outMask = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    enc->setBuffer(outMask, 0, 2);
-    
-    enc->setBytes(&count, sizeof(uint32_t), 3);
-    
-    dispatch1D(enc, count);
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    return outMask;
-}
-
-MTL::Buffer* GpuOps::logicNotU32(MTL::Buffer* mask, uint32_t count) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* lib = ColumnStoreGPU::instance().library();
-    auto* cmd = ColumnStoreGPU::instance().queue()->commandBuffer();
-    auto* enc = cmd->computeCommandEncoder();
-    
-    auto* pso = makePSO(dev, lib, "ops::logic_not_u32");
-    if(!pso) { enc->endEncoding(); return nullptr; }
-    
-    enc->setComputePipelineState(pso);
-    enc->setBuffer(mask, 0, 0);
-    
-    auto* outMask = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    enc->setBuffer(outMask, 0, 1);
-    
-    enc->setBytes(&count, sizeof(uint32_t), 2);
     
     dispatch1D(enc, count);
     enc->endEncoding();
@@ -2580,25 +1996,6 @@ MTL::Buffer* GpuOps::indicesToMask(MTL::Buffer* indices, uint32_t indexCount, ui
     cmd->waitUntilCompleted();
     
     return mask;
-}
-
-void GpuOps::clearMask(MTL::Buffer* mask, uint32_t count) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* lib = ColumnStoreGPU::instance().library();
-    auto* cmd = ColumnStoreGPU::instance().queue()->commandBuffer();
-    auto* enc = cmd->computeCommandEncoder();
-    
-    auto* pso = makePSO(dev, lib, "ops::clear_mask");
-    if(!pso) { enc->endEncoding(); return; }
-    
-    enc->setComputePipelineState(pso);
-    enc->setBuffer(mask, 0, 0);
-    enc->setBytes(&count, sizeof(uint32_t), 1);
-    
-    dispatch1D(enc, count);
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
 }
 
 std::pair<MTL::Buffer*, uint32_t> GpuOps::compactU32Mask(MTL::Buffer* mask, uint32_t totalRows) {
@@ -2679,13 +2076,6 @@ MTL::Buffer* GpuOps::createFilledU32(uint32_t val, uint32_t count) {
     return buf;
 }
 
-MTL::Buffer* GpuOps::createFilledF32(float val, uint32_t count) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* buf = dev->newBuffer(count * sizeof(float), MTL::ResourceStorageModeShared);
-    fillF32(buf, val, count);
-    return buf;
-}
-
 MTL::Buffer* GpuOps::iotaU32(uint32_t count) {
     auto* dev = ColumnStoreGPU::instance().device();
     auto* lib = ColumnStoreGPU::instance().library();
@@ -2733,33 +2123,6 @@ void GpuOps::crossProduct(MTL::Buffer* left, MTL::Buffer* right,
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
-}
-
-MTL::Buffer* GpuOps::selectU32(MTL::Buffer* mask, MTL::Buffer* t, MTL::Buffer* f, uint32_t count) {
-    auto* dev = ColumnStoreGPU::instance().device();
-    auto* lib = ColumnStoreGPU::instance().library();
-    auto* cmd = ColumnStoreGPU::instance().queue()->commandBuffer();
-    auto* enc = cmd->computeCommandEncoder();
-    
-    auto* pso = makePSO(dev, lib, "ops::select_u32");
-    if(!pso) { enc->endEncoding(); return nullptr; }
-    
-    enc->setComputePipelineState(pso);
-    enc->setBuffer(mask, 0, 0);
-    enc->setBuffer(t, 0, 1);
-    enc->setBuffer(f, 0, 2);
-    
-    auto* out = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    enc->setBuffer(out, 0, 3);
-    
-    enc->setBytes(&count, sizeof(uint32_t), 4);
-    
-    dispatch1D(enc, count);
-    enc->endEncoding();
-    cmd->commit();
-    cmd->waitUntilCompleted();
-    
-    return out;
 }
 
 std::optional<FilterResult> GpuOps::filterF32Between(const std::string& colName,
@@ -2816,62 +2179,6 @@ std::optional<FilterResult> GpuOps::filterF32Between(const std::string& colName,
     return res;
 }
 
-std::optional<FilterResult> GpuOps::filterF32BetweenIndexed(const std::string& colName,
-                                                                     MTL::Buffer* col,
-                                                                     MTL::Buffer* indices,
-                                                                     uint32_t count,
-                                                                     float minVal,
-                                                                     float maxVal) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-
-    const char* fn = "ops::filter_between_f32_indexed";
-    auto p_filter = makePSO(store.device(), store.library(), fn);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) return std::nullopt;
-
-    auto mask = store.device()->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(col, 0, 0);
-        enc->setBuffer(indices, 0, 1);
-        enc->setBuffer(mask, 0, 2);
-        enc->setBytes(&minVal, sizeof(float), 3);
-        enc->setBytes(&maxVal, sizeof(float), 4);
-        enc->setBytes(&count, sizeof(uint32_t), 5);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&count, sizeof(uint32_t), 3);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-
-    FilterResult res;
-    res.indices = outIdx;
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-    mask->release();
-    outCnt->release();
-    return res;
-}
-
 std::optional<FilterResult> GpuOps::filterU32Between(const std::string& colName,
                                                               MTL::Buffer* col,
                                                               uint32_t rowCount,
@@ -2914,62 +2221,6 @@ std::optional<FilterResult> GpuOps::filterU32Between(const std::string& colName,
         enc->setBuffer(outCnt, 0, 2);
         enc->setBytes(&rowCount, sizeof(uint32_t), 3);
         dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-
-    FilterResult res;
-    res.indices = outIdx;
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-    mask->release();
-    outCnt->release();
-    return res;
-}
-
-std::optional<FilterResult> GpuOps::filterU32BetweenIndexed(const std::string& colName,
-                                                                     MTL::Buffer* col,
-                                                                     MTL::Buffer* indices,
-                                                                     uint32_t count,
-                                                                     uint32_t minVal,
-                                                                     uint32_t maxVal) {
-    auto& store = ColumnStoreGPU::instance();
-    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
-
-    const char* fn = "ops::filter_range_to_mask_u32_indexed";
-    auto p_filter = makePSO(store.device(), store.library(), fn);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) return std::nullopt;
-
-    auto mask = store.device()->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(col, 0, 0);
-        enc->setBuffer(indices, 0, 1);
-        enc->setBuffer(mask, 0, 2);
-        enc->setBytes(&minVal, sizeof(uint32_t), 3);
-        enc->setBytes(&maxVal, sizeof(uint32_t), 4);
-        enc->setBytes(&count, sizeof(uint32_t), 5);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&count, sizeof(uint32_t), 3);
-        dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
@@ -3071,6 +2322,301 @@ std::optional<FilterResult> GpuOps::hashJoinSemiU32(MTL::Buffer* leftKey,
     return res;
 }
 
+std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
+                                                             uint32_t leftCount,
+                                                             MTL::Buffer* rightKey,
+                                                             uint32_t rightCount) {
+    auto& store = ColumnStoreGPU::instance();
+    if (!store.device() || !store.library()) return std::nullopt;
+
+    // If no right rows, every left row is unmatched
+    if (rightCount == 0) {
+        auto idx = iotaU32(leftCount);
+        return FilterResult{idx, leftCount};
+    }
+
+    auto p_build   = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
+    auto p_probe   = makePSO(store.device(), store.library(), "ops::hash_join_probe_semi");
+    auto p_flip    = makePSO(store.device(), store.library(), "ops::flip_mask_u8");
+    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
+    if (!p_build || !p_probe || !p_flip || !p_compact) return std::nullopt;
+
+    uint32_t cap = nextPow2(std::max<uint32_t>(8u, rightCount * 2u));
+    auto ht_keys = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto ht_head = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto next    = store.device()->newBuffer(static_cast<size_t>(rightCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    
+    std::memset(ht_keys->contents(), 0, cap * sizeof(uint32_t));
+    std::memset(ht_head->contents(), 0, cap * sizeof(uint32_t));
+    if (rightCount > 0) std::memset(next->contents(), 0, static_cast<size_t>(rightCount) * sizeof(uint32_t));
+
+    // BUILD
+    {
+        auto cmd = store.queue()->commandBuffer();
+        auto enc = cmd->computeCommandEncoder();
+        enc->setComputePipelineState(p_build);
+        enc->setBuffer(rightKey, 0, 0);
+        enc->setBuffer(ht_keys, 0, 1);
+        enc->setBuffer(ht_head, 0, 2);
+        enc->setBuffer(next, 0, 3);
+        enc->setBytes(&cap, sizeof(cap), 4);
+        enc->setBytes(&rightCount, sizeof(rightCount), 5);
+        dispatch1D(enc, rightCount);
+        enc->endEncoding();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+    }
+    ht_head->release();
+    next->release();
+
+    // PROBE → u8 mask (1 = matched)
+    auto mask = store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
+    {
+        auto cmd = store.queue()->commandBuffer();
+        auto enc = cmd->computeCommandEncoder();
+        enc->setComputePipelineState(p_probe);
+        enc->setBuffer(leftKey, 0, 0);
+        enc->setBuffer(ht_keys, 0, 1);
+        enc->setBytes(&cap, sizeof(cap), 2);
+        enc->setBytes(&leftCount, sizeof(leftCount), 3);
+        enc->setBuffer(mask, 0, 4);
+        dispatch1D(enc, leftCount);
+        enc->endEncoding();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+    }
+    ht_keys->release();
+
+    // FLIP mask: 1→0 (matched→discard), 0→1 (unmatched→keep)
+    {
+        auto cmd = store.queue()->commandBuffer();
+        auto enc = cmd->computeCommandEncoder();
+        enc->setComputePipelineState(p_flip);
+        enc->setBuffer(mask, 0, 0);
+        enc->setBytes(&leftCount, sizeof(leftCount), 1);
+        dispatch1D(enc, leftCount);
+        enc->endEncoding();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+    }
+
+    // COMPACT
+    auto outIdx = store.device()->newBuffer(leftCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    *(uint32_t*)outCnt->contents() = 0;
+    {
+        auto cmd = store.queue()->commandBuffer();
+        auto enc = cmd->computeCommandEncoder();
+        enc->setComputePipelineState(p_compact);
+        enc->setBuffer(mask, 0, 0);
+        enc->setBuffer(outIdx, 0, 1);
+        enc->setBuffer(outCnt, 0, 2);
+        enc->setBytes(&leftCount, sizeof(leftCount), 3);
+        dispatch1D(enc, leftCount);
+        enc->endEncoding();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+    }
+    mask->release();
+
+    uint32_t validCount = *(uint32_t*)outCnt->contents();
+    outCnt->release();
+
+    FilterResult res;
+    res.indices = outIdx;
+    res.count = validCount;
+    return res;
+}
+
+MTL::Buffer* GpuOps::bitcastF32ToU32(MTL::Buffer* in, uint32_t count) {
+    auto& store = ColumnStoreGPU::instance();
+    auto out = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto p = makePSO(store.device(), store.library(), "ops::bitcast_f32_to_u32");
+    if (!p) {
+        // CPU fallback: memcpy bitcast
+        const float* src = (const float*)in->contents();
+        uint32_t* dst = (uint32_t*)out->contents();
+        for (uint32_t i = 0; i < count; ++i) std::memcpy(&dst[i], &src[i], sizeof(uint32_t));
+        return out;
+    }
+    auto cmd = store.queue()->commandBuffer();
+    auto enc = cmd->computeCommandEncoder();
+    enc->setComputePipelineState(p);
+    enc->setBuffer(in, 0, 0);
+    enc->setBuffer(out, 0, 1);
+    enc->setBytes(&count, sizeof(count), 2);
+    dispatch1D(enc, count);
+    enc->endEncoding();
+    cmd->commit();
+    cmd->waitUntilCompleted();
+    return out;
+}
+
+MTL::Buffer* GpuOps::floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc) {
+    auto& store = ColumnStoreGPU::instance();
+    auto out = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto p = makePSO(store.device(), store.library(), "ops::float_to_sort_key_u32");
+    if (!p) {
+        // CPU fallback
+        const float* src = (const float*)in->contents();
+        uint32_t* dst = (uint32_t*)out->contents();
+        for (uint32_t i = 0; i < count; ++i) {
+            uint32_t bits;
+            std::memcpy(&bits, &src[i], sizeof(bits));
+            if (bits & 0x80000000u) bits = ~bits;
+            else bits ^= 0x80000000u;
+            dst[i] = desc ? ~bits : bits;
+        }
+        return out;
+    }
+    uint32_t descFlag = desc ? 1 : 0;
+    auto cmd = store.queue()->commandBuffer();
+    auto enc = cmd->computeCommandEncoder();
+    enc->setComputePipelineState(p);
+    enc->setBuffer(in, 0, 0);
+    enc->setBuffer(out, 0, 1);
+    enc->setBytes(&count, sizeof(count), 2);
+    enc->setBytes(&descFlag, sizeof(descFlag), 3);
+    dispatch1D(enc, count);
+    enc->endEncoding();
+    cmd->commit();
+    cmd->waitUntilCompleted();
+    return out;
+}
+
+MTL::Buffer* GpuOps::invertU32(MTL::Buffer* in, uint32_t count) {
+    auto& store = ColumnStoreGPU::instance();
+    auto out = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto p = makePSO(store.device(), store.library(), "ops::invert_u32");
+    if (!p) {
+        const uint32_t* src = (const uint32_t*)in->contents();
+        uint32_t* dst = (uint32_t*)out->contents();
+        for (uint32_t i = 0; i < count; ++i) dst[i] = ~src[i];
+        return out;
+    }
+    auto cmd = store.queue()->commandBuffer();
+    auto enc = cmd->computeCommandEncoder();
+    enc->setComputePipelineState(p);
+    enc->setBuffer(in, 0, 0);
+    enc->setBuffer(out, 0, 1);
+    enc->setBytes(&count, sizeof(count), 2);
+    dispatch1D(enc, count);
+    enc->endEncoding();
+    cmd->commit();
+    cmd->waitUntilCompleted();
+    return out;
+}
+
+void GpuOps::flipMaskU8(MTL::Buffer* mask, uint32_t count) {
+    auto& store = ColumnStoreGPU::instance();
+    auto p = makePSO(store.device(), store.library(), "ops::flip_mask_u8");
+    if (!p) {
+        // CPU fallback
+        uint8_t* ptr = (uint8_t*)mask->contents();
+        for (uint32_t i = 0; i < count; ++i) ptr[i] = ptr[i] ? 0 : 1;
+        return;
+    }
+    auto cmd = store.queue()->commandBuffer();
+    auto enc = cmd->computeCommandEncoder();
+    enc->setComputePipelineState(p);
+    enc->setBuffer(mask, 0, 0);
+    enc->setBytes(&count, sizeof(count), 1);
+    dispatch1D(enc, count);
+    enc->endEncoding();
+    cmd->commit();
+    cmd->waitUntilCompleted();
+}
+
+FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
+                                                    uint32_t matchedCount,
+                                                    uint32_t totalRows) {
+    auto& store = ColumnStoreGPU::instance();
+
+    // Edge case: no matches → every row is unmatched
+    if (matchedCount == 0) {
+        auto idx = iotaU32(totalRows);
+        return {idx, totalRows};
+    }
+    if (totalRows == 0) {
+        return {store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared), 0};
+    }
+
+    auto p_scatter = makePSO(store.device(), store.library(), "ops::scatter_one_u8");
+    auto p_flip    = makePSO(store.device(), store.library(), "ops::flip_mask_u8");
+    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
+
+    // Create u8 mask, zero-initialized
+    auto mask = store.device()->newBuffer(totalRows * sizeof(uint8_t), MTL::ResourceStorageModeShared);
+    std::memset(mask->contents(), 0, totalRows * sizeof(uint8_t));
+
+    if (p_scatter && p_flip && p_compact) {
+        // GPU: scatter 1 at matched indices
+        {
+            auto cmd = store.queue()->commandBuffer();
+            auto enc = cmd->computeCommandEncoder();
+            enc->setComputePipelineState(p_scatter);
+            enc->setBuffer(matchedIndices, 0, 0);
+            enc->setBuffer(mask, 0, 1);
+            enc->setBytes(&matchedCount, sizeof(matchedCount), 2);
+            dispatch1D(enc, matchedCount);
+            enc->endEncoding();
+            cmd->commit();
+            cmd->waitUntilCompleted();
+        }
+        // GPU: flip mask (1→0 matched, 0→1 unmatched)
+        {
+            auto cmd = store.queue()->commandBuffer();
+            auto enc = cmd->computeCommandEncoder();
+            enc->setComputePipelineState(p_flip);
+            enc->setBuffer(mask, 0, 0);
+            enc->setBytes(&totalRows, sizeof(totalRows), 1);
+            dispatch1D(enc, totalRows);
+            enc->endEncoding();
+            cmd->commit();
+            cmd->waitUntilCompleted();
+        }
+        // GPU: compact
+        auto outIdx = store.device()->newBuffer(totalRows * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        *(uint32_t*)outCnt->contents() = 0;
+        {
+            auto cmd = store.queue()->commandBuffer();
+            auto enc = cmd->computeCommandEncoder();
+            enc->setComputePipelineState(p_compact);
+            enc->setBuffer(mask, 0, 0);
+            enc->setBuffer(outIdx, 0, 1);
+            enc->setBuffer(outCnt, 0, 2);
+            enc->setBytes(&totalRows, sizeof(totalRows), 3);
+            dispatch1D(enc, totalRows);
+            enc->endEncoding();
+            cmd->commit();
+            cmd->waitUntilCompleted();
+        }
+        mask->release();
+        uint32_t cnt = *(uint32_t*)outCnt->contents();
+        outCnt->release();
+        return {outIdx, cnt};
+    }
+
+    // CPU fallback
+    uint8_t* maskPtr = (uint8_t*)mask->contents();
+    uint32_t* matchPtr = (uint32_t*)matchedIndices->contents();
+    for (uint32_t i = 0; i < matchedCount; ++i) {
+        if (matchPtr[i] < totalRows) maskPtr[matchPtr[i]] = 1;
+    }
+    std::vector<uint32_t> result;
+    for (uint32_t i = 0; i < totalRows; ++i) {
+        if (!maskPtr[i]) result.push_back(i);
+    }
+    mask->release();
+    uint32_t cnt = (uint32_t)result.size();
+    auto outIdx = store.device()->newBuffer(
+        result.empty() ? sizeof(uint32_t) : result.size() * sizeof(uint32_t),
+        MTL::ResourceStorageModeShared);
+    if (!result.empty()) std::memcpy(outIdx->contents(), result.data(), result.size() * sizeof(uint32_t));
+    return {outIdx, cnt};
+}
+
 MTL::Buffer* GpuOps::arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
     auto& store = ColumnStoreGPU::instance();
     auto p = makePSO(store.device(), store.library(), "ops::arith_mul_f32_col_col");
@@ -3093,29 +2639,6 @@ MTL::Buffer* GpuOps::arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uin
     return out;
 }
 
-MTL::Buffer* GpuOps::arithMulF32ColColIndexed(MTL::Buffer* colA, MTL::Buffer* colB, MTL::Buffer* indices, uint32_t count) {
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "ops::arith_mul_f32_col_col_indexed");
-    if (!p) return nullptr;
-
-    auto out = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(float), MTL::ResourceStorageModeShared);
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(colA, 0, 0);
-        enc->setBuffer(colB, 0, 1);
-        enc->setBuffer(indices, 0, 2);
-        enc->setBuffer(out, 0, 3);
-        enc->setBytes(&count, sizeof(count), 4);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    return out;
-}
-
 MTL::Buffer* GpuOps::arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count) {
     auto& store = ColumnStoreGPU::instance();
     auto p = makePSO(store.device(), store.library(), "ops::arith_mul_f32_col_scalar");
@@ -3130,29 +2653,6 @@ MTL::Buffer* GpuOps::arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_
         enc->setBytes(&valB, sizeof(valB), 1);
         enc->setBuffer(out, 0, 2);
         enc->setBytes(&count, sizeof(count), 3);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    return out;
-}
-
-MTL::Buffer* GpuOps::arithMulF32ColScalarIndexed(MTL::Buffer* colA, float valB, MTL::Buffer* indices, uint32_t count) {
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "ops::arith_mul_f32_col_scalar_indexed");
-    if (!p) return nullptr;
-
-    auto out = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(float), MTL::ResourceStorageModeShared);
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBuffer(colA, 0, 0);
-        enc->setBytes(&valB, sizeof(valB), 1);
-        enc->setBuffer(indices, 0, 2);
-        enc->setBuffer(out, 0, 3);
-        enc->setBytes(&count, sizeof(count), 4);
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
@@ -3383,36 +2883,136 @@ float GpuOps::reduceMaxF32(MTL::Buffer* in, uint32_t count) {
     return res;
 }
 
-MTL::Buffer* GpuOps::extractYearFromDate(MTL::Buffer* dateCol, uint32_t count) {
+// ── M11: Extract YEAR from u32 date → u32 year ─────────────────────────
+MTL::Buffer* GpuOps::extractYearU32(MTL::Buffer* dateCol, uint32_t count) {
     if (count == 0) return nullptr;
     auto& store = ColumnStoreGPU::instance();
     auto dev = store.device();
     auto lib = store.library();
     if (!dev || !lib || !store.queue()) return nullptr;
-    
-    // Output is float because evalExprFloatGPU expects float buffers
-    MTL::Buffer* outBuf = dev->newBuffer(count * sizeof(float), MTL::ResourceStorageModeShared);
+
+    MTL::Buffer* outBuf = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     if (!outBuf) return nullptr;
-    
-    auto pso = makePSO(dev, lib, "extract_year_u32_to_f32");
+
+    auto pso = makePSO(dev, lib, "extract_year_u32_to_u32");
     if (!pso) { outBuf->release(); return nullptr; }
-    
+
     auto cmd = store.queue()->commandBuffer();
     auto enc = cmd->computeCommandEncoder();
     enc->setComputePipelineState(pso);
     enc->setBuffer(dateCol, 0, 0);
     enc->setBuffer(outBuf, 0, 1);
     enc->setBytes(&count, sizeof(count), 2);
-    
-    MTL::Size grp = MTL::Size::Make(256, 1, 1);
-    MTL::Size grd = MTL::Size::Make((count + 255) / 256, 1, 1);
-    
-    enc->dispatchThreadgroups(grd, grp);
+    dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
-    
+
     return outBuf;
+}
+
+// ── H4: GPU dedup by sorted keys ────────────────────────────────────────
+MTL::Buffer* GpuOps::dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count,
+                                  uint32_t& uniqueCount) {
+    uniqueCount = 0;
+    if (count == 0 || keys.empty()) return nullptr;
+    auto& store = ColumnStoreGPU::instance();
+    auto dev = store.device();
+    auto lib = store.library();
+    if (!dev || !lib || !store.queue()) return nullptr;
+
+    // Build sort key: single u32 or packed u64
+    bool useU64 = (keys.size() >= 2);
+    MTL::Buffer* sortKeys = nullptr;
+    bool ownSortKeys = false;
+
+    if (keys.size() == 1) {
+        // Copy key to avoid mutating original
+        sortKeys = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        std::memcpy(sortKeys->contents(), keys[0]->contents(), count * sizeof(uint32_t));
+        ownSortKeys = true;
+    } else if (keys.size() == 2) {
+        sortKeys = packU32ToU64(keys[0], keys[1], count);
+        ownSortKeys = true;
+    } else {
+        // 3+ keys: pack first two into u64, then fold remaining via hash
+        sortKeys = packU32ToU64(keys[0], keys[1], count);
+        ownSortKeys = true;
+        auto* ptr = (uint64_t*)sortKeys->contents();
+        for (size_t k = 2; k < keys.size(); ++k) {
+            auto* kp = (const uint32_t*)keys[k]->contents();
+            for (uint32_t i = 0; i < count; ++i) {
+                ptr[i] = ptr[i] * 0x9E3779B97F4A7C15ULL + kp[i];
+            }
+        }
+    }
+
+    // Create index array [0, 1, 2, ...]
+    MTL::Buffer* indices = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    {
+        auto* ip = (uint32_t*)indices->contents();
+        for (uint32_t i = 0; i < count; ++i) ip[i] = i;
+    }
+
+    // Radix sort
+    if (useU64) {
+        radixSortU64(sortKeys, indices, count);
+    } else {
+        radixSortU32(sortKeys, indices, count);
+    }
+
+    // Mark unique positions after sort
+    MTL::Buffer* mask = dev->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
+    const char* kernelName = useU64 ? "mark_unique_sorted_u64" : "mark_unique_sorted_u32";
+    auto pso = makePSO(dev, lib, kernelName);
+    if (!pso) {
+        if (ownSortKeys) sortKeys->release();
+        indices->release();
+        mask->release();
+        return nullptr;
+    }
+
+    {
+        auto cmd = store.queue()->commandBuffer();
+        auto enc = cmd->computeCommandEncoder();
+        enc->setComputePipelineState(pso);
+        enc->setBuffer(sortKeys, 0, 0);
+        enc->setBuffer(mask, 0, 1);
+        enc->setBytes(&count, sizeof(count), 2);
+        dispatch1D(enc, count);
+        enc->endEncoding();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+    }
+
+    if (ownSortKeys) { sortKeys->release(); sortKeys = nullptr; }
+
+    // Compact mask → positions where mask[i]==1
+    auto [maskIdx, uCount] = compactU32Mask(mask, count);
+    mask->release();
+
+    if (!maskIdx || uCount == 0) {
+        indices->release();
+        if (maskIdx) maskIdx->release();
+        return nullptr;
+    }
+
+    if (uCount == count) {
+        // All unique — no dedup needed
+        indices->release();
+        maskIdx->release();
+        uniqueCount = count;
+        return nullptr;
+    }
+
+    // Gather original indices at unique positions
+    MTL::Buffer* uniqueIdx = gatherU32(indices, maskIdx, uCount);
+
+    indices->release();
+    maskIdx->release();
+
+    uniqueCount = uCount;
+    return uniqueIdx;
 }
 
 MTL::Buffer* GpuOps::arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
@@ -3449,28 +3049,6 @@ MTL::Buffer* GpuOps::arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_
         enc->setComputePipelineState(p);
         enc->setBuffer(colA, 0, 0);
         enc->setBytes(&valB, sizeof(valB), 1);
-        enc->setBuffer(out, 0, 2);
-        enc->setBytes(&count, sizeof(count), 3);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    return out;
-}
-
-MTL::Buffer* GpuOps::arithAddF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count) {
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "arith_add_f32_scalar_col");
-    if (!p) return nullptr;
-
-    auto out = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(float), MTL::ResourceStorageModeShared);
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p);
-        enc->setBytes(&valA, sizeof(valA), 0);
-        enc->setBuffer(colB, 0, 1);
         enc->setBuffer(out, 0, 2);
         enc->setBytes(&count, sizeof(count), 3);
         dispatch1D(enc, count);
@@ -3556,66 +3134,6 @@ MTL::Buffer* GpuOps::mathFloorF32(MTL::Buffer* col, uint32_t count) {
         cmd->waitUntilCompleted();
     }
     return out;
-}
-
-// ============================================================================
-// GPU Bitonic Sort
-// ============================================================================
-
-void GpuOps::bitonicSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
-    if (count <= 1) return;
-    
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "ops::bitonic_sort_step_u32");
-    
-    uint32_t n = count;
-    for (uint32_t block = 2; block <= 2 * n; block <<= 1) {
-        for (uint32_t step = block >> 1; step >= 1; step >>= 1) {
-            auto cmd = store.queue()->commandBuffer();
-            auto enc = cmd->computeCommandEncoder();
-            enc->setComputePipelineState(p);
-            enc->setBuffer(keys, 0, 0);
-            enc->setBuffer(indices, 0, 1);
-            enc->setBytes(&n, sizeof(n), 2);
-            enc->setBytes(&block, sizeof(block), 3);
-            enc->setBytes(&step, sizeof(step), 4);
-            dispatch1D(enc, n);
-            enc->endEncoding();
-            cmd->commit();
-            cmd->waitUntilCompleted();
-        }
-    }
-    
-    KernelTimer::instance().record("ops::bitonic_sort_step_u32", "sort",
-                                   0, count);
-}
-
-void GpuOps::bitonicSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
-    if (count <= 1) return;
-    
-    auto& store = ColumnStoreGPU::instance();
-    auto p = makePSO(store.device(), store.library(), "ops::bitonic_sort_step_u64");
-    
-    uint32_t n = count;
-    for (uint32_t block = 2; block <= 2 * n; block <<= 1) {
-        for (uint32_t step = block >> 1; step >= 1; step >>= 1) {
-            auto cmd = store.queue()->commandBuffer();
-            auto enc = cmd->computeCommandEncoder();
-            enc->setComputePipelineState(p);
-            enc->setBuffer(keys, 0, 0);
-            enc->setBuffer(indices, 0, 1);
-            enc->setBytes(&n, sizeof(n), 2);
-            enc->setBytes(&block, sizeof(block), 3);
-            enc->setBytes(&step, sizeof(step), 4);
-            dispatch1D(enc, n);
-            enc->endEncoding();
-            cmd->commit();
-            cmd->waitUntilCompleted();
-        }
-    }
-    
-    KernelTimer::instance().record("ops::bitonic_sort_step_u64", "sort",
-                                   0, count);
 }
 
 // ============================================================================

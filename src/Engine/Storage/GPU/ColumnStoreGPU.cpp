@@ -2,7 +2,6 @@
 #include "ColumnStoreGPU.hpp"
 #include <Metal/Metal.hpp>
 #include <Foundation/Foundation.hpp>
-#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <sstream>

@@ -7,7 +7,6 @@
 #include <cctype>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
 
 using nlohmann::json;
 
@@ -388,22 +387,6 @@ TypedExprPtr Planner::parseExpression(const std::string& exprStr) {
         e->data = std::move(caseExpr);
         return e;
     }
-    
-    /* 
-    // AGGREGATE PARSING MOVED TO EXPLICIT NODES (GROUP_BY, AGGREGATE)
-    // We do NOT want to parse "max(x)" as an aggregate in a Filter/Project,
-    // because it might be a column name (from a subquery/join) or a scalar function.
-    
-    // Check for aggregate function
-    // Use [\s\S]* instead of .* to match across newlines in multiline expressions
-    static const std::regex aggRe(R"(^(sum|count|avg|min|max|count_star)\s*\(([\s\S]*)\)$)", std::regex::icase);
-    if (std::regex_match(s, m, aggRe)) {
-        AggFunc func = parseAggFunc(m[1].str());
-        std::string inner = trim_str(m[2].str());
-        TypedExprPtr arg = inner.empty() ? nullptr : parseExpression(inner);
-        return TypedExpr::aggregate(func, arg);
-    }
-    */
     
     // Check for "IS NOT DISTINCT FROM" - this is DuckDB's NULL-safe equality for semi/anti joins
     // Treat it as regular equality (=)
@@ -865,6 +848,97 @@ static std::string resolveColRef(const std::string& ref, const std::vector<std::
         pos++;
     }
     return expr;
+}
+
+// Parse the outermost SELECT column names (alias if present, else expression)
+static std::vector<std::string> parseSelectColumnNames(const std::string& sql) {
+    std::vector<std::string> cols;
+    std::string sl = tolower_str(sql);
+
+    // Find the first SELECT that is NOT preceded by '(' at the same depth
+    // i.e. the outermost SELECT
+    size_t selPos = std::string::npos;
+    for (size_t i = 0; i + 6 <= sl.size(); ++i) {
+        if (sl.compare(i, 6, "select") == 0) {
+            if (i == 0 || !std::isalnum(static_cast<unsigned char>(sl[i-1]))) {
+                // Check we're not inside parentheses
+                int d = 0;
+                for (size_t k = 0; k < i; ++k) {
+                    if (sl[k] == '(') d++;
+                    else if (sl[k] == ')') d--;
+                }
+                if (d == 0) { selPos = i; break; }
+            }
+        }
+    }
+    if (selPos == std::string::npos) return cols;
+
+    // Skip optional DISTINCT
+    size_t afterSelect = selPos + 6;
+    {
+        std::string rest = trim_str(sl.substr(afterSelect));
+        if (rest.compare(0, 8, "distinct") == 0 &&
+            (rest.size() == 8 || !std::isalnum(static_cast<unsigned char>(rest[8])))) {
+            afterSelect = sl.find("distinct", afterSelect) + 8;
+        }
+    }
+
+    // Find FROM at depth 0
+    int depth = 0;
+    size_t fromPos = std::string::npos;
+    for (size_t i = afterSelect; i + 4 <= sl.size(); ++i) {
+        char c = sl[i];
+        if (c == '(') depth++;
+        else if (c == ')') { depth--; if (depth < 0) break; }
+        if (depth == 0 && sl.compare(i, 4, "from") == 0 &&
+            (i == 0 || !std::isalnum(static_cast<unsigned char>(sl[i-1]))) &&
+            (i + 4 >= sl.size() || !std::isalnum(static_cast<unsigned char>(sl[i+4])))) {
+            fromPos = i;
+            break;
+        }
+    }
+    if (fromPos == std::string::npos) return cols;
+
+    // Extract column list using original SQL (preserve case)
+    std::string list = sql.substr(afterSelect, fromPos - afterSelect);
+    std::string listLower = tolower_str(list);
+
+    depth = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= list.size(); ++i) {
+        if (i == list.size() || (list[i] == ',' && depth == 0)) {
+            std::string item = trim_str(list.substr(start, i - start));
+            start = i + 1;
+            if (item.empty()) continue;
+
+            std::string itemLower = tolower_str(item);
+            // Check for " as " alias
+            size_t asPos = itemLower.rfind(" as ");
+            if (asPos != std::string::npos) {
+                std::string alias = trim_str(item.substr(asPos + 4));
+                alias = strip_parens(std::move(alias));
+                // Remove quotes
+                if (alias.size() >= 2 && (alias.front() == '"' || alias.front() == '\'') &&
+                    alias.back() == alias.front()) {
+                    alias = alias.substr(1, alias.size() - 2);
+                }
+                cols.push_back(tolower_str(alias));
+            } else {
+                // No alias — use the expression as-is (lowercased, stripped)
+                std::string name = trim_str(item);
+                // Remove whitespace for normalization
+                std::string norm;
+                for (char c : name) {
+                    if (!std::isspace(static_cast<unsigned char>(c))) norm += std::tolower(static_cast<unsigned char>(c));
+                }
+                cols.push_back(norm);
+            }
+            continue;
+        }
+        if (list[i] == '(') depth++;
+        else if (list[i] == ')') depth--;
+    }
+    return cols;
 }
 
 // Parse aggregate aliases from SQL SELECT clause
@@ -1565,20 +1639,48 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                     if (delimCondRaw.empty()) delimCondRaw = "1=1";
                     
                     // Determine correct join type for DELIM_JOIN patterns
-                    // LEFT_DELIM_JOIN = correlated lateral left join (keep all LHS, attach subquery RHS)
-                    // RIGHT_DELIM_JOIN / RIGHT_SEMI = EXISTS -> Semi join
-                    // ANTI variants = NOT EXISTS -> Anti join
+                    // Read the actual join type from the plan's extra_info if available
                     JoinType delimJoinType = JoinType::Semi; // Default to Semi for EXISTS
-                    if (nameLower.find("left_delim") != std::string::npos) {
-                        delimJoinType = JoinType::Left;
-                    } else if (nameLower.find("anti") != std::string::npos ||
-                               nameLower.find("not_exists") != std::string::npos) {
-                        delimJoinType = JoinType::Anti;
+                    if (node.contains("extra_info") && node["extra_info"].is_object()) {
+                        auto& ei = node["extra_info"];
+                        if (ei.contains("Join Type") && ei["Join Type"].is_string()) {
+                            std::string jtStr = ei["Join Type"].get_string();
+                            // Convert to lowercase for matching
+                            std::string jtLower = jtStr;
+                            std::transform(jtLower.begin(), jtLower.end(), jtLower.begin(), ::tolower);
+                            if (jtLower.find("anti") != std::string::npos) {
+                                delimJoinType = JoinType::Anti;
+                            } else if (jtLower.find("semi") != std::string::npos) {
+                                delimJoinType = JoinType::Semi;
+                            } else if (jtLower.find("mark") != std::string::npos) {
+                                delimJoinType = JoinType::Semi; // Mark join acts like Semi for EXISTS
+                            } else if (jtLower.find("left") != std::string::npos) {
+                                delimJoinType = JoinType::Left;
+                            } else if (jtLower.find("inner") != std::string::npos || 
+                                       jtLower == "single") {
+                                delimJoinType = JoinType::Inner;
+                            }
+                            debug_log("DELIM_JOIN read Join Type from plan: '" + jtStr + "'");
+                        }
+                    }
+                    // Fallback: derive from node name if extra_info didn't have Join Type
+                    if (delimJoinType == JoinType::Semi) {
+                        if (nameLower.find("anti") != std::string::npos ||
+                            nameLower.find("not_exists") != std::string::npos) {
+                            delimJoinType = JoinType::Anti;
+                        }
                     }
                     debug_log("DELIM_JOIN emitting join type: " + std::to_string(static_cast<int>(delimJoinType)) + 
                               " (0=Inner, 1=Left, 4=Semi, 5=Anti)");
                     
-                    ctx.plan.nodes.push_back(IRNode::join(delimJoinType, Planner::parseExpression(delimCondRaw), delimCondRaw, rhsSaveID, nullptr));
+                    // The DELIM_JOIN's own join is a CORRELATION join that filters
+                    // the LHS based on the consumer's result. For Anti/Semi types,
+                    // the consumer (HASH_JOIN) already performed the check, so use Semi
+                    // to just filter. For Inner/Left/Single types, use Inner to keep
+                    // all matched rows (not just unique keys).
+                    JoinType correlationJoinType = (delimJoinType == JoinType::Anti || delimJoinType == JoinType::Semi)
+                                                  ? JoinType::Semi : JoinType::Inner;
+                    ctx.plan.nodes.push_back(IRNode::join(correlationJoinType, Planner::parseExpression(delimCondRaw), delimCondRaw, rhsSaveID, nullptr));
                     
                     handled = true;
                 } else {
@@ -2460,11 +2562,6 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                 aggNode.asAggregate().alias = aggStr; // Set alias to full aggregate string to match projection expectations
                 aggNode.asAggregate().exprStr = exprStr;
                 aggNode.asAggregate().aggIndex = aggIdx;  // Track which aggregate this is
-                aggNode.asAggregate().hasArithmeticExpr = 
-                    exprStr.find('*') != std::string::npos ||
-                    exprStr.find('/') != std::string::npos ||
-                    exprStr.find('+') != std::string::npos ||
-                    exprStr.find('-') != std::string::npos;
                 
                 bufferedAggs.push_back(std::move(aggNode));
             }
@@ -2699,7 +2796,7 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                 
                 ob.columns.push_back(s);
                 ob.ascending.push_back(asc);
-                ob.specs.push_back({TypedExpr::column(s), asc, false});
+                ob.specs.push_back({TypedExpr::column(s), asc});
             };
             
             if (obSpec.is_array()) {
@@ -2729,6 +2826,7 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
     // ========== JOIN ==========
     else if (name.find("JOIN") != std::string::npos) {
         JoinType jtype = JoinType::Inner;
+        bool isRightVariant = false;
         if (nameLower.find("left") != std::string::npos) jtype = JoinType::Left;
         else if (nameLower.find("right") != std::string::npos) jtype = JoinType::Right;
         else if (nameLower.find("full") != std::string::npos) jtype = JoinType::Full;
@@ -2747,6 +2845,7 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                 else if (jtStr == "semi" || jtStr == "right_semi") jtype = JoinType::Semi;
                 else if (jtStr == "anti" || jtStr == "right_anti") jtype = JoinType::Anti;
                 else if (jtStr == "mark") jtype = JoinType::Mark;
+                isRightVariant = (jtStr.find("right_") == 0);
             }
             if (extraInfo.contains("Conditions")) {
                 if (extraInfo["Conditions"].is_string()) {
@@ -2843,6 +2942,7 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
         
         // Pass captured RHS info (if any)
         IRNode joinNode = IRNode::join(jtype, Planner::parseExpression(condStr), condStr, capturedRightTable, capturedRightFilter);
+        joinNode.asJoin().rightVariant = isRightVariant;
         
         // Extract Keys
         auto& join = joinNode.asJoin();
@@ -3018,7 +3118,6 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
 
 Plan Planner::fromSQL(const std::string& sql) {
     Plan plan;
-    plan.originalSQL = sql;
     
     // Get DuckDB EXPLAIN JSON
     std::string raw = DuckDBAdapter::explainJSON(sql);
@@ -3065,7 +3164,10 @@ Plan Planner::fromSQL(const std::string& sql) {
         collectGlobalColumns(j[0], ctx.forceKeepColumns);
         traverseNode(j[0], ctx);
         
-        plan.parsedFromJSON = true;
+        // Save final output column names parsed from SQL SELECT clause
+        plan.outputColumns = parseSelectColumnNames(sql);
+        debug_log("plan.outputColumns from SQL:");
+        for (const auto& c : plan.outputColumns) debug_log("  '" + c + "'");
         
         // Recover LIMIT from SQL if not in plan
         bool hasLimit = false;
@@ -3085,154 +3187,6 @@ Plan Planner::fromSQL(const std::string& sql) {
     }
     
     return plan;
-}
-
-// --- GPU feasibility check ---
-
-Planner::Feasibility Planner::checkGPUFeasibility(const Plan& plan) {
-    Feasibility f;
-    f.canExecuteGPU = true;
-    
-    if (!plan.isValid()) {
-        f.canExecuteGPU = false;
-        f.blockers.push_back("Invalid plan: " + plan.parseError);
-        return f;
-    }
-    
-    size_t scanCount = 0;
-    size_t joinCount = 0;
-    
-    for (const auto& node : plan.nodes) {
-        switch (node.type) {
-            case IRNode::Type::Scan:
-                scanCount++;
-                break;
-                
-            case IRNode::Type::Join: {
-                joinCount++;
-                const auto& j = node.asJoin();
-                if (j.type != JoinType::Inner) {
-                    f.blockers.push_back(std::string("Unsupported join type: ") + joinTypeName(j.type));
-                }
-                break;
-            }
-            
-            case IRNode::Type::GroupBy: {
-                const auto& gb = node.asGroupBy();
-                // V2 executor uses CPU hash-based GroupBy which supports more keys
-                if (gb.keys.size() > 8) {
-                    f.blockers.push_back("GROUP BY with more than 8 keys: " + std::to_string(gb.keys.size()));
-                }
-                // Check for unsupported aggregate functions
-                for (const auto& spec : gb.aggSpecs) {
-                    if (spec.func != AggFunc::Sum && spec.func != AggFunc::Count && 
-                        spec.func != AggFunc::CountStar && spec.func != AggFunc::Avg) {
-                        f.blockers.push_back(std::string("Unsupported aggregate: ") + aggFuncName(spec.func));
-                    }
-                }
-                break;
-            }
-            
-            case IRNode::Type::Aggregate:
-                // Scalar aggregates are supported
-                break;
-                
-            case IRNode::Type::Filter:
-                // Filters are generally supported
-                break;
-                
-            case IRNode::Type::OrderBy:
-            case IRNode::Type::Limit:
-            case IRNode::Type::Project:
-            case IRNode::Type::Save:
-                // These are supported
-                break;
-                
-            case IRNode::Type::Distinct:
-                f.blockers.push_back("DISTINCT not yet supported");
-                break;
-                
-            case IRNode::Type::Union:
-                f.blockers.push_back("UNION not yet supported");
-                break;
-        }
-    }
-    
-    // Check for multi-way joins
-    if (joinCount > 2) {
-        f.blockers.push_back("Multi-way join (>2 joins): " + std::to_string(joinCount));
-    }
-    
-    f.canExecuteGPU = f.blockers.empty();
-    return f;
-}
-
-// --- Extract needed columns ---
-
-std::vector<std::pair<std::string, std::vector<std::string>>> 
-Planner::extractNeededColumns(const Plan& plan) {
-    std::vector<std::pair<std::string, std::vector<std::string>>> result;
-    
-    // Collect columns from all scans
-    std::unordered_map<std::string, std::unordered_set<std::string>> tableColumns;
-    
-    for (const auto& node : plan.nodes) {
-        if (node.type == IRNode::Type::Scan) {
-            const auto& scan = node.asScan();
-            for (const auto& col : scan.columns) {
-                tableColumns[scan.table].insert(col);
-            }
-        }
-    }
-    
-    // Also collect columns from expressions in filters, aggregates, etc.
-    for (const auto& node : plan.nodes) {
-        std::vector<ColumnRef> refs;
-        
-        switch (node.type) {
-            case IRNode::Type::Filter:
-                collectColumns(node.asFilter().predicate, refs);
-                break;
-            case IRNode::Type::GroupBy:
-                for (const auto& key : node.asGroupBy().keys) collectColumns(key, refs);
-                for (const auto& agg : node.asGroupBy().aggregates) collectColumns(agg, refs);
-                break;
-            case IRNode::Type::Aggregate:
-                collectColumns(node.asAggregate().expr, refs);
-                break;
-            case IRNode::Type::OrderBy:
-                for (const auto& spec : node.asOrderBy().specs) collectColumns(spec.expr, refs);
-                break;
-            case IRNode::Type::Project:
-                for (const auto& expr : node.asProject().exprs) collectColumns(expr, refs);
-                break;
-            default:
-                break;
-        }
-        
-        // Add columns to their tables
-        for (const auto& ref : refs) {
-            if (!ref.table.empty()) {
-                tableColumns[ref.table].insert(ref.column);
-            } else {
-                // Try to infer table from column prefix
-                std::string col = ref.column;
-                if (col.rfind("l_", 0) == 0) tableColumns["lineitem"].insert(col);
-                else if (col.rfind("o_", 0) == 0) tableColumns["orders"].insert(col);
-                else if (col.rfind("c_", 0) == 0) tableColumns["customer"].insert(col);
-                else if (col.rfind("p_", 0) == 0) tableColumns["part"].insert(col);
-                else if (col.rfind("s_", 0) == 0) tableColumns["supplier"].insert(col);
-                else if (col.rfind("n_", 0) == 0) tableColumns["nation"].insert(col);
-                else if (col.rfind("r_", 0) == 0) tableColumns["region"].insert(col);
-            }
-        }
-    }
-    
-    for (const auto& [table, cols] : tableColumns) {
-        result.push_back({table, std::vector<std::string>(cols.begin(), cols.end())});
-    }
-    
-    return result;
 }
 
 } // namespace engine

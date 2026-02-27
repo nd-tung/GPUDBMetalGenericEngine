@@ -3,26 +3,6 @@ using namespace metal;
 
 namespace ops {
 
-struct ColumnViewUInt32 {
-    device const uint32_t* data;
-    uint32_t count;
-};
-
-struct ColumnViewFloat {
-    device const float* data;
-    uint32_t count;
-};
-
-struct ColumnOutUInt32 {
-    device uint32_t* data;
-    uint32_t count;
-};
-
-struct RowMask {
-    device uint8_t* mask; // 0/1 per row
-    uint32_t count;
-};
-
 // ============================================================================
 // HASH JOIN KERNELS (Linear Probing)
 // ============================================================================
@@ -357,24 +337,6 @@ kernel void filter_ge_f32_indexed(const device float* in [[buffer(0)]],
     out_mask[gid] = (in[idx] >= ge_value) ? 1 : 0;
 }
 
-kernel void u32mask_to_u8(const device uint* in_mask [[buffer(0)]],
-                          device uint8_t* out_mask [[buffer(1)]],
-                          constant uint& row_count [[buffer(2)]],
-                          uint gid [[thread_position_in_grid]]) {
-    if (gid >= row_count) return;
-    out_mask[gid] = in_mask[gid] ? 1 : 0;
-}
-
-kernel void project_select_u32(const device uint32_t* in,
-                               const device uint8_t* mask,
-                               device uint32_t* out,
-                               uint gid [[thread_position_in_grid]],
-                               uint grid_size [[threads_per_grid]]) {
-    if (gid >= grid_size) return;
-    // Pass-through respecting mask (non-matching entries zeroed)
-    out[gid] = mask[gid] ? in[gid] : 0u;
-}
-
 kernel void compact_indices(const device uint8_t* mask [[buffer(0)]],
                             device uint32_t* out_indices [[buffer(1)]],
                             device atomic_uint* out_count [[buffer(2)]],
@@ -445,45 +407,6 @@ kernel void compute_charge_ep_disc_tax(device const float* extendedprice [[buffe
                                        uint gid [[thread_position_in_grid]]) {
     if (gid >= row_count) return;
     charge[gid] = extendedprice[gid] * (1.0f - discount[gid]) * (1.0f + tax[gid]);
-}
-
-kernel void gather_col_int32(const device int* in_col [[buffer(0)]],
-                             const device uint32_t* indices [[buffer(1)]],
-                             device int* out_col [[buffer(2)]],
-                             constant uint& count [[buffer(3)]],
-                             uint gid [[thread_position_in_grid]]) {
-    if (gid >= count) return;
-    out_col[gid] = in_col[indices[gid]];
-}
-
-kernel void hash_build_u32(const device uint32_t* keys,
-                           const device uint32_t* payloads,
-                           device uint32_t* ht_keys,
-                           device uint32_t* ht_vals,
-                           constant uint32_t& capacity,
-                           uint gid [[thread_position_in_grid]],
-                           uint grid_size [[threads_per_grid]]) {
-    if (gid >= grid_size) return;
-    // Direct modulo placement, no collision handling
-    uint32_t k = keys[gid];
-    uint32_t v = payloads[gid];
-    uint32_t slot = k % capacity;
-    ht_keys[slot] = k;
-    ht_vals[slot] = v;
-}
-
-kernel void hash_probe_u32(const device uint32_t* probe_keys,
-                           const device uint32_t* ht_keys,
-                           const device uint32_t* ht_vals,
-                           device uint32_t* out_payload,
-                           constant uint32_t& capacity,
-                           uint gid [[thread_position_in_grid]],
-                           uint grid_size [[threads_per_grid]]) {
-    if (gid >= grid_size) return;
-    // Single-slot probe
-    uint32_t k = probe_keys[gid];
-    uint32_t slot = k % capacity;
-    out_payload[gid] = (ht_keys[slot] == k) ? ht_vals[slot] : 0u;
 }
 
 struct GroupByBucketF32 {
@@ -2939,6 +2862,93 @@ kernel void radix_scatter_u64(
     }
 }
 
+// ─── Utility Kernels ──────────────────────────────────────────────
+
+// Add a scalar constant to every element: out[i] = in[i] + add
+kernel void copy_add_u32(
+    const device uint32_t* in  [[buffer(0)]],
+    device uint32_t*       out [[buffer(1)]],
+    constant uint32_t&     add [[buffer(2)]],
+    constant uint32_t&     count [[buffer(3)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    out[gid] = in[gid] + add;
+}
+
+// Bitcast f32 -> u32 (IEEE 754 reinterpretation)
+kernel void bitcast_f32_to_u32(
+    const device float*    in  [[buffer(0)]],
+    device uint32_t*       out [[buffer(1)]],
+    constant uint32_t&     count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    out[gid] = as_type<uint32_t>(in[gid]);
+}
+
+// Bitcast u32 -> f32 (IEEE 754 reinterpretation)
+kernel void bitcast_u32_to_f32(
+    const device uint32_t* in  [[buffer(0)]],
+    device float*          out [[buffer(1)]],
+    constant uint32_t&     count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    out[gid] = as_type<float>(in[gid]);
+}
+
+// Flip u8 mask in-place: 0->1, nonzero->0
+kernel void flip_mask_u8(
+    device uint8_t*     mask  [[buffer(0)]],
+    constant uint32_t&  count [[buffer(1)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    mask[gid] = mask[gid] ? 0 : 1;
+}
+
+// Scatter 1 into a u8 bitmask at the given indices (for unmatched detection)
+kernel void scatter_one_u8(
+    const device uint32_t* indices [[buffer(0)]],
+    device uint8_t*        mask    [[buffer(1)]],
+    constant uint32_t&     count   [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    mask[indices[gid]] = 1;
+}
+
+// IEEE 754 float-to-sortable-u32 transform for ORDER BY
+// Negative: flip all bits. Positive: flip sign bit.
+// With DESC: additionally invert the result.
+kernel void float_to_sort_key_u32(
+    const device float*    in    [[buffer(0)]],
+    device uint32_t*       out   [[buffer(1)]],
+    constant uint32_t&     count [[buffer(2)]],
+    constant uint32_t&     desc  [[buffer(3)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    uint32_t bits = as_type<uint32_t>(in[gid]);
+    if (bits & 0x80000000u)
+        bits = ~bits;
+    else
+        bits ^= 0x80000000u;
+    out[gid] = desc ? ~bits : bits;
+}
+
+// Invert u32 sort key for DESC ordering: out[i] = ~in[i]
+kernel void invert_u32(
+    const device uint32_t* in    [[buffer(0)]],
+    device uint32_t*       out   [[buffer(1)]],
+    constant uint32_t&     count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    out[gid] = ~in[gid];
+}
+
 // ── GroupBy Hash Table Stream Compaction ───────────────────────────
 
 // Step 1 (Mark): Write 1 if slot is valid (key[0] != 0), else 0.
@@ -2976,6 +2986,45 @@ kernel void ht_extract_compact(
     for (uint a = 0; a < numAggs; ++a) {
         out_aggs[dest * numAggs + a] = ht_aggs[gid * 16 + a];
     }
+}
+
+// ── M11: Extract YEAR from YYYYMMDD u32 → u32 ──────────────────────────
+kernel void extract_year_u32_to_u32(
+    const device uint32_t* in  [[buffer(0)]],
+    device uint32_t*       out [[buffer(1)]],
+    constant uint32_t&     count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    uint32_t val = in[gid];
+    if (val > 19000000) {
+        out[gid] = val / 10000;
+    } else {
+        out[gid] = 1970 + uint32_t(float(val) / 365.25f);
+    }
+}
+
+// ── H4: Mark first unique element after sorted keys ─────────────────────
+kernel void mark_unique_sorted_u32(
+    const device uint32_t* sortedKeys [[buffer(0)]],
+    device uint8_t*        mask       [[buffer(1)]],
+    constant uint32_t&     count      [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    if (gid == 0) { mask[gid] = 1; return; }
+    mask[gid] = (sortedKeys[gid] != sortedKeys[gid - 1]) ? 1 : 0;
+}
+
+kernel void mark_unique_sorted_u64(
+    const device uint64_t* sortedKeys [[buffer(0)]],
+    device uint8_t*        mask       [[buffer(1)]],
+    constant uint32_t&     count      [[buffer(2)]],
+    uint gid [[thread_position_in_grid]])
+{
+    if (gid >= count) return;
+    if (gid == 0) { mask[gid] = 1; return; }
+    mask[gid] = (sortedKeys[gid] != sortedKeys[gid - 1]) ? 1 : 0;
 }
 
 }

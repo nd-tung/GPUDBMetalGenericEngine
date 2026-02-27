@@ -9,6 +9,34 @@
 
 namespace engine {
 
+// Normalize a column name for fuzzy comparison:
+// 1. Lowercase  2. Strip whitespace (incl \n\r\t) and parentheses  3. Normalize decimal literals (0.0000 -> 0)
+static std::string normalizeFuzzy(const std::string& input) {
+    std::string result;
+    result.reserve(input.size());
+    for (size_t i = 0; i < input.size(); ) {
+        char c = std::tolower(input[i]);
+        if (std::isspace(static_cast<unsigned char>(c)) || c == '(' || c == ')') { i++; continue; }
+        if (std::isdigit(c)) {
+            // Consume integer part
+            size_t numStart = result.size();
+            while (i < input.size() && std::isdigit(input[i])) { result += std::tolower(input[i]); i++; }
+            // Check for decimal part
+            if (i < input.size() && input[i] == '.' && i + 1 < input.size() && std::isdigit(input[i + 1])) {
+                result += '.'; i++; // skip '.'
+                while (i < input.size() && std::isdigit(input[i])) { result += std::tolower(input[i]); i++; }
+                // Strip trailing zeros after decimal point
+                while (result.size() > numStart + 1 && result.back() == '0') result.pop_back();
+                // Strip trailing decimal point
+                if (result.back() == '.') result.pop_back();
+            }
+        } else {
+            result += c; i++;
+        }
+    }
+    return result;
+}
+
 // ============================================================================
 // Operator Implementations
 // ============================================================================
@@ -222,11 +250,18 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                           std::cerr << "[Exec] Found string col " << colName << " size " << vec->size() << " pattern '" << pat << "'" << std::endl;
                       }
                       
+                      // Check for pre-flattened Arrow-style buffers
+                      MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+                      auto fit = ctx.flatStringCols.find(colName);
+                      if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
+                          fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+                      }
+
                       std::optional<FilterResult> res;
                       if (fn.name == "PREFIX") {
-                          res = GpuOps::filterStringPrefix(colName, *vec, pat, false);
+                          res = GpuOps::filterStringPrefix(colName, *vec, pat, false, fChars, fOff, fLen);
                       } else {
-                          res = GpuOps::filterString(colName, *vec, op, pat);
+                          res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
                       }
                       
                       if (res) {
@@ -516,8 +551,15 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                           std::cerr << "[Exec] Found string col " << colName << " size " << vec->size() << " pattern '" << pat << "'" << std::endl;
                       }
                       
+                      // Check for pre-flattened Arrow-style buffers
+                      MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+                      auto fit = ctx.flatStringCols.find(colName);
+                      if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
+                          fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+                      }
+
                       engine::expr::CompOp op = (cmp.op == engine::CompareOp::Like) ? (engine::expr::CompOp)999 : engine::expr::CompOp::EQ;
-                      auto res = GpuOps::filterString(colName, *vec, op, pat);
+                      auto res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
                       
                       if (res) {
                           if (ctx.activeRowsGPU) {
@@ -969,7 +1011,13 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              if (std::holds_alternative<std::string>(litExpr->asLiteral().value)) {
                   pat = std::get<std::string>(litExpr->asLiteral().value);
              }
-             auto res = GpuOps::filterString(colName, *strVec, op, pat);
+             // Check for pre-flattened Arrow-style buffers
+             MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+             auto fit = ctx.flatStringCols.find(colName);
+             if (fit != ctx.flatStringCols.end() && fit->second.rowCount == strVec->size()) {
+                 fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+             }
+             auto res = GpuOps::filterString(colName, *strVec, op, pat, fChars, fOff, fLen);
              if (res) {
                   if (ctx.activeRowsGPU) {
                       auto joinRes = GpuOps::joinHash(
@@ -1298,7 +1346,13 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                  if (vec) {
                       // Apply NOT LIKE prefix
                       // prefix matching: Like 'pat%'
-                      std::optional<FilterResult> res = GpuOps::filterStringPrefix(c, *vec, pat, true);
+                      // Check for pre-flattened Arrow-style buffers
+                      MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+                      auto fit = ctx.flatStringCols.find(c);
+                      if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
+                          fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+                      }
+                      std::optional<FilterResult> res = GpuOps::filterStringPrefix(c, *vec, pat, true, fChars, fOff, fLen);
                       
                       if (res) {
                           if (ctx.activeRowsGPU) {
@@ -1373,7 +1427,13 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                  }
 
                  if (vec) {
-                      auto res = GpuOps::filterString(colName, *vec, engine::expr::CompOp::EQ, pat);
+                      // Check for pre-flattened Arrow-style buffers
+                      MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+                      auto fit = ctx.flatStringCols.find(colName);
+                      if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
+                          fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+                      }
+                      auto res = GpuOps::filterString(colName, *vec, engine::expr::CompOp::EQ, pat, fChars, fOff, fLen);
                       if (res) {
                           if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
                           ctx.activeRowsGPU = res->indices;
@@ -1392,19 +1452,9 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
 // Expression Evaluation
 // ============================================================================
 
-// CPU fallback stubs (disabled)
-std::vector<float> GpuExecutor::evalExprFloat(const TypedExprPtr&, const EvalContext&) {
-    throw std::runtime_error("CPU evalExprFloat called. CPU fallback is strictly disabled.");
-    return {};
-}
-
+// CPU fallback stub (disabled)
 std::vector<uint32_t> GpuExecutor::evalExprU32(const TypedExprPtr&, const EvalContext&) {
     throw std::runtime_error("CPU evalExprU32 called. CPU fallback is strictly disabled.");
-    return {};
-}
-
-std::vector<bool> GpuExecutor::evalPredicate(const TypedExprPtr&, const EvalContext&) {
-    throw std::runtime_error("CPU evalPredicate called. CPU fallback is strictly disabled.");
     return {};
 }
 MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext& ctx) {
@@ -1533,21 +1583,16 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
         // Fallback: Heuristic for Scalar Aggregates mismatch (sum(...) vs #0)
         // First try fuzzy matching by removing spaces and lowercasing
         if (!buf) {
-            std::string colLower = col;
-            std::transform(colLower.begin(), colLower.end(), colLower.begin(), ::tolower);
-            // Remove spaces for fuzzy compare
-            colLower.erase(std::remove_if(colLower.begin(), colLower.end(), ::isspace), colLower.end());
+            std::string colLower = normalizeFuzzy(col);
             
             if (env_truthy("GPUDB_DEBUG_OPS") && col.find("sum") != std::string::npos) {
-                std::cerr << "[Exec] evalExprFloatGPU: fuzzy search for col='" << col << "' length=" << col.length() << " normalized length=" << colLower.length() << "\n";
+                std::cerr << "[Exec] evalExprFloatGPU: fuzzy search for col='" << col << "' normalized='" << colLower << "'\n";
             }
             
             // Search for matching column in f32ColsGPU
             for (const auto& [name, b] : ctx.f32ColsGPU) {
                 if (!b) continue;
-                std::string nameLower = name;
-                std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
-                nameLower.erase(std::remove_if(nameLower.begin(), nameLower.end(), ::isspace), nameLower.end());
+                std::string nameLower = normalizeFuzzy(name);
                 
                 if (colLower == nameLower) {
                     if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evalExprFloatGPU: fuzzy matched '" << col << "' to '" << name << "'\n";
@@ -1559,9 +1604,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
             if (!buf) {
                 for (const auto& [name, b] : ctx.u32ColsGPU) {
                     if (!b) continue;
-                    std::string nameLower = name;
-                    std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
-                    nameLower.erase(std::remove_if(nameLower.begin(), nameLower.end(), ::isspace), nameLower.end());
+                    std::string nameLower = normalizeFuzzy(name);
                     if (colLower == nameLower) {
                         if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evalExprFloatGPU: fuzzy matched (u32) '" << col << "' to '" << name << "'\n";
                         buf = b;
@@ -2172,86 +2215,4 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
     return nullptr;
 }
 
-MTL::Buffer* GpuExecutor::evalExprU32GPU(const TypedExprPtr& expr, EvalContext& ctx) {
-
-    if (!expr) return nullptr;
-    const bool debug = env_truthy("GPUDB_DEBUG_OPS");
-    uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
-    if (count == 0 && ctx.rowCount > 0 && !ctx.activeRowsGPU) count = ctx.rowCount;
-    if (count == 0) return nullptr;
-
-    if (expr->kind == TypedExpr::Kind::Column) {
-        std::string col = expr->asColumn().column;
-        
-        MTL::Buffer* buf = nullptr;
-        if (ctx.u32ColsGPU.count(col)) {
-            buf = ctx.u32ColsGPU[col];
-        } else if (ctx.u32Cols.count(col) && !ctx.u32Cols[col].empty()) {
-            const auto& vec = ctx.u32Cols[col];
-            if (vec.size() >= count) { // Full column
-                MTL::Buffer* outBuf = GpuOps::createBuffer(nullptr, count * sizeof(uint32_t));
-                memcpy(outBuf->contents(), vec.data(), count * sizeof(uint32_t));
-                // Return gathered/copied buffer directly
-                if (ctx.activeRowsGPU) {
-                     MTL::Buffer* tmp = GpuOps::createBuffer(nullptr, count * sizeof(uint32_t)); 
-                     memcpy(tmp->contents(), vec.data(), count * sizeof(uint32_t));
-                     // Gather
-                     MTL::Buffer* gathered = GpuOps::gatherU32(tmp, ctx.activeRowsGPU, count);
-                     tmp->release();
-                     return gathered;
-                } else {
-                     MTL::Buffer* outBuf = GpuOps::createBuffer(nullptr, count * sizeof(uint32_t)); 
-                     memcpy(outBuf->contents(), vec.data(), count * sizeof(uint32_t));
-                     return outBuf;
-                }
-            } else {
-                // Scalar broadcast
-                uint32_t val = vec[0];
-                MTL::Buffer* outBuf = GpuOps::createBuffer(nullptr, count * sizeof(uint32_t));
-                uint32_t* ptr = (uint32_t*)outBuf->contents();
-                std::fill(ptr, ptr + count, val);
-                return outBuf;
-            }
-        } else {
-            // Suffix search
-            for(int i=1; i<=9; ++i) {
-                std::string s = col + "_" + std::to_string(i);
-                if (ctx.u32ColsGPU.count(s)) { buf = ctx.u32ColsGPU[s]; break; }
-            }
-            // RHS Suffix search
-            if (!buf) {
-                 std::string rhsPattern = col + "_rhs_";
-                 for (const auto& [name, b] : ctx.u32ColsGPU) {
-                     if (name.find(rhsPattern) == 0) { buf = b; break; }
-                 }
-            }
-        }
-        
-        if (buf) {
-            if (ctx.activeRowsGPU) {
-                return GpuOps::gatherU32(buf, ctx.activeRowsGPU, count);
-            } else {
-                buf->retain(); // Caller takes ownership
-                return buf;
-            }
-        }
-    }
-    
-    // Literal
-    if (expr->kind == TypedExpr::Kind::Literal) {
-        uint32_t val = 0;
-        const auto& lit = expr->asLiteral();
-        if (std::holds_alternative<int64_t>(lit.value)) val = (uint32_t)std::get<int64_t>(lit.value);
-        else if (std::holds_alternative<std::string>(lit.value)) val = GpuOps::fnv1a32(std::get<std::string>(lit.value));
-        else if (std::holds_alternative<double>(lit.value)) val = (uint32_t)std::get<double>(lit.value);
-
-        MTL::Buffer* outBuf = GpuOps::createBuffer(nullptr, count * sizeof(uint32_t));
-        uint32_t* ptr = (uint32_t*)outBuf->contents();
-        std::fill(ptr, ptr + count, val);
-        return outBuf;
-    }
-    
-    if (debug) std::cerr << "[Exec] evalExprU32GPU not implemented for this kind: " << (int)expr->kind << "\n";
-    return nullptr;
-}
 } // namespace engine

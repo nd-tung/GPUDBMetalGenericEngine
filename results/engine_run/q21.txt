@@ -1,0 +1,127 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+numwait|s_name|
+20.00|Supplier#000002829|
+18.00|Supplier#000005808|
+17.00|Supplier#000000262|
+17.00|Supplier#000000496|
+17.00|Supplier#000002160|
+17.00|Supplier#000002301|
+17.00|Supplier#000002540|
+17.00|Supplier#000003063|
+17.00|Supplier#000005178|
+17.00|Supplier#000008331|
+16.00|Supplier#000002005|
+16.00|Supplier#000002095|
+16.00|Supplier#000005799|
+16.00|Supplier#000005842|
+16.00|Supplier#000006450|
+16.00|Supplier#000006939|
+16.00|Supplier#000009200|
+16.00|Supplier#000009727|
+15.00|Supplier#000000486|
+15.00|Supplier#000000565|
+15.00|Supplier#000001046|
+15.00|Supplier#000001047|
+15.00|Supplier#000001161|
+15.00|Supplier#000001336|
+15.00|Supplier#000001435|
+15.00|Supplier#000003075|
+15.00|Supplier#000003335|
+15.00|Supplier#000005649|
+15.00|Supplier#000006027|
+15.00|Supplier#000006795|
+15.00|Supplier#000006800|
+15.00|Supplier#000006824|
+15.00|Supplier#000007131|
+15.00|Supplier#000007382|
+15.00|Supplier#000008913|
+15.00|Supplier#000009787|
+14.00|Supplier#000000633|
+14.00|Supplier#000001960|
+14.00|Supplier#000002323|
+14.00|Supplier#000002490|
+14.00|Supplier#000002993|
+14.00|Supplier#000003101|
+14.00|Supplier#000004489|
+14.00|Supplier#000005435|
+14.00|Supplier#000005583|
+14.00|Supplier#000005774|
+14.00|Supplier#000007579|
+14.00|Supplier#000008180|
+14.00|Supplier#000008695|
+14.00|Supplier#000009224|
+13.00|Supplier#000000357|
+13.00|Supplier#000000436|
+13.00|Supplier#000000610|
+13.00|Supplier#000000788|
+13.00|Supplier#000000889|
+13.00|Supplier#000001062|
+13.00|Supplier#000001498|
+13.00|Supplier#000002056|
+13.00|Supplier#000002312|
+13.00|Supplier#000002344|
+13.00|Supplier#000002596|
+13.00|Supplier#000002615|
+13.00|Supplier#000002978|
+13.00|Supplier#000003048|
+13.00|Supplier#000003234|
+13.00|Supplier#000003727|
+13.00|Supplier#000003806|
+13.00|Supplier#000004472|
+13.00|Supplier#000005236|
+13.00|Supplier#000005906|
+13.00|Supplier#000006241|
+13.00|Supplier#000006326|
+13.00|Supplier#000006384|
+13.00|Supplier#000006394|
+13.00|Supplier#000006624|
+13.00|Supplier#000006629|
+13.00|Supplier#000006682|
+13.00|Supplier#000006737|
+13.00|Supplier#000006825|
+13.00|Supplier#000007021|
+13.00|Supplier#000007417|
+13.00|Supplier#000007497|
+13.00|Supplier#000007602|
+13.00|Supplier#000008134|
+13.00|Supplier#000008234|
+13.00|Supplier#000009435|
+13.00|Supplier#000009436|
+13.00|Supplier#000009564|
+13.00|Supplier#000009896|
+12.00|Supplier#000000379|
+12.00|Supplier#000000673|
+12.00|Supplier#000000762|
+12.00|Supplier#000000811|
+12.00|Supplier#000000821|
+12.00|Supplier#000001337|
+12.00|Supplier#000001916|
+12.00|Supplier#000001925|
+12.00|Supplier#000002039|
+12.00|Supplier#000002357|
+12.00|Supplier#000002483|
+---------------------------------------------------
+Planning time: 21.01 ms
+Data Load Time (Disk+Upload): 9836.69 ms
+GPU kernels time: 22.28 ms
+CPU postprocess time: 383.26 ms
+Total Internal Pipeline time: 10242.24 ms
+Total Host Execution time: 10243.33 ms
+Total Wall time (Plan+Exec): 10264.35 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    0.589 ms (2.642%) [2 calls]
+  filter         :    9.197 ms (41.271%) [2 calls]
+  gather         :    3.722 ms (16.701%) [12 calls]
+  groupby        :    0.742 ms (3.328%) [3 calls]
+  hash_join_probe_u32:    6.543 ms (29.364%) [5 calls]
+  hash_join_probe_u64:    1.047 ms (4.700%) [4 calls]
+  sort           :    0.444 ms (1.993%) [8 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 22.283 ms
+  Kernel invocations: 36

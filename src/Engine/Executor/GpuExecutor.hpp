@@ -59,20 +59,12 @@ private:
     static bool executeProject(const IRProject& project, EvalContext& ctx, TableResult& out, std::unordered_map<std::string, EvalContext>* tableContexts = nullptr);
 
     // TypedExpr evaluation on GPU buffers
-    static std::vector<float> evalExprFloat(const TypedExprPtr& expr, const EvalContext& ctx);
     static MTL::Buffer* evalExprFloatGPU(const TypedExprPtr& expr, EvalContext& ctx);
     static std::vector<uint32_t> evalExprU32(const TypedExprPtr& expr, const EvalContext& ctx);
-    static MTL::Buffer* evalExprU32GPU(const TypedExprPtr& expr, EvalContext& ctx);
-    static std::vector<bool> evalPredicate(const TypedExprPtr& pred, const EvalContext& ctx);
     
     // Recursive GPU filter helper
     static bool executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx);
     
-    // Helper to get column data
-    static std::pair<bool, bool> getColumnData(const std::string& colName, const EvalContext& ctx,
-                                                std::vector<uint32_t>*& u32Out, 
-                                                std::vector<float>*& f32Out);
-
     // Orchestrate the complex logic of setting up a join (finding tables, handling scalar subqueries, etc.)
     static bool orchestrateJoin(
         const IRJoin& join,

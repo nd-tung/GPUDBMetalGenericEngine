@@ -3,7 +3,6 @@
 #include <vector>
 #include <memory>
 #include <variant>
-#include <optional>
 #include <cstdint>
 
 namespace engine {
@@ -23,20 +22,6 @@ enum class DataType {
     String,     // stored as hash or raw
     Bool
 };
-
-inline const char* dataTypeName(DataType t) {
-    switch (t) {
-        case DataType::Unknown: return "unknown";
-        case DataType::Int32: return "int32";
-        case DataType::Int64: return "int64";
-        case DataType::Float32: return "float32";
-        case DataType::Float64: return "float64";
-        case DataType::Date: return "date";
-        case DataType::String: return "string";
-        case DataType::Bool: return "bool";
-    }
-    return "?";
-}
 
 // Forward declarations
 struct TypedExpr;
@@ -90,8 +75,7 @@ enum class AggFunc {
     Avg,
     Min,
     Max,
-    First,
-    Last
+    First
 };
 
 inline const char* aggFuncName(AggFunc f) {
@@ -104,7 +88,6 @@ inline const char* aggFuncName(AggFunc f) {
         case AggFunc::Min: return "MIN";
         case AggFunc::Max: return "MAX";
         case AggFunc::First: return "FIRST";
-        case AggFunc::Last: return "LAST";
     }
     return "?";
 }
@@ -354,76 +337,6 @@ inline void collectColumns(const TypedExprPtr& expr, std::vector<ColumnRef>& out
         default:
             break;
     }
-}
-
-// Get all unique column names from an expression
-inline std::vector<std::string> getColumnNames(const TypedExprPtr& expr) {
-    std::vector<ColumnRef> refs;
-    collectColumns(expr, refs);
-    std::vector<std::string> names;
-    for (const auto& r : refs) {
-        bool found = false;
-        for (const auto& n : names) if (n == r.column) { found = true; break; }
-        if (!found) names.push_back(r.column);
-    }
-    return names;
-}
-
-// Check if expression contains any aggregates
-inline bool hasAggregate(const TypedExprPtr& expr) {
-    if (!expr) return false;
-    if (expr->kind == TypedExpr::Kind::Aggregate) return true;
-    switch (expr->kind) {
-        case TypedExpr::Kind::Binary: {
-            const auto& b = expr->asBinary();
-            return hasAggregate(b.left) || hasAggregate(b.right);
-        }
-        case TypedExpr::Kind::Unary:
-            return hasAggregate(expr->asUnary().operand);
-        case TypedExpr::Kind::Compare: {
-            const auto& c = expr->asCompare();
-            if (hasAggregate(c.left) || hasAggregate(c.right)) return true;
-            for (const auto& e : c.inList) if (hasAggregate(e)) return true;
-            return false;
-        }
-        case TypedExpr::Kind::Function:
-            for (const auto& a : expr->asFunction().args) if (hasAggregate(a)) return true;
-            return false;
-        case TypedExpr::Kind::Case: {
-            const auto& cs = expr->asCase();
-            for (const auto& wt : cs.cases) {
-                if (hasAggregate(wt.when) || hasAggregate(wt.then)) return true;
-            }
-            return hasAggregate(cs.elseExpr);
-        }
-        case TypedExpr::Kind::Cast:
-            return hasAggregate(expr->asCast().expr);
-        case TypedExpr::Kind::Alias:
-            return hasAggregate(expr->asAlias().expr);
-        default:
-            return false;
-    }
-}
-
-// Unwrap alias to get the underlying expression
-inline TypedExprPtr unwrapAlias(const TypedExprPtr& expr) {
-    if (!expr) return nullptr;
-    if (expr->kind == TypedExpr::Kind::Alias) {
-        return unwrapAlias(expr->asAlias().expr);
-    }
-    return expr;
-}
-
-// Get alias name if present
-inline std::string getAliasName(const TypedExprPtr& expr) {
-    if (!expr) return "";
-    if (expr->kind == TypedExpr::Kind::Alias) {
-        return expr->asAlias().alias;
-    }
-    if (expr->kind == TypedExpr::Kind::Aggregate) {
-        return expr->asAggregate().alias;
-    }
-    return "";
 }
 
 } // namespace engine

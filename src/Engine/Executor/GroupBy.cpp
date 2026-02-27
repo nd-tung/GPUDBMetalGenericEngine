@@ -2,7 +2,6 @@
 #include "GpuExecutorPriv.hpp"
 #include "Operators.hpp"
 #include "ColumnStoreGPU.hpp"
-#include "TypedExprEval.hpp"
 #include "KernelTimer.hpp"
 #include "Schema.hpp"
 
@@ -10,7 +9,6 @@
 #include <cstring>
 #include <iostream>
 #include <map>
-#include <numeric>
 #include <unordered_set>
 
 namespace engine {
@@ -281,49 +279,80 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     }
                 } else {
                     // Try f32Cols - convert to u32 for grouping (e.g., count values)
-            
-                     // LAZY FETCH F32: If vector is empty but on GPU, bring it back
-                    if ((ctx.f32Cols.find(col) == ctx.f32Cols.end() || ctx.f32Cols[col].empty()) && ctx.f32ColsGPU.count(col)) {
-                         MTL::Buffer* buf = ctx.f32ColsGPU.at(col);
-                         size_t count = buf->length() / sizeof(float);
-                         if (count > 0) {
-                             std::vector<float> down(count);
-                             std::memcpy(down.data(), buf->contents(), count * sizeof(float));
-                             ctx.f32Cols[col] = std::move(down);
-                             if(debug) std::cerr << "[Exec] GroupBy: Lazy fetch F32 key " << col << " from GPU\n";
-                         }
+
+                    // GPU fast path: if f32 is on GPU, bitcast directly without downloading
+                    bool gpuBitcastDone = false;
+                    if (ctx.f32ColsGPU.count(col)) {
+                        MTL::Buffer* gpuF32 = ctx.f32ColsGPU.at(col);
+                        uint32_t gpuCount = (uint32_t)(gpuF32->length() / sizeof(float));
+                        if (gpuCount > 0) {
+                            MTL::Buffer* gpuU32 = nullptr;
+                            if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && gpuCount != (uint32_t)expectedKeyRows) {
+                                // Gather active rows first, then bitcast
+                                MTL::Buffer* gathered = GpuOps::gatherF32(gpuF32, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
+                                gpuU32 = GpuOps::bitcastF32ToU32(gathered, ctx.activeRowsCountGPU);
+                                gathered->release();
+                                gpuCount = ctx.activeRowsCountGPU;
+                            } else {
+                                gpuU32 = GpuOps::bitcastF32ToU32(gpuF32, gpuCount);
+                            }
+                            std::vector<uint32_t> converted(gpuCount);
+                            std::memcpy(converted.data(), gpuU32->contents(), gpuCount * sizeof(uint32_t));
+                            gpuU32->release();
+                            if (debug) std::cerr << "[Exec] GroupBy: GPU bitcast f32 key " << col << " to u32 (" << gpuCount << " rows)\n";
+                            keyVecs.push_back(std::move(converted));
+                            keyNames.push_back(keyName.empty() ? col : keyName);
+                            keyFromF32.push_back(true);
+                            outputStringMaps.push_back({});
+                            hashToStringMaps.push_back({});
+                            gpuBitcastDone = true;
+                        }
                     }
 
-                    auto itF = ctx.f32Cols.find(col);
-                    if (itF == ctx.f32Cols.end()) {
-                        for (int suffix = 1; suffix <= 9 && itF == ctx.f32Cols.end(); ++suffix) {
-                            std::string suffixedCol = col + "_" + std::to_string(suffix);
-                            itF = ctx.f32Cols.find(suffixedCol);
+                    if (!gpuBitcastDone) {
+                        // CPU fallback: download f32, bitcast element-by-element
+                        if ((ctx.f32Cols.find(col) == ctx.f32Cols.end() || ctx.f32Cols[col].empty()) && ctx.f32ColsGPU.count(col)) {
+                             MTL::Buffer* buf = ctx.f32ColsGPU.at(col);
+                             size_t count = buf->length() / sizeof(float);
+                             if (count > 0) {
+                                 std::vector<float> down(count);
+                                 std::memcpy(down.data(), buf->contents(), count * sizeof(float));
+                                 ctx.f32Cols[col] = std::move(down);
+                                 if(debug) std::cerr << "[Exec] GroupBy: Lazy fetch F32 key " << col << " from GPU\n";
+                             }
                         }
-                    }
-                    if (itF != ctx.f32Cols.end()) {
-                        std::vector<uint32_t> converted;
-                        converted.reserve(expectedKeyRows);
-                        if (!ctx.activeRows.empty() && itF->second.size() != expectedKeyRows) {
-                            for(uint32_t r : ctx.activeRows) {
-                                if (r < itF->second.size()) {
-                                    uint32_t bits; std::memcpy(&bits, &itF->second[r], sizeof(bits));
+
+                        auto itF = ctx.f32Cols.find(col);
+                        if (itF == ctx.f32Cols.end()) {
+                            for (int suffix = 1; suffix <= 9 && itF == ctx.f32Cols.end(); ++suffix) {
+                                std::string suffixedCol = col + "_" + std::to_string(suffix);
+                                itF = ctx.f32Cols.find(suffixedCol);
+                            }
+                        }
+                        if (itF != ctx.f32Cols.end()) {
+                            std::vector<uint32_t> converted;
+                            converted.reserve(expectedKeyRows);
+                            if (!ctx.activeRows.empty() && itF->second.size() != expectedKeyRows) {
+                                for(uint32_t r : ctx.activeRows) {
+                                    if (r < itF->second.size()) {
+                                        uint32_t bits; std::memcpy(&bits, &itF->second[r], sizeof(bits));
+                                        converted.push_back(bits);
+                                    }
+                                    else converted.push_back(0);
+                                }
+                            } else {
+                                for (float f : itF->second) {
+                                    uint32_t bits; std::memcpy(&bits, &f, sizeof(bits));
                                     converted.push_back(bits);
                                 }
-                                else converted.push_back(0);
                             }
-                        } else {
-                            for (float f : itF->second) {
-                                uint32_t bits; std::memcpy(&bits, &f, sizeof(bits));
-                                converted.push_back(bits);
-                            }
+                            if (debug) std::cerr << "[Exec] GroupBy: converted f32 key " << col << " to u32\n";
+                            keyVecs.push_back(std::move(converted));
+                            keyNames.push_back(keyName.empty() ? col : keyName);
+                            keyFromF32.push_back(true);
+                            outputStringMaps.push_back({});
+                            hashToStringMaps.push_back({});
                         }
-                        if (debug) std::cerr << "[Exec] GroupBy: converted f32 key " << col << " to u32\n";
-                        keyVecs.push_back(std::move(converted));
-                        keyNames.push_back(keyName.empty() ? col : keyName);
-                        keyFromF32.push_back(true);
-                        outputStringMaps.push_back({});
-                        hashToStringMaps.push_back({});
                     }
                 }
             }

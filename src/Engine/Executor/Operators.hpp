@@ -63,10 +63,6 @@ public:
 
     static uint32_t fnv1a32(std::string_view s);
 
-    // Encode a string literal to the u32 representation used by the column (hash or char)
-    static uint32_t encodeStringForColumn(const std::string& table, const std::string& col, const std::string& val);
-
-
     // Load raw strings from a table column (for pattern matching: LIKE, CONTAINS)
     static std::vector<std::string> loadStringColumnRaw(const std::string& dataset_path,
                                                         const std::string& table,
@@ -86,15 +82,22 @@ public:
 
     // Filter a raw string column. 
     // Uses GPU kernel for pattern matching.
+    // When preChars/preOffsets/preLengths are non-null, skip CPU→GPU flatten.
     static std::optional<FilterResult> filterString(const std::string& colName,
                                                        const std::vector<std::string>& data,
                                                        engine::expr::CompOp op,
-                                                       const std::string& pattern);
+                                                       const std::string& pattern,
+                                                       MTL::Buffer* preChars = nullptr,
+                                                       MTL::Buffer* preOffsets = nullptr,
+                                                       MTL::Buffer* preLengths = nullptr);
 
     static std::optional<FilterResult> filterStringPrefix(const std::string& colName,
                                                       const std::vector<std::string>& data,
                                                       const std::string& pattern,
-                                                      bool invert = false);
+                                                      bool invert = false,
+                                                      MTL::Buffer* preChars = nullptr,
+                                                      MTL::Buffer* preOffsets = nullptr,
+                                                      MTL::Buffer* preLengths = nullptr);
     static std::optional<FilterResult> filterU32Indexed(const std::string& colName,
                                                            MTL::Buffer* col,
                                                            MTL::Buffer* indices,
@@ -132,14 +135,6 @@ public:
                                                            float minVal,
                                                            float maxVal);
 
-    // Filter a f32 column through an indices vector using BETWEEN.
-    static std::optional<FilterResult> filterF32BetweenIndexed(const std::string& colName,
-                                                                  MTL::Buffer* col,
-                                                                  MTL::Buffer* indices,
-                                                                  uint32_t count,
-                                                                  float minVal,
-                                                                  float maxVal);
-
     // Filter a u32 column with BETWEEN [min, max] (inclusive) and return compacted indices.
     static std::optional<FilterResult> filterU32Between(const std::string& colName,
                                                            MTL::Buffer* col,
@@ -147,63 +142,38 @@ public:
                                                            uint32_t minVal,
                                                            uint32_t maxVal);
 
-    // Filter a u32 column through an indices vector using BETWEEN.
-    static std::optional<FilterResult> filterU32BetweenIndexed(const std::string& colName,
-                                                                  MTL::Buffer* col,
-                                                                  MTL::Buffer* indices,
-                                                                  uint32_t count,
-                                                                  uint32_t minVal,
-                                                                  uint32_t maxVal);
-
-    // Materialize relation by gathering each present column using indices.
-    static RelationGPU applySelection(RelationGPU&& rel, const FilterResult& sel);
-
-    // Build hash table on rightKey (payload is right row index) and probe leftKey.
-    static std::optional<JoinMapGPU> hashJoinU32(MTL::Buffer* leftKey,
-                                                 uint32_t leftCount,
-                                                 MTL::Buffer* rightKey,
-                                                 uint32_t rightCount);
-
     static std::optional<FilterResult> hashJoinSemiU32(MTL::Buffer* leftKey,
                                                           uint32_t leftCount,
                                                           MTL::Buffer* rightKey,
                                                           uint32_t rightCount);
 
-    // Materialize joined columns: gather from left/right using JoinMapGPU.
-    static RelationGPU materializeJoin(RelationGPU&& left,
-                                       RelationGPU&& right,
-                                       const JoinMapGPU& map,
-                                       const std::vector<std::string>& keepLeftU32,
-                                       const std::vector<std::string>& keepLeftF32,
-                                       const std::vector<std::string>& keepRightU32,
-                                       const std::vector<std::string>& keepRightF32);
+    // ANTI join: returns indices of left rows that do NOT match any right key.
+    static std::optional<FilterResult> hashJoinAntiU32(MTL::Buffer* leftKey,
+                                                          uint32_t leftCount,
+                                                          MTL::Buffer* rightKey,
+                                                          uint32_t rightCount);
 
-    // Compute revenue = extendedprice * (1-discount)
-    static MTL::Buffer* computeRevenue(MTL::Buffer* extendedprice,
-                                       MTL::Buffer* discount,
-                                       uint32_t rowCount);
+    // Find unmatched rows: given a set of matched indices (from a join),
+    // returns the indices in [0, totalRows) that are NOT in matchedIndices.
+    // Uses GPU: scatter → flip → compact.
+    static FilterResult findUnmatchedIndices(MTL::Buffer* matchedIndices,
+                                             uint32_t matchedCount,
+                                             uint32_t totalRows);
 
-    // Compute charge = extendedprice * (1-discount) * (1+tax)
-    static MTL::Buffer* computeCharge(MTL::Buffer* extendedprice,
-                                      MTL::Buffer* discount,
-                                      MTL::Buffer* tax,
-                                      uint32_t rowCount);
+    // Flip a u8 mask in-place on GPU (0→1, nonzero→0)
+    static void flipMaskU8(MTL::Buffer* mask, uint32_t count);
 
-    // GroupBy multi-key SUM over one float agg.
-    static std::optional<GroupByHashTable> groupBySumMultiKey(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                 MTL::Buffer* aggF32,
-                                                                 uint32_t rowCount);
+    // Bitcast f32 buffer to u32 buffer on GPU (IEEE 754 reinterpretation).
+    // Returns a new buffer; caller must release.
+    static MTL::Buffer* bitcastF32ToU32(MTL::Buffer* in, uint32_t count);
 
-    // GroupBy multi-key SUM+COUNT over one float agg.
-    // COUNT is accumulated as u32 in ht_aggs[slot*8 + 1].
-    static std::optional<GroupByHashTable> groupBySumCountMultiKey(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                      MTL::Buffer* aggF32,
-                                                                      uint32_t rowCount);
+    // Convert f32 to sort-key u32 on GPU (IEEE 754 → order-preserving u32).
+    // desc=true flips for descending order. Returns new buffer; caller must release.
+    static MTL::Buffer* floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc);
 
-    // GroupBy multi-key COUNT(*).
-    // COUNT is accumulated as u32 in ht_aggs[slot*8 + 0].
-    static std::optional<GroupByHashTable> groupByCountMultiKey(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                   uint32_t rowCount);
+    // Bitwise NOT (invert) u32 buffer on GPU for DESC ordering.
+    // Returns new buffer; caller must release.
+    static MTL::Buffer* invertU32(MTL::Buffer* in, uint32_t count);
 
     // GroupBy multi-key with typed aggregates (up to 8).
     // aggTypes[a]: 0 = SUM(f32) using aggInputsF32[a], 1 = COUNT(*) (u32).
@@ -239,16 +209,11 @@ public:
         int op);
 
     // Generic Mask Operations
-    static MTL::Buffer* cmpColColU32Mask(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count, int op);
-    static MTL::Buffer* cmpColLitU32Mask(MTL::Buffer* colA, uint32_t valB, uint32_t count, int op);
     static MTL::Buffer* logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* logicAndU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* logicNotU32(MTL::Buffer* mask, uint32_t count);
     static MTL::Buffer* logicAndNotU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
     
     // Index array to mask conversion
     static MTL::Buffer* indicesToMask(MTL::Buffer* indices, uint32_t indexCount, uint32_t totalRows);
-    static void clearMask(MTL::Buffer* mask, uint32_t count);
     
     // Compact u32 mask to indices
     static std::pair<MTL::Buffer*, uint32_t> compactU32Mask(MTL::Buffer* mask, uint32_t totalRows);
@@ -257,7 +222,6 @@ public:
     static void fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count);
     static void fillF32(MTL::Buffer* buf, float val, uint32_t count);
     static MTL::Buffer* createFilledU32(uint32_t val, uint32_t count);
-    static MTL::Buffer* createFilledF32(float val, uint32_t count);
     
     // Generate sequence 0, 1, 2, ... (iota)
     static MTL::Buffer* iotaU32(uint32_t count);
@@ -266,13 +230,6 @@ public:
     static void crossProduct(MTL::Buffer* left, MTL::Buffer* right, 
                              MTL::Buffer* outLeft, MTL::Buffer* outRight,
                              uint32_t leftCount, uint32_t rightCount);
-    
-    // Select
-    static MTL::Buffer* selectU32(MTL::Buffer* mask, MTL::Buffer* t, MTL::Buffer* f, uint32_t count);
-
-    // Utility: CPU-side copy with +constant bias (buffers are StorageModeShared).
-    // Used to avoid 0 being interpreted as an empty key in hash tables.
-    static MTL::Buffer* copyAddU32(MTL::Buffer* in, uint32_t count, uint32_t add);
 
     static void release(FilterResult& r);
     static void release(JoinMapGPU& j);
@@ -288,9 +245,7 @@ public:
 
     // Arithmetic Ops
     static MTL::Buffer* arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithMulF32ColColIndexed(MTL::Buffer* colA, MTL::Buffer* colB, MTL::Buffer* indices, uint32_t count);
     static MTL::Buffer* arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
-    static MTL::Buffer* arithMulF32ColScalarIndexed(MTL::Buffer* colA, float valB, MTL::Buffer* indices, uint32_t count);
 
     static MTL::Buffer* arithDivF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
     static MTL::Buffer* arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
@@ -301,7 +256,6 @@ public:
     static MTL::Buffer* arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
     static MTL::Buffer* arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithAddF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
     static MTL::Buffer* arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
     // Math Ops
@@ -316,15 +270,13 @@ public:
     static float reduceMaxF32(MTL::Buffer* in, uint32_t count);
 
     // Date Extract
-    static MTL::Buffer* extractYearFromDate(MTL::Buffer* dateCol, uint32_t count);
+    // M11: Extract YEAR from u32 date → u32 year (handles YYYYMMDD and day-count)
+    static MTL::Buffer* extractYearU32(MTL::Buffer* dateCol, uint32_t count);
 
-    // GPU Bitonic Sort
-    // Sorts an index array by a u32 key array in-place.
-    // After sort, indices[i] gives the original row index of the i-th sorted element.
-    // Keys are also sorted in-place. Both buffers must be at least `count` elements.
-    static void bitonicSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
-    // Same but with u64 keys (for multi-column composite sort keys)
-    static void bitonicSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
+    // H4: GPU dedup — returns gather indices for unique rows, sets uniqueCount
+    // keys: vector of u32 GPU buffers (1 or 2 keys; falls back to CPU for 3+)
+    static MTL::Buffer* dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count,
+                                    uint32_t& uniqueCount);
 
     // GPU Radix Sort (stable, 8-bit radix)
     // For ≤1024 elements: single-dispatch block sort (shared-memory bitonic).

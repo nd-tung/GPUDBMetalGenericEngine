@@ -2,11 +2,6 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <optional>
-#include <fstream>
-#include <sstream>
-#include <algorithm>
-#include <cctype>
 
 namespace engine {
 
@@ -16,37 +11,16 @@ namespace engine {
 
 enum class ColumnType {
     Int32,
-    Int64,
     Float32,
-    Float64,
     Date,           // YYYYMMDD as integer
     StringHash,     // FNV1a hash of string
     StringChar,     // Single character stored as char code
-    StringRaw       // Raw string (CPU only)
 };
-
-inline const char* columnTypeName(ColumnType t) {
-    switch (t) {
-        case ColumnType::Int32: return "int32";
-        case ColumnType::Int64: return "int64";
-        case ColumnType::Float32: return "float32";
-        case ColumnType::Float64: return "float64";
-        case ColumnType::Date: return "date";
-        case ColumnType::StringHash: return "string_hash";
-        case ColumnType::StringChar: return "string_char";
-        case ColumnType::StringRaw: return "string_raw";
-    }
-    return "?";
-}
 
 struct ColumnSchema {
     std::string name;
     int index;              // 0-based column index in .tbl file
     ColumnType type;
-    bool nullable = true;
-    bool isPrimaryKey = false;
-    bool isForeignKey = false;
-    std::string references;  // table.column for foreign keys
 };
 
 struct TableSchema {
@@ -59,13 +33,6 @@ struct TableSchema {
             if (c.name == colName) return &c;
         }
         return nullptr;
-    }
-    
-    int getColumnIndex(const std::string& colName) const {
-        for (const auto& c : columns) {
-            if (c.name == colName) return c.index;
-        }
-        return -1;
     }
     
     ColumnType getColumnType(const std::string& colName) const {
@@ -204,117 +171,6 @@ public:
         }});
     }
     
-    // Load schema from a SQL file (CREATE TABLE statements)
-    bool loadFromSQL(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) return false;
-        
-        std::stringstream buf;
-        buf << file.rdbuf();
-        std::string content = buf.str();
-        
-        // Parse CREATE TABLE statements
-        // Format: CREATE TABLE name (col1 type1, col2 type2, ...);
-        
-        size_t pos = 0;
-        while ((pos = content.find("CREATE TABLE", pos)) != std::string::npos) {
-            size_t nameStart = pos + 12;
-            while (nameStart < content.size() && std::isspace(content[nameStart])) nameStart++;
-            
-            size_t nameEnd = nameStart;
-            while (nameEnd < content.size() && !std::isspace(content[nameEnd]) && content[nameEnd] != '(') nameEnd++;
-            
-            std::string tableName = content.substr(nameStart, nameEnd - nameStart);
-            
-            size_t parenStart = content.find('(', nameEnd);
-            size_t parenEnd = content.find(')', parenStart);
-            if (parenStart == std::string::npos || parenEnd == std::string::npos) {
-                pos = nameEnd;
-                continue;
-            }
-            
-            std::string colDefs = content.substr(parenStart + 1, parenEnd - parenStart - 1);
-            
-            TableSchema schema;
-            schema.name = tableName;
-            
-            // Parse column definitions
-            int colIndex = 0;
-            size_t start = 0;
-            while (start < colDefs.size()) {
-                size_t comma = colDefs.find(',', start);
-                if (comma == std::string::npos) comma = colDefs.size();
-                
-                std::string def = colDefs.substr(start, comma - start);
-                // Trim
-                while (!def.empty() && std::isspace(def.front())) def.erase(def.begin());
-                while (!def.empty() && std::isspace(def.back())) def.pop_back();
-                
-                // Skip constraints like PRIMARY KEY, FOREIGN KEY
-                std::string defLower = def;
-                std::transform(defLower.begin(), defLower.end(), defLower.begin(), ::tolower);
-                if (defLower.find("primary key") != std::string::npos ||
-                    defLower.find("foreign key") != std::string::npos ||
-                    defLower.find("constraint") != std::string::npos) {
-                    start = comma + 1;
-                    continue;
-                }
-                
-                // Parse "colname type"
-                size_t space = def.find(' ');
-                if (space != std::string::npos) {
-                    std::string colName = def.substr(0, space);
-                    std::string typePart = def.substr(space + 1);
-                    
-                    // Determine type
-                    std::string typeLower = typePart;
-                    std::transform(typeLower.begin(), typeLower.end(), typeLower.begin(), ::tolower);
-                    
-                    ColumnType type = ColumnType::StringHash;
-                    if (typeLower.find("int") != std::string::npos) {
-                        type = ColumnType::Int32;
-                    } else if (typeLower.find("decimal") != std::string::npos ||
-                               typeLower.find("numeric") != std::string::npos ||
-                               typeLower.find("float") != std::string::npos ||
-                               typeLower.find("double") != std::string::npos ||
-                               typeLower.find("real") != std::string::npos) {
-                        type = ColumnType::Float32;
-                    } else if (typeLower.find("date") != std::string::npos) {
-                        type = ColumnType::Date;
-                    } else if (typeLower.find("char(1)") != std::string::npos) {
-                        type = ColumnType::StringChar;
-                    } else if (typeLower.find("varchar") != std::string::npos ||
-                               typeLower.find("char") != std::string::npos ||
-                               typeLower.find("text") != std::string::npos) {
-                        type = ColumnType::StringHash;
-                    }
-                    
-                    schema.columns.push_back({colName, colIndex, type});
-                    colIndex++;
-                }
-                
-                start = comma + 1;
-            }
-            
-            if (!schema.columns.empty()) {
-                registerTable(std::move(schema));
-            }
-            
-            pos = parenEnd;
-        }
-        
-        return true;
-    }
-    
-    // Get all table names
-    std::vector<std::string> getTableNames() const {
-        std::vector<std::string> names;
-        for (const auto& [name, _] : tables_) {
-            names.push_back(name);
-        }
-        return names;
-    }
-    
 private:
     SchemaRegistry() {
         initTPCH();  // Initialize with TPC-H by default
@@ -322,21 +178,5 @@ private:
     
     std::unordered_map<std::string, TableSchema> tables_;
 };
-
-// ============================================================================
-// Helper to infer table from column name prefix
-// ============================================================================
-
-inline std::string inferTableFromColumn(const std::string& colName) {
-    if (colName.rfind("l_", 0) == 0) return "lineitem";
-    if (colName.rfind("o_", 0) == 0) return "orders";
-    if (colName.rfind("c_", 0) == 0) return "customer";
-    if (colName.rfind("p_", 0) == 0) return "part";
-    if (colName.rfind("s_", 0) == 0) return "supplier";
-    if (colName.rfind("ps_", 0) == 0) return "partsupp";
-    if (colName.rfind("n_", 0) == 0) return "nation";
-    if (colName.rfind("r_", 0) == 0) return "region";
-    return "";
-}
 
 } // namespace engine

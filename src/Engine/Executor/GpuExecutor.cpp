@@ -10,11 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
-#include <cmath>
 #include <iostream>
 #include <map>
-#include <numeric>
-#include <regex>
 #include <set>
 #include <unordered_set>
 
@@ -95,9 +92,7 @@ std::vector<std::string> GpuExecutor::getGPUBlockers(const Plan& plan) {
 
     // Count nodes and track table scans
     size_t joinCount = 0;
-    bool hasSubquery = false;
     bool hasEmptyScan = false;
-    bool hasCase = false;
     bool hasDistinct = false;
     bool hasOuterJoin = false;
     bool hasSubqueryInCondition = false;
@@ -716,6 +711,68 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         joinedTables.insert(tableKey);
                         isFirst = false;
 
+                        // Filter context to only include columns needed by this scan
+                        // This prevents extra columns (e.g., string match cols) from
+                        // leaking into the pipeline and causing name collisions later
+                        if (!scan.columns.empty()) {
+                            std::set<std::string> keepCols(scan.columns.begin(), scan.columns.end());
+                            // Also keep columns referenced by the scan's pushed-down filter
+                            if (scan.filter) {
+                                collectColumnsFromExpr(scan.filter, keepCols);
+                            }
+                            // Helper: check if a column name (possibly with instance suffix) should be kept
+                            auto shouldKeep = [&](const std::string& colName) -> bool {
+                                if (keepCols.count(colName)) return true;
+                                // Check without instance suffix (e.g., "n_nationkey_2" -> "n_nationkey")
+                                auto lastUnderscore = colName.rfind('_');
+                                if (lastUnderscore != std::string::npos) {
+                                    std::string suffix = colName.substr(lastUnderscore + 1);
+                                    bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
+                                    if (allDigits) {
+                                        std::string baseName = colName.substr(0, lastUnderscore);
+                                        if (keepCols.count(baseName)) return true;
+                                    }
+                                }
+                                return false;
+                            };
+                            // Apply filter to u32/f32/string columns
+                            for (auto cit = currentCtx.u32Cols.begin(); cit != currentCtx.u32Cols.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.u32Cols.erase(cit);
+                                else ++cit;
+                            }
+                            for (auto cit = currentCtx.u32ColsGPU.begin(); cit != currentCtx.u32ColsGPU.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.u32ColsGPU.erase(cit);
+                                else ++cit;
+                            }
+                            for (auto cit = currentCtx.f32Cols.begin(); cit != currentCtx.f32Cols.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.f32Cols.erase(cit);
+                                else ++cit;
+                            }
+                            for (auto cit = currentCtx.f32ColsGPU.begin(); cit != currentCtx.f32ColsGPU.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.f32ColsGPU.erase(cit);
+                                else ++cit;
+                            }
+                            for (auto cit = currentCtx.stringCols.begin(); cit != currentCtx.stringCols.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.stringCols.erase(cit);
+                                else ++cit;
+                            }
+                            for (auto cit = currentCtx.flatStringCols.begin(); cit != currentCtx.flatStringCols.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.flatStringCols.erase(cit);
+                                else ++cit;
+                            }
+                            if (debug) {
+                                std::cerr << "[Exec] Scan column filter: kept cols:";
+                                for (const auto& c : keepCols) std::cerr << " " << c;
+                                std::cerr << "\n";
+                            }
+                        }
+
                         // DELIM_SCAN deduplication: In DuckDB's decorrelated plans,
                         // DELIM_SCAN produces the DISTINCT set of correlated keys,
                         // while COLUMN_DATA_SCAN produces the full original data.
@@ -841,6 +898,10 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                         }
                                     }
                                     if (debug) std::cerr << "[Exec] DELIM_SCAN: stripped to correlation cols only: [" << dedupCols.size() << " cols]\n";
+                                    // Mark these columns as DELIM correlation for join priority
+                                    for (const auto& dc : dedupCols) {
+                                        currentCtx.isDelimCorrelation.insert(dc);
+                                    }
                                 }
                             }
                         }
@@ -1129,26 +1190,46 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 joinedTables.clear();
                 joinedTables.insert("__GROUPED__");
                 
+                // Build set of f32 column names to detect float keys restored from u32
+                std::set<std::string> f32NameSet;
+                for (const auto& fn : tableResult.f32_names) f32NameSet.insert(fn);
+                
                 for (size_t i = 0; i < tableResult.u32_cols.size(); ++i) {
                     if (i < tableResult.u32_names.size()) {
-                        currentCtx.u32Cols[tableResult.u32_names[i]] = tableResult.u32_cols[i];
-                        // Also register under positional name for #N references
-                        std::string posKey = "#" + std::to_string(i);
-                        currentCtx.u32Cols[posKey] = tableResult.u32_cols[i];
+                        const std::string& name = tableResult.u32_names[i];
+                        // Skip named registration if this column was restored to f32
+                        // (the u32 version contains raw IEEE 754 bits, not the actual value)
+                        bool restoredToF32 = f32NameSet.count(name) > 0;
+                        if (!restoredToF32) {
+                            currentCtx.u32Cols[name] = tableResult.u32_cols[i];
+                        }
+                        // Register positional key only if not restored to f32
+                        if (!restoredToF32) {
+                            std::string posKey = "#" + std::to_string(i);
+                            currentCtx.u32Cols[posKey] = tableResult.u32_cols[i];
+                        }
                         // Re-register columns under their aliases (for CTE support)
-                        for (const auto& [alias, canonical] : currentCtx.columnAliases) {
-                            if (canonical == tableResult.u32_names[i]) {
-                                currentCtx.u32Cols[alias] = tableResult.u32_cols[i];
-                                if (debug) std::cerr << "[Exec] GroupBy: re-registering alias " << alias << " -> " << canonical << "\n";
+                        if (!restoredToF32) {
+                            for (const auto& [alias, canonical] : currentCtx.columnAliases) {
+                                if (canonical == name) {
+                                    currentCtx.u32Cols[alias] = tableResult.u32_cols[i];
+                                    if (debug) std::cerr << "[Exec] GroupBy: re-registering alias " << alias << " -> " << canonical << "\n";
+                                }
                             }
                         }
                     }
                 }
+                // Recount non-skipped u32 columns for f32 positional offset
+                size_t u32RegisteredCount = 0;
+                for (size_t i = 0; i < tableResult.u32_cols.size(); ++i) {
+                    if (i < tableResult.u32_names.size() && !f32NameSet.count(tableResult.u32_names[i]))
+                        u32RegisteredCount++;
+                }
                 for (size_t i = 0; i < tableResult.f32_cols.size(); ++i) {
                     if (i < tableResult.f32_names.size()) {
                         currentCtx.f32Cols[tableResult.f32_names[i]] = tableResult.f32_cols[i];
-                        // Also register under positional name for #N references (offset by key count)
-                        std::string posKey = "#" + std::to_string(i + tableResult.u32_cols.size());
+                        // Also register under positional name for #N references (offset by registered u32 count)
+                        std::string posKey = "#" + std::to_string(i + u32RegisteredCount);
                         currentCtx.f32Cols[posKey] = tableResult.f32_cols[i];
                         // Re-register columns under their aliases (for CTE support)
                         for (const auto& [alias, canonical] : currentCtx.columnAliases) {
@@ -1171,7 +1252,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
 
                 // Strict Mode: Upload GroupBy results to GPU
                 if (debug) std::cerr << "[Exec] Uploading GroupBy results to GPU (Strict Mode)\n";
-                // auto& store = ColumnStoreGPU::instance(); // Unused if we use GpuOps
                 
                 for(const auto& [name, vec] : currentCtx.u32Cols) {
                     if (!vec.empty()) {
@@ -1318,13 +1398,15 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     }
 
                     for (const auto& [name, vec] : currentCtx.u32Cols) {
-                        if (!vec.empty() && name.find("__internal_") == std::string::npos) {
+                        if (!vec.empty() && name.find("__internal_") == std::string::npos
+                            && !(name.size() >= 2 && name[0] == '#' && std::isdigit(name[1]))) {
                             tableResult.u32_names.push_back(name);
                             tableResult.u32_cols.push_back(vec);
                         }
                     }
                     for (const auto& [name, vec] : currentCtx.f32Cols) {
-                        if (!vec.empty()) {
+                        if (!vec.empty()
+                            && !(name.size() >= 2 && name[0] == '#' && std::isdigit(name[1]))) {
                             tableResult.f32_names.push_back(name);
                             tableResult.f32_cols.push_back(vec);
                         }
@@ -1664,6 +1746,81 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     tableResult.gpu_ms = KernelTimer::instance().totalGpuMs();
     tableResult.upload_ms = result.table.upload_ms;
     
+    // Filter final output to only include columns from the plan's outputColumns
+    // This strips intermediate join keys and sort-only columns
+    if (!plan.outputColumns.empty() && !result.isScalarAggregate) {
+        // Build set of expected output column names (lowercased for fuzzy match)
+        std::set<std::string> expectedCols;
+        for (const auto& c : plan.outputColumns) {
+            std::string lower = c;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            expectedCols.insert(lower);
+        }
+        
+        auto isExpected = [&](const std::string& name) -> bool {
+            std::string lower = name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (expectedCols.count(lower)) return true;
+            // Also try base_ident (strip table prefix)
+            std::string base = base_ident(lower);
+            if (expectedCols.count(base)) return true;
+            // Check if any expected col matches the base
+            for (const auto& ec : expectedCols) {
+                if (base_ident(ec) == base) return true;
+            }
+            return false;
+        };
+        
+        if (tableResult.order.empty()) {
+            // No order vector - filter u32/f32/string columns directly
+            TableResult filtered;
+            filtered.rowCount = tableResult.rowCount;
+            filtered.singleCharCols = tableResult.singleCharCols;
+            
+            for (size_t i = 0; i < tableResult.u32_names.size(); ++i) {
+                if (isExpected(tableResult.u32_names[i])) {
+                    filtered.u32_names.push_back(tableResult.u32_names[i]);
+                    filtered.u32_cols.push_back(tableResult.u32_cols[i]);
+                }
+            }
+            for (size_t i = 0; i < tableResult.f32_names.size(); ++i) {
+                if (isExpected(tableResult.f32_names[i])) {
+                    filtered.f32_names.push_back(tableResult.f32_names[i]);
+                    filtered.f32_cols.push_back(tableResult.f32_cols[i]);
+                }
+            }
+            for (size_t i = 0; i < tableResult.string_names.size(); ++i) {
+                if (isExpected(tableResult.string_names[i])) {
+                    filtered.string_names.push_back(tableResult.string_names[i]);
+                    filtered.string_cols.push_back(tableResult.string_cols[i]);
+                }
+            }
+            
+            tableResult.u32_cols = std::move(filtered.u32_cols);
+            tableResult.u32_names = std::move(filtered.u32_names);
+            tableResult.f32_cols = std::move(filtered.f32_cols);
+            tableResult.f32_names = std::move(filtered.f32_names);
+            tableResult.string_cols = std::move(filtered.string_cols);
+            tableResult.string_names = std::move(filtered.string_names);
+        } else {
+            // Filter order vector
+            std::vector<TableResult::ColRef> filteredOrder;
+            for (const auto& ref : tableResult.order) {
+                if (isExpected(ref.name)) {
+                    filteredOrder.push_back(ref);
+                }
+            }
+            tableResult.order = std::move(filteredOrder);
+        }
+        
+        if (debug) {
+            std::cerr << "[Exec] Final output filter: " << plan.outputColumns.size() << " expected cols, "
+                      << "result has " << tableResult.u32_names.size() << " u32, "
+                      << tableResult.f32_names.size() << " f32, "
+                      << tableResult.string_names.size() << " string cols\n";
+        }
+    }
+    
     // CPU post-processing = pipeline wall-clock minus GPU kernel time + column cleanup time
     auto postEnd = std::chrono::high_resolution_clock::now();
     double postProcessMs = std::chrono::duration<double, std::milli>(postEnd - endTime).count();
@@ -1675,13 +1832,4 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     return result;
 }
 
-// --- Expression Evaluation ---
-
-// Evaluator implementations moved to GpuExecutor_Evaluator.cpp
-// - mapCompOp
-// - executeGPUFilterRecursive
-// - evalExprFloat
-// - evalExprFloatGPU
-// - evalExprU32
-// - evalPredicate
 } // namespace engine
