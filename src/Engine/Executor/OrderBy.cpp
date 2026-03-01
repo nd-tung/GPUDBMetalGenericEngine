@@ -14,7 +14,8 @@
 
 namespace engine {
 
-bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
+bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
+                                 const std::unordered_map<std::string, DictEncoded>& dictCols) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     
     if (debug) {
@@ -164,22 +165,79 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
         return rank;
     };
 
-    auto buildRankString = [&](const std::vector<std::string>& col, bool asc) -> std::vector<uint32_t> {
+    auto buildRankString = [&](const std::vector<std::string>& col, bool asc,
+                               const std::string& colName) -> std::vector<uint32_t> {
+        // Path 0: Dictionary ID path — dict IDs are already lexicographic ranks
+        // (dictionary is sorted at build time, IDs are 0-based sequential)
+        auto dictIt = dictCols.find(colName);
+        if (dictIt != dictCols.end() && dictIt->second.rowCount == n) {
+            const auto& dict = dictIt->second;
+            uint32_t maxRank = static_cast<uint32_t>(dict.dictionary.size());
+            std::vector<uint32_t> rank(n);
+            if (asc) {
+                // ASC: dict IDs are already lexicographic ranks — download from GPU
+                if (dict.idsGPU) {
+                    std::memcpy(rank.data(), dict.idsGPU->contents(), n * sizeof(uint32_t));
+                } else {
+                    std::copy(dict.ids.begin(), dict.ids.begin() + n, rank.begin());
+                }
+            } else {
+                // DESC: invert on GPU (bitwise NOT preserves relative DESC ordering)
+                if (dict.idsGPU) {
+                    MTL::Buffer* inv = GpuOps::invertU32(dict.idsGPU, n);
+                    std::memcpy(rank.data(), inv->contents(), n * sizeof(uint32_t));
+                    inv->release();
+                } else {
+                    for (uint32_t i = 0; i < n; ++i) rank[i] = maxRank - 1 - dict.ids[i];
+                }
+            }
+            if (debug) {
+                std::cerr << "[Exec] OrderBy: Dict ID rank for '" << colName
+                          << "' (" << maxRank << " unique)\n";
+            }
+            return rank;
+        }
+
+        // Path 1: Prefix-u64 accelerated ranking.
+        // Sort unique strings using 8-byte prefix comparison (resolves >99%
+        // of pairs without full string compare). Eliminates hash collision risk.
+        auto cpuPrefix = [](const std::string& s) -> uint64_t {
+            uint64_t val = 0;
+            size_t m = std::min(s.size(), size_t(8));
+            for (size_t i = 0; i < m; ++i) val = (val << 8) | uint8_t(s[i]);
+            val <<= (8 - m) * 8;
+            return val;
+        };
+
+        // Build sorted unique strings with prefix-accelerated comparator
+        uint32_t rc = static_cast<uint32_t>(col.size());
         std::vector<std::string> uniq(col.begin(), col.end());
-        std::sort(uniq.begin(), uniq.end());
+        std::sort(uniq.begin(), uniq.end(), [&](const std::string& a, const std::string& b) {
+            uint64_t pa = cpuPrefix(a), pb = cpuPrefix(b);
+            if (pa != pb) return pa < pb;
+            return a < b; // Full compare only for equal 8-byte prefixes
+        });
         uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
-        
+
+        // Build string → rank map
         std::unordered_map<std::string, uint32_t> rankMap;
+        rankMap.reserve(uniq.size());
         for (uint32_t r = 0; r < (uint32_t)uniq.size(); ++r) {
             rankMap[uniq[r]] = r;
         }
-        
-        std::vector<uint32_t> rank(n);
+
+        // Assign ranks to all rows
         uint32_t maxRank = (uint32_t)uniq.size();
-        for (uint32_t i = 0; i < n; ++i) {
-            auto it = rankMap.find(col[i]);
-            uint32_t r = (it != rankMap.end()) ? it->second : maxRank;
+        std::vector<uint32_t> rank(n);
+        for (uint32_t i = 0; i < rc; ++i) {
+            auto it2 = rankMap.find(col[i]);
+            uint32_t r = (it2 != rankMap.end()) ? it2->second : maxRank;
             rank[i] = asc ? r : (maxRank - 1 - r);
+        }
+
+        if (debug) {
+            std::cerr << "[Exec] OrderBy: Prefix-u64 rank for '" << colName
+                      << "' (" << uniq.size() << " unique)\n";
         }
         return rank;
     };
@@ -191,7 +249,8 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
         } else if (sc.type == 1) {
             ranks.push_back(buildRankF32(table.f32_cols[sc.colIdx], sc.ascending));
         } else {
-            ranks.push_back(buildRankString(table.string_cols[sc.colIdx], sc.ascending));
+            ranks.push_back(buildRankString(table.string_cols[sc.colIdx], sc.ascending,
+                                            table.string_names[sc.colIdx]));
         }
     }
 
@@ -308,14 +367,34 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table) {
             srcF32Bufs[i]->release();
         }
 
-        // String columns: reorder on CPU (GPU has no variable-length string support)
+        // String columns: reorder via GPU dict ID gather when available,
+        // otherwise CPU random-access move
         if (!table.string_cols.empty()) {
             std::vector<uint32_t> sortedIdx(n);
             std::memcpy(sortedIdx.data(), idxBuf->contents(), n * sizeof(uint32_t));
-            for (auto& col : table.string_cols) {
-                std::vector<std::string> tmp(n);
-                for (uint32_t i = 0; i < n; ++i) tmp[i] = std::move(col[sortedIdx[i]]);
-                col = std::move(tmp);
+            for (size_t ci = 0; ci < table.string_cols.size(); ++ci) {
+                const std::string& colName = table.string_names[ci];
+                auto dictIt = dictCols.find(colName);
+                if (dictIt != dictCols.end() && dictIt->second.idsGPU && dictIt->second.rowCount == n) {
+                    // GPU path: gather dict IDs by sorted index, then sequential dictionary lookup
+                    MTL::Buffer* gathered = GpuOps::gatherU32(dictIt->second.idsGPU, idxBuf, n);
+                    std::vector<uint32_t> gatheredIds(n);
+                    std::memcpy(gatheredIds.data(), gathered->contents(), n * sizeof(uint32_t));
+                    gathered->release();
+                    const auto& dict = dictIt->second.dictionary;
+                    auto& col = table.string_cols[ci];
+                    for (uint32_t i = 0; i < n; ++i) {
+                        col[i] = dict[gatheredIds[i]];
+                    }
+                    if (debug)
+                        std::cerr << "[Exec] OrderBy: GPU dict reorder '" << colName << "'\n";
+                } else {
+                    // CPU fallback: random-access string move
+                    auto& col = table.string_cols[ci];
+                    std::vector<std::string> tmp(n);
+                    for (uint32_t i = 0; i < n; ++i) tmp[i] = std::move(col[sortedIdx[i]]);
+                    col = std::move(tmp);
+                }
             }
         }
 

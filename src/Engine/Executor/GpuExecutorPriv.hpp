@@ -1,16 +1,38 @@
 #pragma once
 #include "GpuExecutor.hpp"
 
+#include <Metal/Metal.hpp>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <iostream>
 #include <set>
 #include <map>
 #include <unordered_map>
 
 namespace engine {
+
+// Pre-flattened Arrow-style GPU string column buffers.
+// Standalone struct so it can be forward-declared in public headers.
+struct FlatStringCol {
+    MTL::Buffer* chars   = nullptr;  // raw character bytes
+    MTL::Buffer* offsets = nullptr;  // uint32_t[rowCount] start offset per string
+    MTL::Buffer* lengths = nullptr;  // uint32_t[rowCount] length per string
+    uint32_t rowCount   = 0;
+    uint32_t totalBytes = 0;
+};
+
+// Dictionary-encoded string column: sorted unique strings with per-row IDs.
+// Provides collision-free integer encoding (unlike FNV1a hashes) and O(1) reverse mapping.
+// Standalone struct so it can be forward-declared in public headers.
+struct DictEncoded {
+    std::vector<std::string> dictionary;  // sorted unique strings
+    std::vector<uint32_t> ids;            // per-row dictionary ID (CPU)
+    MTL::Buffer* idsGPU = nullptr;        // per-row dictionary ID (GPU)
+    uint32_t rowCount = 0;
+};
 
 // Move EvalContext definition here so it can be shared across translation units
 struct EvalContext {
@@ -26,14 +48,11 @@ struct EvalContext {
     std::unordered_map<std::string, std::vector<std::string>> stringCols;
 
     // Pre-flattened string columns (Arrow-style GPU buffers, created at load time)
-    struct FlatStringCol {
-        MTL::Buffer* chars   = nullptr;  // raw character bytes
-        MTL::Buffer* offsets = nullptr;  // uint32_t[rowCount] start offset per string
-        MTL::Buffer* lengths = nullptr;  // uint32_t[rowCount] length per string
-        uint32_t rowCount   = 0;
-        uint32_t totalBytes = 0;
-    };
+    // Uses standalone FlatStringCol struct above.
     std::unordered_map<std::string, FlatStringCol> flatStringCols;
+    
+    // Dictionary-encoded string columns (uses standalone DictEncoded struct above)
+    std::unordered_map<std::string, DictEncoded> dictCols;
     
     // Column aliases: maps alias -> canonical name
     // e.g., "supplier_no" -> "l_suppkey" for CTE aliasing
@@ -48,6 +67,18 @@ struct EvalContext {
     
     // Row count
     size_t rowCount = 0;
+
+    // Lazy sync: download activeRowsGPU to CPU activeRows on demand.
+    // Call this before any code path that reads activeRows (the CPU vector).
+    void ensureActiveRowsCPU() {
+        if (activeRowsGPU && activeRows.size() != activeRowsCountGPU) {
+            activeRows.resize(activeRowsCountGPU);
+            if (activeRowsCountGPU > 0) {
+                std::memcpy(activeRows.data(), activeRowsGPU->contents(),
+                            activeRowsCountGPU * sizeof(uint32_t));
+            }
+        }
+    }
 
     // Flag to indicate if this context represents a scalar result (even if broadcasted)
     bool isScalarResult = false;
@@ -70,13 +101,16 @@ struct ScanInstance {
 // Function declarations for shared helpers (implemented in respective .cpp files)
 std::map<size_t, ScanInstance> buildScanInstanceMap(const Plan& plan);
 std::unordered_map<std::string, std::set<std::string>> collectNeededColumns(const Plan& plan);
-std::unordered_map<std::string, std::set<std::string>> collectPatternMatchColumns(const Plan& plan);
+// GPU dedup helper: deduplicate an EvalContext by u32 key columns (GpuExecutor.cpp)
+uint32_t gpuDedupContext(EvalContext& ctx, const std::vector<std::string>& dedupCols, bool debug);
+// Flatten/dict helpers (Scan.cpp) — callable from Join.cpp and other modules
+void flattenStringCol(EvalContext& ctx, const std::string& colName);
+void buildDictCol(EvalContext& ctx, const std::string& colName);
 
 // Helper for table loading (Scan logic)
 struct IRGpuLoader {
     static void loadTables(
         const std::unordered_map<std::string, std::set<std::string>>& tableColsMap,
-        const std::unordered_map<std::string, std::set<std::string>>& patternMatchCols,
         const std::map<size_t, ScanInstance>& scanInstanceMap,
         const std::string& datasetPath,
         std::unordered_map<std::string, EvalContext>& tableContexts,
@@ -317,19 +351,5 @@ inline TypedExprPtr transformMultiInstancePredicate(const TypedExprPtr& pred,
     
     return TypedExpr::binary(BinaryOp::And, bin.left, newRightCompare);
 }
-
-// Orchestrate the complex logic of setting up a join (finding tables, handling scalar subqueries, etc.)
-// Returns true if join was successful or skipped legitimately, false on error
-bool orchestrateJoin(
-    const IRJoin& join,
-    const std::string& datasetPath,
-    EvalContext& currentCtx,
-    std::unordered_map<std::string, EvalContext>& tableContexts,
-    std::vector<EvalContext>& savedPipelines,
-    std::vector<std::set<std::string>>& savedPipelineTables,
-    std::set<std::string>& joinedTables,
-    bool& hasPipeline,
-    GpuExecutor::ExecutionResult& result
-);
 
 } // namespace engine

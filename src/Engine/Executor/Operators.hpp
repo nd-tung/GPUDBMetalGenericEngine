@@ -128,20 +128,6 @@ public:
                                                            engine::expr::CompOp op,
                                                            float literal);
 
-    // Filter a f32 column with BETWEEN [min, max] (inclusive) and return compacted indices.
-    static std::optional<FilterResult> filterF32Between(const std::string& colName,
-                                                           MTL::Buffer* col,
-                                                           uint32_t rowCount,
-                                                           float minVal,
-                                                           float maxVal);
-
-    // Filter a u32 column with BETWEEN [min, max] (inclusive) and return compacted indices.
-    static std::optional<FilterResult> filterU32Between(const std::string& colName,
-                                                           MTL::Buffer* col,
-                                                           uint32_t rowCount,
-                                                           uint32_t minVal,
-                                                           uint32_t maxVal);
-
     static std::optional<FilterResult> hashJoinSemiU32(MTL::Buffer* leftKey,
                                                           uint32_t leftCount,
                                                           MTL::Buffer* rightKey,
@@ -222,6 +208,7 @@ public:
     static void fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count);
     static void fillF32(MTL::Buffer* buf, float val, uint32_t count);
     static MTL::Buffer* createFilledU32(uint32_t val, uint32_t count);
+    static MTL::Buffer* createFilledF32(float val, uint32_t count);
     
     // Generate sequence 0, 1, 2, ... (iota)
     static MTL::Buffer* iotaU32(uint32_t count);
@@ -231,8 +218,6 @@ public:
                              MTL::Buffer* outLeft, MTL::Buffer* outRight,
                              uint32_t leftCount, uint32_t rightCount);
 
-    static void release(FilterResult& r);
-    static void release(JoinMapGPU& j);
     static void release(GroupByHashTable& g);
 
     // GPU stream compaction: extract valid entries from GroupBy hash table.
@@ -244,6 +229,9 @@ public:
         uint32_t numAggsTotal);
 
     // Arithmetic Ops
+    static MTL::Buffer* arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t count);
+    static MTL::Buffer* nonNullIndicatorF32(MTL::Buffer* in, uint32_t count);
+
     static MTL::Buffer* arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
     static MTL::Buffer* arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
@@ -283,6 +271,24 @@ public:
     // For >1024 elements: 4-pass (u32) or 8-pass (u64) LSD radix sort.
     static void radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
     static void radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
+
+    // Flat-string SUBSTRING: adjusts offsets/lengths (zero-copy into same chars buffer).
+    // startPos is 1-based (SQL convention). Returns (outOffsets, outLengths).
+    static std::pair<MTL::Buffer*, MTL::Buffer*> substringFlat(
+        MTL::Buffer* inOffsets, MTL::Buffer* inLengths,
+        uint32_t startPos, uint32_t substrLen, uint32_t rowCount);
+
+    // Hash-encode flat string columns to u32 (first 8 chars packed big-endian).
+    static MTL::Buffer* stringHashEncodeU32(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
+
+    // FNV1a-32 hash of flat string columns (full string, better distribution).
+    static MTL::Buffer* stringFnv1aU32(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
+
+    // 8-byte big-endian prefix extraction for sort-compatible string keys.
+    static MTL::Buffer* stringPrefixU64(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
 };
 
 } // namespace engine

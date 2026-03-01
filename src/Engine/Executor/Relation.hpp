@@ -14,11 +14,6 @@ namespace engine {
 struct RelationGPU {
     uint32_t rowCount = 0;
 
-    // Optional selection vector into the base columns.
-    // When present, it contains `rowCount` u32 indices (into the base column buffers).
-    // This enables lazy filtering without immediately gathering every column.
-    MTL::Buffer* indices = nullptr;
-
     // Columns stored as MTL::Buffer* in shared memory.
     // Lifetime is owned by RelationGPU (release in destructor).
     std::unordered_map<std::string, MTL::Buffer*> u32cols;
@@ -30,11 +25,9 @@ struct RelationGPU {
 
     RelationGPU(RelationGPU&& other) noexcept {
         rowCount = other.rowCount;
-        indices = other.indices;
         u32cols = std::move(other.u32cols);
         f32cols = std::move(other.f32cols);
         other.rowCount = 0;
-        other.indices = nullptr;
         other.u32cols.clear();
         other.f32cols.clear();
     }
@@ -43,11 +36,9 @@ struct RelationGPU {
         if (this == &other) return *this;
         releaseAll();
         rowCount = other.rowCount;
-        indices = other.indices;
         u32cols = std::move(other.u32cols);
         f32cols = std::move(other.f32cols);
         other.rowCount = 0;
-        other.indices = nullptr;
         other.u32cols.clear();
         other.f32cols.clear();
         return *this;
@@ -56,8 +47,6 @@ struct RelationGPU {
     ~RelationGPU() { releaseAll(); }
 
     void releaseAll() {
-        if (indices) indices->release();
-        indices = nullptr;
         for (auto& [_, b] : u32cols) if (b) b->release();
         for (auto& [_, b] : f32cols) if (b) b->release();
         u32cols.clear();
@@ -65,8 +54,7 @@ struct RelationGPU {
         rowCount = 0;
     }
 
-    bool hasU32(const std::string& name) const { return u32cols.find(name) != u32cols.end(); }
-    bool hasF32(const std::string& name) const { return f32cols.find(name) != f32cols.end(); }
+
 };
 
 } // namespace engine

@@ -1874,6 +1874,37 @@ kernel void iota_u32(
     buf[gid] = gid;
 }
 
+// Add constant to each u32 element: out[i] = in[i] + val
+kernel void arith_add_const_u32(
+    const device uint32_t* in [[buffer(0)]],
+    constant uint32_t& val [[buffer(1)]],
+    device uint32_t* out [[buffer(2)]],
+    constant uint& count [[buffer(3)]],
+    uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    out[gid] = in[gid] + val;
+}
+
+// Non-null indicator: out[i] = (in[i] != 0.0) ? 1.0 : 0.0
+kernel void nonnull_indicator_f32(
+    const device float* in [[buffer(0)]],
+    device float* out [[buffer(1)]],
+    constant uint& count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    out[gid] = (in[gid] != 0.0f) ? 1.0f : 0.0f;
+}
+
+// Hash-combine u64 buffer with u32 key: u64[i] = u64[i] * GOLDEN + u32[i]
+kernel void hash_combine_u64_u32(
+    device uint64_t* u64buf [[buffer(0)]],
+    const device uint32_t* u32key [[buffer(1)]],
+    constant uint& count [[buffer(2)]],
+    uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    u64buf[gid] = u64buf[gid] * 0x9E3779B97F4A7C15ULL + u32key[gid];
+}
+
 // Cross product: generate pairs (left[i], right[j]) for all i, j
 kernel void cross_product(
     const device uint32_t* left [[buffer(0)]],
@@ -2974,6 +3005,7 @@ kernel void ht_extract_compact(
     constant uint32_t&     cap      [[buffer(6)]],
     constant uint32_t&     numKeys  [[buffer(7)]],
     constant uint32_t&     numAggs  [[buffer(8)]],
+    constant uint32_t&     totalRows [[buffer(9)]],
     uint gid [[thread_position_in_grid]])
 {
     if (gid >= cap) return;
@@ -2981,10 +3013,10 @@ kernel void ht_extract_compact(
     uint dest = offsets[gid];
     for (uint k = 0; k < numKeys; ++k) {
         uint keyVal = ht_keys[gid * 8 + k];
-        out_keys[dest * numKeys + k] = (keyVal > 0) ? (keyVal - 1) : 0;
+        out_keys[k * totalRows + dest] = (keyVal > 0) ? (keyVal - 1) : 0;
     }
     for (uint a = 0; a < numAggs; ++a) {
-        out_aggs[dest * numAggs + a] = ht_aggs[gid * 16 + a];
+        out_aggs[a * totalRows + dest] = ht_aggs[gid * 16 + a];
     }
 }
 
@@ -3007,7 +3039,7 @@ kernel void extract_year_u32_to_u32(
 // ── H4: Mark first unique element after sorted keys ─────────────────────
 kernel void mark_unique_sorted_u32(
     const device uint32_t* sortedKeys [[buffer(0)]],
-    device uint8_t*        mask       [[buffer(1)]],
+    device uint32_t*       mask       [[buffer(1)]],
     constant uint32_t&     count      [[buffer(2)]],
     uint gid [[thread_position_in_grid]])
 {
@@ -3018,7 +3050,7 @@ kernel void mark_unique_sorted_u32(
 
 kernel void mark_unique_sorted_u64(
     const device uint64_t* sortedKeys [[buffer(0)]],
-    device uint8_t*        mask       [[buffer(1)]],
+    device uint32_t*       mask       [[buffer(1)]],
     constant uint32_t&     count      [[buffer(2)]],
     uint gid [[thread_position_in_grid]])
 {
@@ -3027,4 +3059,95 @@ kernel void mark_unique_sorted_u64(
     mask[gid] = (sortedKeys[gid] != sortedKeys[gid - 1]) ? 1 : 0;
 }
 
+// ── Flat-string SUBSTRING (zero-copy: adjusts offsets/lengths into same chars buffer) ──
+kernel void substring_flat(
+    const device uint32_t* inOffsets  [[buffer(0)]],
+    const device uint32_t* inLengths  [[buffer(1)]],
+    device uint32_t*       outOffsets [[buffer(2)]],
+    device uint32_t*       outLengths [[buffer(3)]],
+    constant uint32_t&     startPos   [[buffer(4)]],   // 1-based SQL start
+    constant uint32_t&     substrLen  [[buffer(5)]],
+    constant uint32_t&     rowCount   [[buffer(6)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= rowCount) return;
+    uint32_t origOff = inOffsets[tid];
+    uint32_t origLen = inLengths[tid];
+    uint32_t cStart = (startPos > 0) ? (startPos - 1) : 0;
+    if (cStart >= origLen) {
+        outOffsets[tid] = origOff + origLen;
+        outLengths[tid] = 0;
+    } else {
+        outOffsets[tid] = origOff + cStart;
+        uint32_t remaining = origLen - cStart;
+        outLengths[tid] = (substrLen < remaining) ? substrLen : remaining;
+    }
 }
+
+// ── Hash-encode flat string to u32 (first 8 chars packed big-endian) ──
+kernel void string_hash_encode_u32(
+    const device uint8_t*  chars    [[buffer(0)]],
+    const device uint32_t* offsets  [[buffer(1)]],
+    const device uint32_t* lengths  [[buffer(2)]],
+    device uint32_t*       encoded  [[buffer(3)]],
+    constant uint32_t&     rowCount [[buffer(4)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= rowCount) return;
+    uint32_t off = offsets[tid];
+    uint32_t len = lengths[tid];
+    uint32_t hashLen = min(len, 8u);
+    uint32_t val = 0;
+    for (uint32_t i = 0; i < hashLen; i++) {
+        val = val * 256 + chars[off + i];
+    }
+    encoded[tid] = val;
+}
+
+// ── FNV1a-32 hash of flat string (full string, better distribution) ──
+kernel void string_fnv1a_u32(
+    const device uint8_t*  chars    [[buffer(0)]],
+    const device uint32_t* offsets  [[buffer(1)]],
+    const device uint32_t* lengths  [[buffer(2)]],
+    device uint32_t*       hashes   [[buffer(3)]],
+    constant uint32_t&     rowCount [[buffer(4)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= rowCount) return;
+    uint32_t off = offsets[tid];
+    uint32_t len = lengths[tid];
+    uint32_t h = 2166136261u; // FNV offset basis
+    for (uint32_t i = 0; i < len; i++) {
+        h ^= chars[off + i];
+        h *= 16777619u;       // FNV prime
+    }
+    // Sentinel avoidance: 0 = empty slot in GroupBy HT, must match CPU fnv1a32
+    if (h == 0u) h = 1u;
+    if (h == 0xFFFFFFFFu) h = 0xFFFFFFFEu;
+    hashes[tid] = h;
+}
+
+// ── 8-byte big-endian prefix extraction for sort-compatible string keys ──
+// Shorter strings are zero-padded on the right, giving correct lexicographic order.
+kernel void string_prefix_u64(
+    const device uint8_t*  chars    [[buffer(0)]],
+    const device uint32_t* offsets  [[buffer(1)]],
+    const device uint32_t* lengths  [[buffer(2)]],
+    device ulong*          prefixes [[buffer(3)]],
+    constant uint32_t&     rowCount [[buffer(4)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= rowCount) return;
+    uint32_t off = offsets[tid];
+    uint32_t len = lengths[tid];
+    uint32_t n = min(len, 8u);
+    ulong val = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        val = (val << 8) | ulong(chars[off + i]);
+    }
+    // Zero-pad remaining bytes (shift left)
+    val <<= (8u - n) * 8u;
+    prefixes[tid] = val;
+}
+
+} // namespace ops

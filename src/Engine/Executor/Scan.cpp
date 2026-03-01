@@ -12,7 +12,7 @@ namespace engine {
 
 // Helper: flatten a vector<string> into pre-computed Metal GPU buffers
 // and store in ctx.flatStringCols for zero-copy filter dispatch.
-static void flattenStringCol(EvalContext& ctx, const std::string& colName) {
+void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     auto it = ctx.stringCols.find(colName);
     if (it == ctx.stringCols.end() || it->second.empty()) return;
 
@@ -38,7 +38,7 @@ static void flattenStringCol(EvalContext& ctx, const std::string& colName) {
         currentOffset += data[i].size();
     }
 
-    EvalContext::FlatStringCol flat;
+    FlatStringCol flat;
     flat.rowCount   = rowCount;
     flat.totalBytes = static_cast<uint32_t>(totalChars);
 
@@ -51,6 +51,63 @@ static void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     flat.lengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
 
     ctx.flatStringCols[colName] = flat;
+}
+
+// Helper: compute FNV1a-32 hashes on GPU from flat string buffers.
+// Replaces CPU per-row hashing (loadStringHashU32) with GPU batch computation.
+static void computeGpuHash(EvalContext& ctx, const std::string& colName) {
+    auto it = ctx.flatStringCols.find(colName);
+    if (it == ctx.flatStringCols.end()) return;
+    auto& flat = it->second;
+    if (flat.rowCount == 0) return;
+
+    auto hashBuf = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
+    if (!hashBuf) return;
+
+    ctx.u32ColsGPU[colName] = hashBuf;
+    // Download to CPU for compatibility with CPU-side consumers
+    std::vector<uint32_t> hashCPU(flat.rowCount);
+    memcpy(hashCPU.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
+    ctx.u32Cols[colName] = std::move(hashCPU);
+}
+
+// Helper: build dictionary encoding for a string column.
+// Creates sorted unique dictionary + per-row IDs, uploads IDs to GPU.
+void buildDictCol(EvalContext& ctx, const std::string& colName) {
+    auto it = ctx.stringCols.find(colName);
+    if (it == ctx.stringCols.end() || it->second.empty()) return;
+
+    auto& store = ColumnStoreGPU::instance();
+    if (!store.device()) return;
+
+    const auto& data = it->second;
+    uint32_t rowCount = static_cast<uint32_t>(data.size());
+
+    // Build sorted unique dictionary
+    std::vector<std::string> uniq(data.begin(), data.end());
+    std::sort(uniq.begin(), uniq.end());
+    uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
+
+    // Build forward map: string -> dict ID (0-based)
+    std::unordered_map<std::string, uint32_t> fwd;
+    fwd.reserve(uniq.size());
+    for (uint32_t i = 0; i < static_cast<uint32_t>(uniq.size()); ++i) {
+        fwd[uniq[i]] = i;
+    }
+
+    // Assign per-row dictionary IDs
+    std::vector<uint32_t> ids(rowCount);
+    for (uint32_t i = 0; i < rowCount; ++i) {
+        ids[i] = fwd[data[i]];
+    }
+
+    DictEncoded dict;
+    dict.dictionary = std::move(uniq);
+    dict.ids = ids;
+    dict.rowCount = rowCount;
+    dict.idsGPU = store.device()->newBuffer(ids.data(), ids.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+
+    ctx.dictCols[colName] = std::move(dict);
 }
 
 std::map<size_t, ScanInstance> buildScanInstanceMap(const Plan& plan) {
@@ -173,254 +230,8 @@ std::unordered_map<std::string, std::set<std::string>> collectNeededColumns(cons
     return tableCols;
 }
 
-static void collectPatternMatchColumns(const TypedExprPtr& expr, 
-                                       std::unordered_map<std::string, std::set<std::string>>& tableCols,
-                                       const std::unordered_map<std::string, std::string>& aliasMap) {
-    if (!expr) return;
-    
-    if (expr->kind == TypedExpr::Kind::Function) {
-        const auto& func = expr->asFunction();
-        if ((func.name == "LIKE" || func.name == "NOTLIKE" || func.name == "CONTAINS" ||
-             func.name == "PREFIX" || func.name == "SUFFIX" ||
-             func.name == "SUBSTRING" || func.name == "SUBSTR" ||
-             func.name == "substring" || func.name == "substr") && func.args.size() >= 1) {
-            if (func.args[0] && func.args[0]->kind == TypedExpr::Kind::Column) {
-                std::string colName = func.args[0]->asColumn().column;
-                // Resolve alias
-                if (aliasMap.count(colName)) colName = aliasMap.at(colName);
-                
-                std::string table = tableForColumn(colName);
-                if (!table.empty()) {
-                    tableCols[table].insert(colName);
-                }
-            }
-        }
-        for (const auto& arg : func.args) {
-            collectPatternMatchColumns(arg, tableCols, aliasMap);
-        }
-    } else if (expr->kind == TypedExpr::Kind::Binary) {
-        collectPatternMatchColumns(expr->asBinary().left, tableCols, aliasMap);
-        collectPatternMatchColumns(expr->asBinary().right, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Unary) {
-        collectPatternMatchColumns(expr->asUnary().operand, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Compare) {
-        const auto& cmp = expr->asCompare();
-        
-        // Detect String Comparison (Column = StringLiteral)
-        bool isStringComp = false;
-        if ((cmp.right && cmp.right->kind == TypedExpr::Kind::Literal && 
-             std::holds_alternative<std::string>(cmp.right->asLiteral().value)) ||
-            (cmp.left && cmp.left->kind == TypedExpr::Kind::Literal && 
-             std::holds_alternative<std::string>(cmp.left->asLiteral().value))) {
-            isStringComp = true;
-        }
-
-        // Detect IN list with Strings
-        if (cmp.op == CompareOp::In && !cmp.inList.empty()) {
-            for (const auto& item : cmp.inList) {
-                if (item && item->kind == TypedExpr::Kind::Literal && 
-                    std::holds_alternative<std::string>(item->asLiteral().value)) {
-                    isStringComp = true;
-                    break;
-                }
-            }
-        }
-
-        if (isStringComp) {
-            // If string comparison, mark columns for raw string loading
-            auto registerCol = [&](const TypedExprPtr& e) {
-                if (e && e->kind == TypedExpr::Kind::Column) {
-                    std::string colName = e->asColumn().column;
-                    // Resolve alias
-                    if (aliasMap.count(colName)) colName = aliasMap.at(colName);
-
-                    std::string table = tableForColumn(colName);
-                    if (std::getenv("GPUDB_DEBUG_OPS")) {
-                        std::cerr << "[Exec] DEBUG: Found string comparison col " << colName << " table=" << table << "\n";
-                    }
-                    if (!table.empty()) {
-                        tableCols[table].insert(colName);
-                    }
-                }
-            };
-            registerCol(cmp.left);
-            registerCol(cmp.right);
-        }
-
-        collectPatternMatchColumns(cmp.left, tableCols, aliasMap);
-        collectPatternMatchColumns(cmp.right, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Case) {
-        const auto& caseExpr = expr->asCase();
-        for (const auto& whenClause : caseExpr.cases) {
-            collectPatternMatchColumns(whenClause.when, tableCols, aliasMap);
-            collectPatternMatchColumns(whenClause.then, tableCols, aliasMap);
-        }
-        collectPatternMatchColumns(caseExpr.elseExpr, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Aggregate) {
-        collectPatternMatchColumns(expr->asAggregate().arg, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Cast) {
-        collectPatternMatchColumns(expr->asCast().expr, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Alias) {
-        collectPatternMatchColumns(expr->asAlias().expr, tableCols, aliasMap);
-    } else if (expr->kind == TypedExpr::Kind::Column) {
-        std::string colName = expr->asColumn().column;
-        if (aliasMap.count(colName)) colName = aliasMap.at(colName);
-
-        // Handle mangled function call in column name
-        if (colName.rfind("NOT prefix(", 0) == 0) {
-            // "NOT prefix(p_type, ...)"
-            size_t comma = colName.find(',');
-            if (comma != std::string::npos && comma > 11) {
-                std::string c = colName.substr(11, comma - 11);
-                // trim
-                c.erase(0, c.find_first_not_of(" "));
-                c.erase(c.find_last_not_of(" ") + 1);
-                
-                if (aliasMap.count(c)) c = aliasMap.at(c);
-                std::string table = tableForColumn(c);
-                if (!table.empty()) {
-                    tableCols[table].insert(c);
-                    if (std::getenv("GPUDB_DEBUG_OPS")) {
-                        std::cerr << "[Exec] DEBUG: Found mangled prefix comparison col " << c << " table=" << table << "\n";
-                    }
-                }
-            }
-        }
-    }
-}
-
-std::unordered_map<std::string, std::set<std::string>> collectPatternMatchColumns(const Plan& plan) {
-    std::unordered_map<std::string, std::set<std::string>> tableCols;
-    std::unordered_map<std::string, std::string> aliasMap;
-    
-    for (const auto& node : plan.nodes) {
-        switch (node.type) {
-            case IRNode::Type::Scan:
-                if (node.asScan().filter) {
-                    collectPatternMatchColumns(node.asScan().filter, tableCols, aliasMap);
-                }
-                break;
-            case IRNode::Type::Filter:
-                collectPatternMatchColumns(node.asFilter().predicate, tableCols, aliasMap);
-                break;
-            case IRNode::Type::Project:
-                for (size_t i = 0; i < node.asProject().exprs.size(); ++i) {
-                    const auto& expr = node.asProject().exprs[i];
-                    std::string outName = i < node.asProject().outputNames.size() ? node.asProject().outputNames[i] : "";
-                    
-                    collectPatternMatchColumns(expr, tableCols, aliasMap);
-                    
-                    // Track aliases: outName -> underlying column
-                    if (!outName.empty() && expr->kind == TypedExpr::Kind::Column) {
-                        std::string src = expr->asColumn().column;
-                        if (aliasMap.count(src)) src = aliasMap.at(src);
-                        aliasMap[outName] = src;
-                        if (std::getenv("GPUDB_DEBUG_OPS")) {
-                            std::cerr << "[Exec] DEBUG: Tracked pattern alias " << outName << " -> " << src << "\n";
-                        }
-                    }
-                }
-                break;
-            case IRNode::Type::Join: {
-                const auto& join = node.asJoin();
-                // Check condition
-                collectPatternMatchColumns(join.condition, tableCols, aliasMap);
-                // Check right filter (pushed down predicates)
-                if (join.rightFilter) {
-                    collectPatternMatchColumns(join.rightFilter, tableCols, aliasMap);
-                }
-                // Check keys
-                for (const auto& k : join.leftKeys) collectPatternMatchColumns(k, tableCols, aliasMap);
-                for (const auto& k : join.rightKeys) collectPatternMatchColumns(k, tableCols, aliasMap);
-                break;
-            }
-            case IRNode::Type::Aggregate: {
-                const auto& agg = node.asAggregate();
-                collectPatternMatchColumns(agg.expr, tableCols, aliasMap);
-                break;
-            }
-            case IRNode::Type::GroupBy: {
-                const auto& gb = node.asGroupBy();
-                for (const auto& k : gb.keys) {
-                    collectPatternMatchColumns(k, tableCols, aliasMap);
-                    
-                    // Check if GROUP BY key is a string column - need raw strings for output
-                    if (k && k->kind == TypedExpr::Kind::Column) {
-                        std::string colName = k->asColumn().column;
-                        // Resolve alias
-                        if (aliasMap.count(colName)) colName = aliasMap.at(colName);
-                        
-                        std::string table = tableForColumn(colName);
-                        if (!table.empty()) {
-                            // Check if this column is a StringHash type in schema
-                            const auto& schema = SchemaRegistry::instance();
-                            const auto* tbl = schema.getTable(table);
-                            if (tbl) {
-                                auto colType = tbl->getColumnType(colName);
-                                if (colType == ColumnType::StringHash) {
-                                    // Need raw strings for this GROUP BY key
-                                    tableCols[table].insert(colName);
-                                    if (std::getenv("GPUDB_DEBUG_OPS")) {
-                                        std::cerr << "[Exec] DEBUG: GroupBy key " << colName << " needs raw strings for output\n";
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                for (const auto& agg : gb.aggregates) collectPatternMatchColumns(agg, tableCols, aliasMap);
-                break;
-            }
-            case IRNode::Type::OrderBy: {
-                const auto& ob = node.asOrderBy();
-                for (const auto& spec : ob.specs) {
-                    collectPatternMatchColumns(spec.expr, tableCols, aliasMap);
-                    // ORDER BY on a StringHash column needs raw strings for lexicographic sort
-                    if (spec.expr && spec.expr->kind == TypedExpr::Kind::Column) {
-                        std::string colName = spec.expr->asColumn().column;
-                        if (aliasMap.count(colName)) colName = aliasMap.at(colName);
-                        std::string table = tableForColumn(colName);
-                        if (!table.empty()) {
-                            const auto& schema = SchemaRegistry::instance();
-                            const auto* tbl = schema.getTable(table);
-                            if (tbl) {
-                                auto colType = tbl->getColumnType(colName);
-                                if (colType == ColumnType::StringHash) {
-                                    tableCols[table].insert(colName);
-                                }
-                            }
-                        }
-                    }
-                }
-                // Also check simple column names list
-                for (const auto& colName : ob.columns) {
-                    std::string resolved = colName;
-                    if (aliasMap.count(resolved)) resolved = aliasMap.at(resolved);
-                    std::string table = tableForColumn(resolved);
-                    if (!table.empty()) {
-                        const auto& schema = SchemaRegistry::instance();
-                        const auto* tbl = schema.getTable(table);
-                        if (tbl) {
-                            auto colType = tbl->getColumnType(resolved);
-                            if (colType == ColumnType::StringHash) {
-                                tableCols[table].insert(resolved);
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-            default:
-                break;
-        }
-    }
-    
-    return tableCols;
-}
-
 void IRGpuLoader::loadTables(
     const std::unordered_map<std::string, std::set<std::string>>& tableColsMap,
-    const std::unordered_map<std::string, std::set<std::string>>& patternMatchCols,
     const std::map<size_t, ScanInstance>& scanInstanceMap,
     const std::string& datasetPath,
     std::unordered_map<std::string, EvalContext>& tableContexts,
@@ -481,21 +292,28 @@ void IRGpuLoader::loadTables(
                         buf->retain();
                     }
                     
-                    auto pmIt = patternMatchCols.find(tableName);
-                    if (pmIt != patternMatchCols.end()) {
-                        for (const auto& colName : pmIt->second) {
-                            std::string actualCol = colName;
-                            if (tableName == "nation" && colName == "nation") actualCol = "n_name";
-                            
-                            auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, actualCol);
-                            if (!rawStrings.empty()) {
-                                if (inst.instanceNum == 1) {
-                                    ctx.stringCols[colName] = rawStrings;
-                                    flattenStringCol(ctx, colName);
+                    // Always load raw strings + flatten for ALL StringHash columns
+                    {
+                        const auto& schema = SchemaRegistry::instance();
+                        const auto* tblSchema = schema.getTable(tableName);
+                        if (tblSchema) {
+                            for (const auto& colName : cols) {
+                                if (tblSchema->getColumnType(colName) == ColumnType::StringHash) {
+                                    auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, colName);
+                                    if (!rawStrings.empty()) {
+                                        if (inst.instanceNum == 1) {
+                                            ctx.stringCols[colName] = rawStrings;
+                                            flattenStringCol(ctx, colName);
+                                            computeGpuHash(ctx, colName);
+                                            buildDictCol(ctx, colName);
+                                        }
+                                        std::string suffixed = colName + "_" + std::to_string(inst.instanceNum);
+                                        ctx.stringCols[suffixed] = std::move(rawStrings);
+                                        flattenStringCol(ctx, suffixed);
+                                        computeGpuHash(ctx, suffixed);
+                                        buildDictCol(ctx, suffixed);
+                                    }
                                 }
-                                std::string suffixed = colName + "_" + std::to_string(inst.instanceNum);
-                                ctx.stringCols[suffixed] = std::move(rawStrings);
-                                flattenStringCol(ctx, suffixed);
                             }
                         }
                     }
@@ -536,20 +354,25 @@ void IRGpuLoader::loadTables(
                 buf->retain();
             }
             
-            auto pmIt = patternMatchCols.find(tableName);
-            if (pmIt != patternMatchCols.end()) {
-                for (const auto& colName : pmIt->second) {
-                    std::string actualCol = colName;
-                    if (tableName == "nation" && colName == "nation") actualCol = "n_name";
-
-                    auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, actualCol);
-                    if (!rawStrings.empty()) {
-                        ctx.stringCols[colName] = std::move(rawStrings);
-                        flattenStringCol(ctx, colName);
-                        if (debug) {
-                            std::cerr << "[Exec] Loaded raw strings for " << tableName << "." << colName 
-                                      << " (" << ctx.stringCols[colName].size() << " rows, flat="
-                                      << ctx.flatStringCols.count(colName) << ")\n";
+            // Always load raw strings + flatten for ALL StringHash columns
+            {
+                const auto& schema = SchemaRegistry::instance();
+                const auto* tblSchema = schema.getTable(tableName);
+                if (tblSchema) {
+                    for (const auto& colName : cols) {
+                        if (tblSchema->getColumnType(colName) == ColumnType::StringHash) {
+                            auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, colName);
+                            if (!rawStrings.empty()) {
+                                ctx.stringCols[colName] = std::move(rawStrings);
+                                flattenStringCol(ctx, colName);
+                                computeGpuHash(ctx, colName);
+                                buildDictCol(ctx, colName);
+                                if (debug) {
+                                    std::cerr << "[Exec] Loaded raw strings for " << tableName << "." << colName 
+                                              << " (" << ctx.stringCols[colName].size() << " rows, flat="
+                                              << ctx.flatStringCols.count(colName) << ")\n";
+                                }
+                            }
                         }
                     }
                 }

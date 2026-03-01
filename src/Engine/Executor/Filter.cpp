@@ -45,19 +45,13 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
     if (!ctx.u32ColsGPU.empty() || !ctx.f32ColsGPU.empty()) {
         if (executeGPUFilterRecursive(pred, ctx)) {
             if (debug) std::cerr << "[Exec] GPU Filter success, count=" << ctx.activeRowsCountGPU << "\n";
-            // Sync activeRows to CPU for operations that require it
+            // Lazy sync: only update rowCount here.
+            // CPU activeRows vector is populated on demand via ctx.ensureActiveRowsCPU().
             if (ctx.activeRowsGPU) {
                 ctx.rowCount = ctx.activeRowsCountGPU;
-                ctx.activeRows.resize(ctx.rowCount);
-                if (ctx.rowCount > 0) {
-                   const uint32_t* ptr = static_cast<const uint32_t*>(ctx.activeRowsGPU->contents());
-                   std::memcpy(ctx.activeRows.data(), ptr, ctx.rowCount * sizeof(uint32_t));
-                }
-            } else {
-                 if (ctx.activeRowsCountGPU == 0) {
-                     ctx.rowCount = 0;
-                     ctx.activeRows.clear();
-                 }
+            } else if (ctx.activeRowsCountGPU == 0) {
+                ctx.rowCount = 0;
+                ctx.activeRows.clear();
             }
             return true;
         } else {

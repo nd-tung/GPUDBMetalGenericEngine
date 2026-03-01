@@ -938,6 +938,10 @@ static std::vector<std::string> parseSelectColumnNames(const std::string& sql) {
         if (list[i] == '(') depth++;
         else if (list[i] == ')') depth--;
     }
+
+    // If the only column is "*", return empty to mean "all columns"
+    if (cols.size() == 1 && cols[0] == "*") return {};
+
     return cols;
 }
 
@@ -2043,6 +2047,9 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
             if (f.is_array()) {
                 for (const auto& item : f.get_array()) {
                     std::string s = item.get_string();
+                    // Skip DuckDB "Dynamic Filter" entries — these are optimizer-
+                    // generated bloom-filter-style hints that reference no real column.
+                    if (s.find("Dynamic Filter") != std::string::npos) continue;
                     // Handle "optional:" filters by stripping the prefix
                     // This allows valid filters (like IN lists) to be executed by the scanner
                     // rather than relying on complex downstream joins (like MARK joins)
@@ -2054,10 +2061,15 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                 }
             } else if (f.is_string()) {
                 std::string s = f.get_string();
-                if (s.find("optional:") != std::string::npos) {
-                     s = trim_str(s.substr(s.find("optional:") + 9));
+                // Skip DuckDB "Dynamic Filter" entries
+                if (s.find("Dynamic Filter") != std::string::npos) {
+                    // do not add
+                } else {
+                    if (s.find("optional:") != std::string::npos) {
+                         s = trim_str(s.substr(s.find("optional:") + 9));
+                    }
+                    candidateFilters.push_back(s);
                 }
-                candidateFilters.push_back(s);
             }
             
             // Keep all filters - they compare columns to literals

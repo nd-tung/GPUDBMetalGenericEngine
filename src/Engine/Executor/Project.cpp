@@ -1,6 +1,7 @@
 #include "GpuExecutor.hpp"
 #include "GpuExecutorPriv.hpp"
 #include "Operators.hpp"
+#include "ColumnStoreGPU.hpp"
 
 #include <iostream>
 #include <vector>
@@ -22,15 +23,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
     }
 
     // NOTE: activeRows sync from GPU is deferred until needed (e.g., for string columns)
-    // Lambda to sync on-demand
+    // Lambda delegates to EvalContext method
     auto ensureActiveRowsCPU = [&]() {
-        if (ctx.activeRowsGPU && ctx.activeRows.size() != ctx.activeRowsCountGPU) {
-            if (debug) std::cerr << "[Exec] Project: Lazy syncing activeRowsGPU (" << ctx.activeRowsCountGPU << ") to CPU\n";
-            ctx.activeRows.resize(ctx.activeRowsCountGPU);
-            if (ctx.activeRowsCountGPU > 0) {
-                std::memcpy(ctx.activeRows.data(), ctx.activeRowsGPU->contents(), ctx.activeRowsCountGPU * sizeof(uint32_t));
-            }
-        }
+        ctx.ensureActiveRowsCPU();
     };
 
     const size_t originalRowCount = ctx.rowCount;
@@ -153,7 +148,130 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         }
                     }
                     
-                    // Find raw strings for this column
+                    // --- GPU path: use FlatStringCol or flatten on-the-fly from stringCols ---
+                    std::string flatKey = colName;
+                    if (!ctx.flatStringCols.count(flatKey)) {
+                        for (int suffix = 1; suffix <= 9; ++suffix) {
+                            std::string sfx = colName + "_" + std::to_string(suffix);
+                            if (ctx.flatStringCols.count(sfx)) { flatKey = sfx; break; }
+                        }
+                    }
+                    
+                    // If no pre-existing flat buffers, try flatten on-the-fly from stringCols
+                    bool tempFlat = false;
+                    FlatStringCol flatBuf;
+                    if (!ctx.flatStringCols.count(flatKey)) {
+                        // Find CPU strings
+                        std::string strKey = colName;
+                        auto sIt = ctx.stringCols.find(strKey);
+                        if (sIt == ctx.stringCols.end()) {
+                            for (int suffix = 1; suffix <= 9; ++suffix) {
+                                sIt = ctx.stringCols.find(colName + "_" + std::to_string(suffix));
+                                if (sIt != ctx.stringCols.end()) { strKey = sIt->first; break; }
+                            }
+                        }
+                        if (sIt != ctx.stringCols.end() && !sIt->second.empty()) {
+                            const auto& data = sIt->second;
+                            uint32_t rc = static_cast<uint32_t>(data.size());
+                            std::vector<uint32_t> offsets(rc), lengths(rc);
+                            size_t totalChars = 0;
+                            for (const auto& s : data) totalChars += s.size();
+                            std::vector<char> chars;
+                            chars.reserve(totalChars);
+                            size_t cur = 0;
+                            for (size_t i = 0; i < rc; ++i) {
+                                offsets[i] = static_cast<uint32_t>(cur);
+                                lengths[i] = static_cast<uint32_t>(data[i].size());
+                                chars.insert(chars.end(), data[i].begin(), data[i].end());
+                                cur += data[i].size();
+                            }
+                            flatBuf.rowCount = rc;
+                            flatBuf.totalBytes = static_cast<uint32_t>(totalChars);
+                            flatBuf.chars = GpuOps::createBuffer(chars.empty() ? (const void*)"\0" : chars.data(),
+                                                                  std::max(chars.size(), (size_t)1));
+                            flatBuf.offsets = GpuOps::createBuffer(offsets.data(), offsets.size() * sizeof(uint32_t));
+                            flatBuf.lengths = GpuOps::createBuffer(lengths.data(), lengths.size() * sizeof(uint32_t));
+                            tempFlat = true;
+                        }
+                    }
+                    
+                    FlatStringCol* flatPtr = nullptr;
+                    if (ctx.flatStringCols.count(flatKey))
+                        flatPtr = &ctx.flatStringCols[flatKey];
+                    else if (tempFlat)
+                        flatPtr = &flatBuf;
+                    
+                    if (flatPtr) {
+                        auto& flat = *flatPtr;
+                        uint32_t gpuStart = static_cast<uint32_t>(std::max(startPos, 1));
+                        uint32_t gpuLen = (length >= 0) ? static_cast<uint32_t>(length) : 0xFFFFFFFF;
+                        uint32_t rc = flat.rowCount;
+                        
+                        // GPU substring: compute new offsets/lengths (zero-copy into same chars)
+                        auto [subOffsets, subLengths] = GpuOps::substringFlat(
+                            flat.offsets, flat.lengths, gpuStart, gpuLen, rc);
+                        
+                        if (subOffsets && subLengths) {
+                            // Release temp input offsets/lengths (no longer needed after substring)
+                            if (tempFlat) {
+                                flatBuf.offsets->release();
+                                flatBuf.lengths->release();
+                                flatBuf.offsets = nullptr;
+                                flatBuf.lengths = nullptr;
+                            }
+                            
+                            // GPU hash encode for u32 groupby compatibility
+                            MTL::Buffer* encodedGPU = GpuOps::stringHashEncodeU32(
+                                flat.chars, subOffsets, subLengths, rc);
+                            
+                            // Download u32 encoding
+                            std::vector<uint32_t> encoded(rc);
+                            if (encodedGPU) {
+                                std::memcpy(encoded.data(), encodedGPU->contents(), rc * sizeof(uint32_t));
+                                encodedGPU->release();
+                            }
+                            
+                            // Reconstruct CPU strings from flat buffers for downstream use
+                            const uint8_t* charsPtr = static_cast<const uint8_t*>(flat.chars->contents());
+                            const uint32_t* offPtr = static_cast<const uint32_t*>(subOffsets->contents());
+                            const uint32_t* lenPtr = static_cast<const uint32_t*>(subLengths->contents());
+                            std::vector<std::string> substrResults(rc);
+                            for (uint32_t i = 0; i < rc; ++i) {
+                                substrResults[i] = std::string(reinterpret_cast<const char*>(charsPtr + offPtr[i]), lenPtr[i]);
+                            }
+                            
+                            // Store FlatStringCol for the output under the new name
+                            FlatStringCol outFlat;
+                            outFlat.chars     = flat.chars;   // shared — zero-copy
+                            outFlat.offsets   = subOffsets;
+                            outFlat.lengths   = subLengths;
+                            outFlat.rowCount  = rc;
+                            outFlat.totalBytes = flat.totalBytes; // conservative
+                            ctx.flatStringCols[outName] = outFlat;
+                            ctx.flatStringCols[posName] = outFlat;
+                            
+                            ctx.stringCols[outName] = std::move(substrResults);
+                            ctx.stringCols[posName] = ctx.stringCols[outName];
+                            ctx.u32Cols[outName] = encoded;
+                            ctx.u32Cols[posName] = encoded;
+                            out.u32_cols.push_back(encoded);
+                            out.u32_names.push_back(outName);
+                            
+                            if (debug) {
+                                std::cerr << "[Exec] Project: GPU SUBSTRING computed " << rc 
+                                          << " results for " << outName << "\n";
+                            }
+                            continue;
+                        }
+                        // GPU path failed — clean up temp buffers and fall through to CPU
+                        if (tempFlat) {
+                            if (flatBuf.chars) flatBuf.chars->release();
+                            if (flatBuf.offsets) flatBuf.offsets->release();
+                            if (flatBuf.lengths) flatBuf.lengths->release();
+                        }
+                    }
+                    
+                    // --- CPU fallback: find raw strings ---
                     auto strIt = ctx.stringCols.find(colName);
                     if (strIt == ctx.stringCols.end()) {
                         // Try suffixed versions
@@ -182,24 +300,38 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         ctx.stringCols[outName] = std::move(substrResults);
                         ctx.stringCols[posName] = ctx.stringCols[outName];
                         
-                        // Create u32 encoded values for groupby compatibility (simple hash).
-                        std::vector<uint32_t> encoded;
-                        encoded.reserve(ctx.stringCols[outName].size());
-                        for (const auto& s : ctx.stringCols[outName]) {
-                            // Hash first 8 chars to u32 for groupby compatibility
-                            uint32_t val = 0;
-                            for (size_t i = 0; i < s.size() && i < 8; ++i) {
-                                val = val * 256 + static_cast<uint8_t>(s[i]);
+                        // Build flat GPU buffers + dict + hash for groupby compatibility
+                        flattenStringCol(ctx, outName);
+                        buildDictCol(ctx, outName);
+                        auto flatIt = ctx.flatStringCols.find(outName);
+                        if (flatIt != ctx.flatStringCols.end() && flatIt->second.rowCount > 0) {
+                            auto& flat = flatIt->second;
+                            MTL::Buffer* hashBuf = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
+                            if (hashBuf) {
+                                std::vector<uint32_t> encoded(flat.rowCount);
+                                std::memcpy(encoded.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
+                                hashBuf->release();
+                                ctx.u32Cols[outName] = encoded;
+                                ctx.u32Cols[posName] = encoded;
+                                ctx.u32ColsGPU[outName] = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
+                                out.u32_cols.push_back(std::move(encoded));
+                                out.u32_names.push_back(outName);
                             }
-                            encoded.push_back(val);
+                        } else {
+                            // Fallback: CPU hash
+                            std::vector<uint32_t> encoded;
+                            encoded.reserve(ctx.stringCols[outName].size());
+                            for (const auto& s : ctx.stringCols[outName]) {
+                                encoded.push_back(GpuOps::fnv1a32(s));
+                            }
+                            ctx.u32Cols[outName] = encoded;
+                            ctx.u32Cols[posName] = encoded;
+                            out.u32_cols.push_back(std::move(encoded));
+                            out.u32_names.push_back(outName);
                         }
-                        ctx.u32Cols[outName] = encoded;
-                        ctx.u32Cols[posName] = encoded;
-                        out.u32_cols.push_back(encoded);
-                        out.u32_names.push_back(outName);
                         
                         if (debug) {
-                            std::cerr << "[Exec] Project: SUBSTRING computed " << ctx.stringCols[outName].size() 
+                            std::cerr << "[Exec] Project: CPU SUBSTRING computed " << ctx.stringCols[outName].size() 
                                       << " results for " << outName << "\n";
                         }
                         continue;
@@ -348,6 +480,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         const auto& data = itU->second;
                         results.reserve(data.size());
                         // Respect activeRows if set
+                        ensureActiveRowsCPU();
                         if (ctx.activeRows.size() == ctx.activeRowsCountGPU && ctx.activeRowsCountGPU > 0 && ctx.activeRows.size() != data.size()) {
                             for (uint32_t idx : ctx.activeRows) {
                                 if (idx < data.size()) {
@@ -371,6 +504,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             found = true;
                             const auto& data = itS->second;
                             results.reserve(data.size());
+                             ensureActiveRowsCPU();
                              if (ctx.activeRows.size() == ctx.activeRowsCountGPU && ctx.activeRowsCountGPU > 0 && ctx.activeRows.size() != data.size()) {
                                 for(uint32_t idx : ctx.activeRows) {
                                     if(idx < data.size()) {
@@ -762,6 +896,14 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     colData = {};
                 } else if (ctx.activeRows.empty() || itU->second.size() == ctx.activeRows.size()) {
                     colData = itU->second;
+                } else if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0) {
+                    // GPU gather path: upload CPU vector, gather by GPU activeRows, download
+                    auto& s = ColumnStoreGPU::instance();
+                    MTL::Buffer* src = s.device()->newBuffer(itU->second.data(), itU->second.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                    colData.resize(ctx.activeRowsCountGPU);
+                    std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(uint32_t));
+                    src->release(); dst->release();
                 } else {
                     // Need CPU activeRows for compaction
                     ensureActiveRowsCPU();
@@ -851,11 +993,21 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 if (ctx.rowCount == 0) {
                     colData = {};
                 } else if (!ctx.activeRows.empty()) {
-                    // Need CPU activeRows for compaction
-                    ensureActiveRowsCPU();
-                    colData.reserve(ctx.activeRows.size());
-                    for (uint32_t idx : ctx.activeRows) {
-                        colData.push_back(idx < itF->second.size() ? itF->second[idx] : 0.0f);
+                    // Prefer GPU gather for f32 activeRows compaction
+                    if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && itF->second.size() > ctx.activeRows.size()) {
+                        auto& s = ColumnStoreGPU::instance();
+                        MTL::Buffer* src = s.device()->newBuffer(itF->second.data(), itF->second.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                        MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                        colData.resize(ctx.activeRowsCountGPU);
+                        std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(float));
+                        src->release(); dst->release();
+                    } else {
+                        // CPU fallback
+                        ensureActiveRowsCPU();
+                        colData.reserve(ctx.activeRows.size());
+                        for (uint32_t idx : ctx.activeRows) {
+                            colData.push_back(idx < itF->second.size() ? itF->second[idx] : 0.0f);
+                        }
                     }
                 } else {
                     colData = itF->second;
@@ -912,80 +1064,125 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     }
                     
                     if (sourceCtx) {
-                        if (debug) std::cerr << "[Exec] Project: performing ad-hoc join for " << neededCol << " on " << currentKey << " -> " << targetKey << "\n";
+                        if (debug) std::cerr << "[Exec] Project: performing GPU ad-hoc join for " << neededCol << " on " << currentKey << " -> " << targetKey << "\n";
                         
-                        std::unordered_map<uint32_t, uint32_t> keyToRow;
+                        // --- GPU hash join: build keys from dimension table, probe from current context ---
                         const auto& sKeys = sourceCtx->u32Cols.at(targetKey);
-                        for (size_t i = 0; i < sKeys.size(); ++i) keyToRow[sKeys[i]] = static_cast<uint32_t>(i);
+                        uint32_t buildCount = static_cast<uint32_t>(sKeys.size());
+                        MTL::Buffer* buildKeysGPU = GpuOps::createBuffer(sKeys.data(), sKeys.size() * sizeof(uint32_t));
                         
-                        const auto& probeKeysFull = ctx.u32Cols.at(currentKey);
-                        std::vector<uint32_t> probeKeys;
-                        if (!ctx.activeRows.empty()) {
-                            // Need CPU activeRows for probe key extraction
-                            ensureActiveRowsCPU();
-                            probeKeys.reserve(ctx.activeRows.size());
-                            for(auto idx : ctx.activeRows) probeKeys.push_back(idx < probeKeysFull.size() ? probeKeysFull[idx] : 0);
+                        // Get probe keys on GPU (prefer existing GPU buffer, fallback to CPU upload)
+                        MTL::Buffer* probeKeysGPU = nullptr;
+                        uint32_t probeCount = 0;
+                        bool probeOwned = false;
+                        
+                        if (ctx.u32ColsGPU.count(currentKey)) {
+                            if (ctx.activeRowsGPU) {
+                                probeKeysGPU = GpuOps::gatherU32(ctx.u32ColsGPU[currentKey], ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                                probeCount = ctx.activeRowsCountGPU;
+                                probeOwned = true;
+                            } else {
+                                probeKeysGPU = ctx.u32ColsGPU[currentKey];
+                                probeCount = static_cast<uint32_t>(ctx.rowCount);
+                            }
                         } else {
-                            probeKeys = probeKeysFull;
+                            const auto& probeKeysFull = ctx.u32Cols.at(currentKey);
+                            MTL::Buffer* probeSrc = GpuOps::createBuffer(probeKeysFull.data(), probeKeysFull.size() * sizeof(uint32_t));
+                            if (!ctx.activeRows.empty() || ctx.activeRowsGPU) {
+                                if (ctx.activeRowsGPU) {
+                                    probeKeysGPU = GpuOps::gatherU32(probeSrc, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                                    probeCount = ctx.activeRowsCountGPU;
+                                } else {
+                                    MTL::Buffer* arBuf = GpuOps::createBuffer(ctx.activeRows.data(), ctx.activeRows.size() * sizeof(uint32_t));
+                                    probeKeysGPU = GpuOps::gatherU32(probeSrc, arBuf, static_cast<uint32_t>(ctx.activeRows.size()));
+                                    probeCount = static_cast<uint32_t>(ctx.activeRows.size());
+                                    arBuf->release();
+                                }
+                                probeSrc->release();
+                            } else {
+                                probeKeysGPU = probeSrc;
+                                probeCount = static_cast<uint32_t>(probeKeysFull.size());
+                            }
+                            probeOwned = true;
                         }
+                        
+                        // GPU hash join
+                        auto jRes = GpuOps::joinHash(buildKeysGPU, nullptr, buildCount, probeKeysGPU, nullptr, probeCount);
+                        buildKeysGPU->release();
+                        if (probeOwned) probeKeysGPU->release();
+                        
+                        if (debug) std::cerr << "[Exec] Project: GPU ad-hoc join matched " << jRes.count << "/" << probeCount << " rows\n";
+                        
+                        // joinHash output is in probe order (probe row i → buildIndices[i])
+                        // For FK joins, jRes.count should equal probeCount
                         
                         if (sourceCtx->f32Cols.count(neededCol)) {
                             const auto& sVals = sourceCtx->f32Cols.at(neededCol);
-                            std::vector<float> res;
-                            res.reserve(probeKeys.size());
-                            for (uint32_t k : probeKeys) {
-                                if (keyToRow.count(k)) {
-                                    uint32_t row = keyToRow[k];
-                                    res.push_back(row < sVals.size() ? sVals[row] : 0.0f);
-                                } else res.push_back(0.0f);
-                            }
+                            MTL::Buffer* srcValsGPU = GpuOps::createBuffer(sVals.data(), sVals.size() * sizeof(float));
+                            MTL::Buffer* gathered = GpuOps::gatherF32(srcValsGPU, jRes.buildIndices, jRes.count);
+                            srcValsGPU->release();
+                            
+                            std::vector<float> res(jRes.count);
+                            std::memcpy(res.data(), gathered->contents(), jRes.count * sizeof(float));
+                            gathered->release();
+                            
                             ctx.f32Cols[posName] = res;
                             if (!outName.empty()) ctx.f32Cols[outName] = res;
                             out.f32_cols.push_back(res);
                             out.f32_names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
+                            if (jRes.buildIndices) jRes.buildIndices->release();
+                            if (jRes.probeIndices) jRes.probeIndices->release();
                             continue;
                         } else if (sourceCtx->stringCols.count(neededCol)) {
+                            // Strings: download buildIndices to CPU and gather strings
                             const auto& sVals = sourceCtx->stringCols.at(neededCol);
+                            std::vector<uint32_t> buildIdx(jRes.count);
+                            std::memcpy(buildIdx.data(), jRes.buildIndices->contents(), jRes.count * sizeof(uint32_t));
+                            
                             std::vector<std::string> res;
-                            res.reserve(probeKeys.size());
-                            for (uint32_t k : probeKeys) {
-                                if (keyToRow.count(k)) {
-                                    uint32_t row = keyToRow[k];
-                                    res.push_back(row < sVals.size() ? sVals[row] : "");
-                                } else res.push_back("");
+                            res.reserve(jRes.count);
+                            for (uint32_t bi : buildIdx) {
+                                res.push_back(bi < sVals.size() ? sVals[bi] : "");
                             }
                             ctx.stringCols[posName] = res;
                             if (!outName.empty()) ctx.stringCols[outName] = res;
                             out.string_cols.push_back(res);
                             out.string_names.push_back(outName.empty() ? neededCol : outName);
-                            // Dummy u32
-                             std::vector<uint32_t> encoded;
-                             for(const auto& s : res) encoded.push_back(s.empty() ? 0 : (uint32_t)s[0]);
-                             ctx.u32Cols[posName] = encoded;
-                             if (!outName.empty()) ctx.u32Cols[outName] = encoded;
-                             out.u32_cols.push_back(encoded);
-                             out.u32_names.push_back(outName.empty() ? neededCol : outName);
-                             updateRowCount(res.size());
-                             continue;
+                            // Dummy u32 encoding
+                            std::vector<uint32_t> encoded;
+                            for (const auto& s : res) encoded.push_back(s.empty() ? 0 : (uint32_t)s[0]);
+                            ctx.u32Cols[posName] = encoded;
+                            if (!outName.empty()) ctx.u32Cols[outName] = encoded;
+                            out.u32_cols.push_back(encoded);
+                            out.u32_names.push_back(outName.empty() ? neededCol : outName);
+                            updateRowCount(res.size());
+                            if (jRes.buildIndices) jRes.buildIndices->release();
+                            if (jRes.probeIndices) jRes.probeIndices->release();
+                            continue;
                         } else if (sourceCtx->u32Cols.count(neededCol)) {
-                             // U32 Case
-                             const auto& sVals = sourceCtx->u32Cols.at(neededCol);
-                             std::vector<uint32_t> res;
-                             res.reserve(probeKeys.size());
-                             for (uint32_t k : probeKeys) {
-                                 if (keyToRow.count(k)) {
-                                     uint32_t row = keyToRow[k];
-                                     res.push_back(row < sVals.size() ? sVals[row] : 0);
-                                 } else res.push_back(0);
-                             }
-                             ctx.u32Cols[posName] = res;
-                             if (!outName.empty()) ctx.u32Cols[outName] = res;
-                             out.u32_cols.push_back(res);
-                             out.u32_names.push_back(outName.empty() ? neededCol : outName);
-                             updateRowCount(res.size());
-                             continue;
+                            const auto& sVals = sourceCtx->u32Cols.at(neededCol);
+                            MTL::Buffer* srcValsGPU = GpuOps::createBuffer(sVals.data(), sVals.size() * sizeof(uint32_t));
+                            MTL::Buffer* gathered = GpuOps::gatherU32(srcValsGPU, jRes.buildIndices, jRes.count);
+                            srcValsGPU->release();
+                            
+                            std::vector<uint32_t> res(jRes.count);
+                            std::memcpy(res.data(), gathered->contents(), jRes.count * sizeof(uint32_t));
+                            gathered->release();
+                            
+                            ctx.u32Cols[posName] = res;
+                            if (!outName.empty()) ctx.u32Cols[outName] = res;
+                            out.u32_cols.push_back(res);
+                            out.u32_names.push_back(outName.empty() ? neededCol : outName);
+                            updateRowCount(res.size());
+                            if (jRes.buildIndices) jRes.buildIndices->release();
+                            if (jRes.probeIndices) jRes.probeIndices->release();
+                            continue;
                         }
+                        
+                        // No matching value column found — release join result
+                        if (jRes.buildIndices) jRes.buildIndices->release();
+                        if (jRes.probeIndices) jRes.probeIndices->release();
                     }
                 }
             }
@@ -1075,17 +1272,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 updateRowCount(out.f32_cols.back().size());
                 out.f32_names.push_back(outName.empty() ? posName : outName);
             } else {
-                // Try u32 evaluation
-                std::vector<uint32_t> uvals = evalExprU32(expr, ctx);
-                if (!uvals.empty()) {
-                    if (!outName.empty()) {
-                        ctx.u32Cols[outName] = uvals;
-                    }
-                    ctx.u32Cols[posName] = uvals;
-                    out.u32_cols.push_back(std::move(uvals));
-                    updateRowCount(out.u32_cols.back().size());
-                    out.u32_names.push_back(outName.empty() ? posName : outName);
-                } else {
                     // Expression evaluation failed - try to find column by positional reference
                     // This handles post-GroupBy projections where #N refers to aggregated output
                     bool found = false;
@@ -1140,7 +1326,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                                     }
                                 } 
                             }
-                        }                    }
+                        }
+                    }
                     
                     // Try posName (#N) in f32Cols
                     if (!found) {
@@ -1184,7 +1371,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         std::cerr << "[Exec] Project: expr[" << i << "] evaluation failed, no fallback found\n";
                     }
                 }
-            }
         }
     }
     
