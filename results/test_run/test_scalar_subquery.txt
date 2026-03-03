@@ -1,0 +1,167 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'total_value' -> 'sum(ps_supplycost * ps_availqty)'
+[Planner]   'sum(ps_supplycost*ps_availqty)' -> 'total_value'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node HASH_JOIN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table nation
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_nationkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6093417488
+[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: s_nationkey
+[Planner] Proj: s_suppkey
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Generating Scan: supplier at index 0 Plan: 6093433192
+[Planner] Node SEQ_SCAN  output projections: s_nationkey, s_suppkey, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 4
+  #0: s_nationkey
+  #1: s_suppkey
+  #2: n_nationkey
+  #3: n_name
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+[Planner] Join Key Analysis: l => supplier, r => nation
+[Planner] Captured RHS Table: nation
+[Planner] RHS Tables: nation, 
+[Planner] Checking matchesRHS: supplier
+[Planner] Checking matchesRHS: nation
+[Planner] Node HASH_JOIN output projections: s_nationkey, s_suppkey, n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: ps_suppkey
+[Planner] Proj: ps_supplycost
+[Planner] Proj: ps_availqty
+DEBUG: Scan table determined as: 'partsupp'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
+[Planner] Generating Scan: partsupp at index 3 Plan: 6093433192
+[Planner] Node SEQ_SCAN  output projections: ps_suppkey, ps_supplycost, ps_availqty, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
+[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
+[Planner] ChildProjs size: 7
+  #0: ps_suppkey
+  #1: ps_supplycost
+  #2: ps_availqty
+  #3: s_nationkey
+  #4: s_suppkey
+  #5: n_nationkey
+  #6: n_name
+[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
+[Planner] Join Key Analysis: l => partsupp, r => supplier
+[Planner] Captured RHS Table: tmpl_join_2
+[Planner] RHS Tables: tmpl_join_2, 
+[Planner] Checking matchesRHS: partsupp
+[Planner] Checking matchesRHS: supplier
+[Planner] Node HASH_JOIN output projections: ps_suppkey, ps_supplycost, ps_availqty, s_nationkey, s_suppkey, n_nationkey, n_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: ps_suppkey
+[Planner] Proj: ps_supplycost
+[Planner] Proj: ps_availqty
+[Planner] Forcing keep of global column: s_suppkey
+[Planner] Forcing keep of global column: n_nationkey
+[Planner] Forcing keep of global column: n_name
+[Planner] Forcing keep of global column: s_nationkey
+[Planner] Node PROJECTION output projections: ps_suppkey, ps_supplycost, ps_availqty, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_name
+[Planner] Proj: (ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))
+[Planner] Forcing keep of global column: ps_supplycost
+[Planner] Forcing keep of global column: ps_availqty
+[Planner] Forcing keep of global column: ps_suppkey
+[Planner] Node PROJECTION output projections: n_name, (ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0))), 
+[Planner] Parsing agg string: 'sum(#1)'
+[Planner] Resolved agg: sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0))))
+[Planner] inputExpr '(ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))'
+[Planner] No alias found for agg, using generated name: sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))
+[Planner] Pushing spec with outputName='sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))'
+[Planner] Node HASH_GROUP_BY output projections: n_name, sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0)))), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_name
+[Planner] Proj: sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))
+[Planner] Node PROJECTION output projections: n_name, sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0)))), 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'n_name'
+[Planner]   'total_value'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+n_name|
+---------------------------------------------------
+Planning time: 18.82 ms
+Data Load Time (Disk+Upload): 904.20 ms
+GPU kernels time: 4.38 ms
+CPU postprocess time: 7.71 ms
+Total Internal Pipeline time: 916.29 ms
+Total Host Execution time: 916.31 ms
+Total Wall time (Plan+Exec): 935.13 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.214 ms (4.891%) [1 calls]
+  compact        :    0.222 ms (5.060%) [1 calls]
+  filter         :    0.843 ms (19.237%) [1 calls]
+  gather         :    1.576 ms (35.967%) [7 calls]
+  hash_join_probe_u32:    1.527 ms (34.845%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 4.381 ms
+  Kernel invocations: 12
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                0.843             25          0.030
+ops::compact_indices                 0.222             25          0.113
+ops::gather_col_u32                  0.212              1          0.005
+ops::gather_col_u32                  0.238              1          0.004
+ops::gather_col_u32                  0.227              1          0.004
+ops::gather_col_u32                  0.199              1          0.005
+ops::gather_col_u32                  0.190              1          0.005
+hash_join_probe_write_multi          0.216          10000         46.270
+ops::gather_col_u32                  0.278            396          1.423
+hash_join_probe_write_multi          1.310         800000        610.493
+ops::gather_col_u32                  0.232          31680        136.822
+ops::cast_u32_to_f32                 0.214          31680        147.836
+─────────────────────────────────────────────────────────────────
+TOTAL: 4.381 ms

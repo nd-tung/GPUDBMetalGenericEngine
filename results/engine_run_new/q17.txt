@@ -5,25 +5,25 @@
 ---------------------------------------------------
 Scalar avg_yearly: 348406.06
 ---------------------------------------------------
-Planning time: 20.47 ms
-Data Load Time (Disk+Upload): 6241.04 ms
-GPU kernels time: 29.82 ms
-CPU postprocess time: 54.18 ms
-Total Internal Pipeline time: 6325.03 ms
-Total Host Execution time: 6325.36 ms
-Total Wall time (Plan+Exec): 6345.83 ms
+Planning time: 20.32 ms
+Data Load Time (Disk+Upload): 6160.35 ms
+GPU kernels time: 30.31 ms
+CPU postprocess time: 64.70 ms
+Total Internal Pipeline time: 6255.37 ms
+Total Host Execution time: 6255.68 ms
+Total Wall time (Plan+Exec): 6276.00 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.575 ms (1.928%) [2 calls]
-  filter         :    8.784 ms (29.460%) [2 calls]
-  gather         :    7.352 ms (24.660%) [34 calls]
-  groupby        :    0.673 ms (2.257%) [3 calls]
-  hash_join_probe_u32:   12.432 ms (41.696%) [6 calls]
-  sort           :    0.000 ms (0.000%) [2 calls]
+  compact        :    1.552 ms (5.120%) [2 calls]
+  filter         :    1.750 ms (5.775%) [2 calls]
+  gather         :   13.290 ms (43.843%) [56 calls]
+  groupby        :    0.678 ms (2.236%) [3 calls]
+  hash_join_probe_u32:   13.042 ms (43.026%) [6 calls]
+  sort           :    0.000 ms (0.000%) [5 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 29.816 ms
-  Kernel invocations: 49
+  TOTAL GPU TIME: 30.312 ms
+  Kernel invocations: 74
 [Planner] Parsed aliases:
 [Planner]   'avg_yearly' -> 'sum(l_extendedprice) / 7.0'
 [Planner]   'sum(l_extendedprice)/7.0' -> 'avg_yearly'
@@ -56,7 +56,7 @@ GPU Kernel Timing Summary:
 [Planner] checkDelim visiting: column_data_scan
 [Planner] checkDelim FOUND: column_data_scan
 [Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6158575656
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6163556392
 [Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
 [Planner] Traversing node: HASH_JOIN
 [Planner] Traversing: HASH_JOIN
@@ -72,7 +72,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: p_partkey
 DEBUG: Scan table determined as: 'part'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 0 Plan: 6158575656
+[Planner] Generating Scan: part at index 0 Plan: 6163556392
 [Planner] Node SEQ_SCAN  output projections: p_partkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -83,7 +83,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
 [Planner] Proj: l_extendedprice
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 2 Plan: 6158575656
+[Planner] Generating Scan: lineitem at index 2 Plan: 6163556392
 [Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, l_extendedprice, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
 [Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
@@ -100,7 +100,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Checking matchesRHS: lineitem
 [Planner] Checking matchesRHS: part
 [Planner] Node HASH_JOIN output projections: l_partkey, l_quantity, l_extendedprice, p_partkey, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_4 at index 4 Plan: 6158575656
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_4 at index 4 Plan: 6163556392
 [Planner] Created Save Node with type: 9
 [Planner] CONFIRMED: Back node is Save.
 [Planner] Post-Emit Size: 5
@@ -124,7 +124,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Traversing: DELIM_SCAN
 [Planner] Entering children traversal block. Name: delim_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 5 Plan: 6158575656
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 5 Plan: 6163556392
 [Planner] Traversing node: HASH_GROUP_BY
 [Planner] Traversing: HASH_GROUP_BY
 [Planner] Entering children traversal block. Name: hash_group_by Children: 1
@@ -141,7 +141,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Traversing: DELIM_SCAN
 [Planner] Entering children traversal block. Name: delim_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 7 Plan: 6158575656
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 7 Plan: 6163556392
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
 [Planner] Entering children traversal block. Name: seq_scan  Children: 0
@@ -150,7 +150,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: l_quantity
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 9 Plan: 6158575656
+[Planner] Generating Scan: lineitem at index 9 Plan: 6163556392
 [Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_8'
 [Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
@@ -200,7 +200,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] DEBUG: COLUMN_DATA_SCAN found
 DEBUG: COLUMN_DATA_SCAN extra_info keys: 
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 16 Plan: 6158575656
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 16 Plan: 6163556392
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
 [Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
 [Planner] ChildProjs size: 2
@@ -246,4 +246,4 @@ Expression: (CAST(l_quantity AS DOUBLE) < SUBQUERY)
 [Planner]   'avg_yearly'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

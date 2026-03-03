@@ -3150,4 +3150,30 @@ kernel void string_prefix_u64(
     prefixes[tid] = val;
 }
 
+// ── GPU FlatStringCol gather: copy chars from source to compacted output ──
+// Each thread handles one output row.
+// srcOffsets/srcLengths are the ORIGINAL (un-gathered) source buffers.
+// indices maps output row → source row.
+// dstOffsets is the exclusive prefix-sum of gathered lengths (pre-computed on host).
+// dstLengths = srcLengths[indices[i]] (already gathered by host via gather_col_u32).
+kernel void gather_flat_string_chars(
+    const device uint8_t*  srcChars   [[buffer(0)]],
+    const device uint32_t* srcOffsets [[buffer(1)]],
+    const device uint32_t* indices    [[buffer(2)]],
+    const device uint32_t* dstOffsets [[buffer(3)]],
+    const device uint32_t* dstLengths [[buffer(4)]],
+    device uint8_t*        dstChars   [[buffer(5)]],
+    constant uint32_t&     count      [[buffer(6)]],
+    uint tid [[thread_position_in_grid]])
+{
+    if (tid >= count) return;
+    uint32_t srcRow = indices[tid];
+    uint32_t srcOff = srcOffsets[srcRow];
+    uint32_t dstOff = dstOffsets[tid];
+    uint32_t len    = dstLengths[tid];
+    for (uint32_t i = 0; i < len; i++) {
+        dstChars[dstOff + i] = srcChars[srcOff + i];
+    }
+}
+
 } // namespace ops

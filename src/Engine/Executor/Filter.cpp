@@ -34,6 +34,7 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
     for (const auto& [name, _] : ctx.u32Cols) availableCols.insert(name);
     for (const auto& [name, _] : ctx.f32Cols) availableCols.insert(name);
     for (const auto& [name, _] : ctx.stringCols) availableCols.insert(name);
+    for (const auto& [name, _] : ctx.dictCols) availableCols.insert(name);
     // Also include GPU columns
     for (const auto& [name, _] : ctx.u32ColsGPU) availableCols.insert(name);
     for (const auto& [name, _] : ctx.f32ColsGPU) availableCols.insert(name);

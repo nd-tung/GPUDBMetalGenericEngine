@@ -1,4 +1,5 @@
 #include "Operators.hpp"
+#include "EnvUtil.hpp"
 
 #include "ColumnStoreGPU.hpp"
 #include "KernelTimer.hpp"
@@ -419,7 +420,7 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
     auto& store = ColumnStoreGPU::instance();
     if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
 
-    if (std::getenv("GPUDB_DEBUG_OPS")) {
+    if (env_truthy("GPUDB_DEBUG_OPS")) {
         std::cerr << "[Exec] GPU filterU32: col=" << colName << " rowCount=" << rowCount << " val=" << literal << "\n";
     }
 
@@ -491,11 +492,10 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
 
     mask->release();
     outCnt->release();
-    (void)colName;
     return res;
 }
 
-std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
+std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
                                                           const std::vector<std::string>& data,
                                                           engine::expr::CompOp op,
                                                           const std::string& pattern,
@@ -508,7 +508,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     // 1. Prepare data
     size_t rowCount = data.size();
     if (rowCount == 0) return FilterResult{nullptr, 0};
-    if (std::getenv("GPUDB_DEBUG_OPS")) {
+    if (env_truthy("GPUDB_DEBUG_OPS")) {
         std::cerr << "[Exec] GPU filterString: rowCount=" << rowCount << " pattern=" << pattern << "\n";
     }
     
@@ -593,7 +593,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     uint32_t rc = static_cast<uint32_t>(rowCount);
 
     // 4. Dispatch Kernel
-    if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] GPU filterString: dispatching kernel rowCount=" << rowCount
+    if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] GPU filterString: dispatching kernel rowCount=" << rowCount
                                                    << (useMultiContains ? " (multi-contains, " + std::to_string(numSegments) + " segments)" : "")
                                                    << "\n";
     
@@ -627,7 +627,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     auto filterStart = std::chrono::high_resolution_clock::now();
 
     {
-        if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Encoding...\n";
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Encoding...\n";
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_filter);
@@ -646,13 +646,13 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
             enc->setBytes(&patternLen, sizeof(patternLen), 5);
             enc->setBytes(&rc, sizeof(rc), 6);
         }
-        if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Dispatching 1D...\n";
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Dispatching 1D...\n";
         dispatch1D(enc, rowCount);
         enc->endEncoding();
         cmd->commit();
-        if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Waiting...\n";
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Waiting...\n";
         cmd->waitUntilCompleted();
-        if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Done waiting.\n";
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Done waiting.\n";
     }
     
     auto filterEnd = std::chrono::high_resolution_clock::now();
@@ -667,7 +667,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     // 4b. Flip mask for NOTLIKE with multi-segment pattern
     if (useMultiContains && op == engine::expr::CompOp::NE) {
         flipMaskU8(mask, (uint32_t)rowCount);
-        if (std::getenv("GPUDB_DEBUG_OPS"))
+        if (env_truthy("GPUDB_DEBUG_OPS"))
             std::cerr << "[Exec] GPU filterString: flipped mask for NOTLIKE multi-contains\n";
     }
     
@@ -679,7 +679,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     
     auto compactStart = std::chrono::high_resolution_clock::now();
     {
-        if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Compacting...\n";
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Compacting...\n";
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_compact);
@@ -691,7 +691,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
-        if (std::getenv("GPUDB_DEBUG_OPS")) std::cerr << "Compact done.\n";
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Compact done.\n";
     }
     auto compactEnd = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record("ops::compact_indices", "compact", 
@@ -708,7 +708,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& colName,
     return res;
 }
 
-std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colName,
+std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colName*/,
                                                           const std::vector<std::string>& data,
                                                           const std::string& pattern,
                                                           bool invert,
@@ -724,7 +724,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
     size_t rowCount = data.size();
     if (rowCount == 0) return FilterResult{nullptr, 0};
     
-    if (std::getenv("GPUDB_DEBUG_OPS")) {
+    if (env_truthy("GPUDB_DEBUG_OPS")) {
         std::cerr << "[GpuOps] filterStringPrefix pattern='" << pattern << "' invert=" << invert << " rowCount=" << rowCount << "\n";
     }
     
@@ -767,7 +767,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
 
     const char* kernelName = invert ? "ops::filter_string_not_prefix" : "ops::filter_string_prefix";
 
-    if (std::getenv("GPUDB_DEBUG_OPS")) {
+    if (env_truthy("GPUDB_DEBUG_OPS")) {
         std::cerr << "[GpuOps] Requesting kernel: " << kernelName << "\n";
     }
 
@@ -835,14 +835,13 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& colNam
 }
 
 JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys, 
-                                     MTL::Buffer* buildIndices, 
+                                     MTL::Buffer* /*buildIndices*/, 
                                      uint32_t buildCount,
                                      MTL::Buffer* probeKeys,
-                                     MTL::Buffer* probeIndices,
+                                     MTL::Buffer* /*probeIndices*/,
                                      uint32_t probeCount) {
     auto& store = ColumnStoreGPU::instance();
-    const char* dbgEnv = std::getenv("GPUDB_DEBUG_OPS");
-    bool debug = dbgEnv && (std::string(dbgEnv) == "1" || std::string(dbgEnv) == "true");
+    const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (buildCount == 0 || probeCount == 0 || !store.device()) return {nullptr, nullptr, 0};
 
     // Use multi-match join to correctly handle duplicate keys on the build side.
@@ -970,8 +969,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
                                         MTL::Buffer* probeIndices,
                                         uint32_t probeCount) {
     auto& store = ColumnStoreGPU::instance();
-    const char* dbgEnv = std::getenv("GPUDB_DEBUG_OPS");
-    bool debug = dbgEnv && (std::string(dbgEnv) == "1" || std::string(dbgEnv) == "true");
+    const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (debug) std::cerr << "[GPU] joinHashU64: buildCount=" << buildCount << " probeCount=" << probeCount << std::endl << std::flush;
     if (buildCount == 0 || probeCount == 0 || !store.device()) return {nullptr, nullptr, 0};
 
@@ -1161,12 +1159,11 @@ std::optional<FilterResult> GpuOps::filterU32Indexed(const std::string& colName,
     res.indices = outIdx;
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
-    bool debug = (std::getenv("GPUDB_DEBUG_OPS") != nullptr);
+    bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (debug) std::cerr << "[Exec] GPU filterU32Indexed: col=" << colName << " rowCount=" << count << " val=" << literal << " result=" << res.count << "\n";
 
     mask->release();
     outCnt->release();
-    (void)colName;
     return res;
 }
 
@@ -1244,7 +1241,6 @@ std::optional<FilterResult> GpuOps::filterF32(const std::string& colName,
 
     mask->release();
     outCnt->release();
-    (void)colName;
     return res;
 }
 
@@ -1482,7 +1478,7 @@ std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vecto
         *reinterpret_cast<float*>(dummyAgg->contents()) = 0.0f;
     }
 
-    MTL::Buffer* k0 = keyColsU32.size() > 0 ? keyColsU32[0] : keyColsU32[0];
+    MTL::Buffer* k0 = keyColsU32[0];
     MTL::Buffer* k1 = keyColsU32.size() > 1 ? keyColsU32[1] : keyColsU32[0];
     MTL::Buffer* k2 = keyColsU32.size() > 2 ? keyColsU32[2] : keyColsU32[0];
     MTL::Buffer* k3 = keyColsU32.size() > 3 ? keyColsU32[3] : keyColsU32[0];
@@ -2884,6 +2880,71 @@ MTL::Buffer* GpuOps::stringPrefixU64(
     cmd->waitUntilCompleted();
 
     return outBuf;
+}
+
+// ── GPU FlatStringCol gather ─────────────────────────────────────────────
+// Gathers chars/offsets/lengths by an index buffer to produce a compacted FlatStringCol.
+// Steps: 1) gather lengths via gatherU32, 2) prefix-sum → new offsets,
+//        3) gather_flat_string_chars kernel copies chars.
+GpuOps::FlatStringGatherResult GpuOps::gatherFlatString(
+    MTL::Buffer* srcChars, MTL::Buffer* srcOffsets, MTL::Buffer* srcLengths,
+    MTL::Buffer* indices, uint32_t count, bool doSync) {
+    FlatStringGatherResult r;
+    if (count == 0 || !srcChars || !srcOffsets || !srcLengths || !indices) return r;
+
+    auto& store = ColumnStoreGPU::instance();
+    auto dev = store.device();
+    if (!dev || !store.queue()) return r;
+
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // Step 1: Gather lengths  (outLengths[i] = srcLengths[indices[i]])
+    MTL::Buffer* outLengths = gatherU32(srcLengths, indices, count, true);
+    if (!outLengths) return r;
+
+    // Step 2: Prefix-sum on lengths → outOffsets (exclusive scan)
+    // We need a copy for the scan since scanInPlace modifies in-place.
+    MTL::Buffer* outOffsets = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    if (!outOffsets) { outLengths->release(); return r; }
+    std::memcpy(outOffsets->contents(), outLengths->contents(), count * sizeof(uint32_t));
+    uint64_t totalBytes = scanInPlace(outOffsets, count);
+
+    // Step 3: Allocate output chars and dispatch char-copy kernel
+    uint32_t totalBytesU32 = static_cast<uint32_t>(totalBytes);
+    size_t allocBytes = (totalBytesU32 > 0) ? totalBytesU32 : 1;
+    MTL::Buffer* outChars = dev->newBuffer(allocBytes, MTL::ResourceStorageModeShared);
+    if (!outChars) { outLengths->release(); outOffsets->release(); return r; }
+
+    if (totalBytesU32 > 0) {
+        auto pso = makePSO(dev, store.library(), "ops::gather_flat_string_chars");
+        if (!pso) { outChars->release(); outLengths->release(); outOffsets->release(); return r; }
+
+        auto cmd = store.queue()->commandBuffer();
+        auto enc = cmd->computeCommandEncoder();
+        enc->setComputePipelineState(pso);
+        enc->setBuffer(srcChars, 0, 0);
+        enc->setBuffer(srcOffsets, 0, 1);
+        enc->setBuffer(indices, 0, 2);
+        enc->setBuffer(outOffsets, 0, 3);
+        enc->setBuffer(outLengths, 0, 4);
+        enc->setBuffer(outChars, 0, 5);
+        enc->setBytes(&count, sizeof(count), 6);
+        dispatch1D(enc, count);
+        enc->endEncoding();
+        cmd->commit();
+        if (doSync) cmd->waitUntilCompleted();
+    }
+
+    auto end = std::chrono::high_resolution_clock::now();
+    KernelTimer::instance().record("ops::gather_flat_string", "gather",
+        std::chrono::duration<double, std::milli>(end - start).count(), count);
+
+    r.chars = outChars;
+    r.offsets = outOffsets;
+    r.lengths = outLengths;
+    r.rowCount = count;
+    r.totalBytes = totalBytesU32;
+    return r;
 }
 
 // ── H4: GPU dedup by sorted keys ────────────────────────────────────────

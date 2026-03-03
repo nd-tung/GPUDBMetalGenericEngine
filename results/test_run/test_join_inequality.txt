@@ -1,0 +1,185 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'margin' -> 'p_retailprice - ps_supplycost'
+[Planner]   'p_retailprice-ps_supplycost' -> 'margin'
+[Planner] Traversing node: TOP_N
+[Planner] Traversing: TOP_N
+[Planner] Entering children traversal block. Name: top_n Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table supplier
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: s_suppkey
+[Planner] Proj: s_name
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Generating Scan: supplier at index 0 Plan: 6158092864
+[Planner] Node SEQ_SCAN  output projections: s_suppkey, s_name, 
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Skipping capture for 'part' table to force full Traversal
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_partkey
+[Planner] Proj: p_retailprice
+[Planner] Proj: p_name
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 0 Plan: 6158100840
+[Planner] Node SEQ_SCAN  output projections: p_partkey, p_retailprice, p_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: ps_suppkey
+[Planner] Proj: ps_partkey
+[Planner] Proj: ps_supplycost
+DEBUG: Scan table determined as: 'partsupp'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
+[Planner] Generating Scan: partsupp at index 2 Plan: 6158100840
+[Planner] Node SEQ_SCAN  output projections: ps_suppkey, ps_partkey, ps_supplycost, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
+[Planner] Pre-resolved Condition: 'ps_partkey = p_partkey'
+[Planner] ChildProjs size: 6
+  #0: ps_suppkey
+  #1: ps_partkey
+  #2: ps_supplycost
+  #3: p_partkey
+  #4: p_retailprice
+  #5: p_name
+[Planner] Resolved Condition: 'ps_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_1'
+[Planner] Join Key Analysis: l => partsupp, r => part
+[Planner] Captured RHS Table: tmpl_join_1
+[Planner] RHS Tables: tmpl_join_1, 
+[Planner] Checking matchesRHS: partsupp
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: ps_suppkey, ps_partkey, ps_supplycost, p_partkey, p_retailprice, p_name, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'supplier'
+[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
+[Planner] ChildProjs size: 8
+  #0: ps_suppkey
+  #1: ps_partkey
+  #2: ps_supplycost
+  #3: p_partkey
+  #4: p_retailprice
+  #5: p_name
+  #6: s_suppkey
+  #7: s_name
+[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='supplier'
+[Planner] Join Key Analysis: l => partsupp, r => supplier
+[Planner] Captured RHS Table: supplier
+[Planner] RHS Tables: supplier, 
+[Planner] Checking matchesRHS: partsupp
+[Planner] Checking matchesRHS: supplier
+[Planner] Node HASH_JOIN output projections: ps_suppkey, ps_partkey, ps_supplycost, p_partkey, p_retailprice, p_name, s_suppkey, s_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: s_name
+[Planner] Proj: p_name
+[Planner] Proj: ps_supplycost
+[Planner] Proj: p_retailprice
+[Planner] Proj: margin
+[Planner] Projection: resolving alias 'margin' -> 'p_retailprice - ps_supplycost'
+[Planner] Forcing keep of global column: s_suppkey
+[Planner] Forcing keep of global column: p_partkey
+[Planner] Forcing keep of global column: ps_partkey
+[Planner] Forcing keep of global column: ps_suppkey
+[Planner] Node PROJECTION output projections: s_name, p_name, ps_supplycost, p_retailprice, margin, 
+[Planner] ORDER BY looking up alias: '(p_retailprice-ps_supplycost)'
+[Planner] Node TOP_N output projections: s_name, p_name, ps_supplycost, p_retailprice, margin, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   's_name'
+[Planner]   'p_name'
+[Planner]   'ps_supplycost'
+[Planner]   'p_retailprice'
+[Planner]   'margin'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+ps_supplycost|p_retailprice|margin|s_name|p_name|
+49.99|1950.96|1900.97|Supplier#000006476|sky misty honeydew lawn dodger|
+49.99|1945.89|1895.90|Supplier#000000413|azure firebrick orchid powder sky|
+49.99|1736.64|1686.65|Supplier#000008682|ivory sienna sandy black seashell|
+49.99|1634.62|1584.63|Supplier#000003160|gainsboro lace cyan drab maroon|
+49.99|1584.55|1534.56|Supplier#000002582|powder white steel brown blush|
+49.99|1935.90|1885.91|Supplier#000005901|peach spring light white steel|
+49.98|1920.97|1870.99|Supplier#000009492|sandy floral beige steel blush|
+49.98|1569.62|1519.64|Supplier#000008129|orchid lawn grey mint light|
+49.98|1724.66|1674.68|Supplier#000008694|plum chartreuse deep brown hot|
+49.97|1816.86|1766.89|Supplier#000006369|ghost dim medium puff brown|
+49.97|1591.63|1541.66|Supplier#000008649|peru coral grey white gainsboro|
+49.97|1657.73|1607.76|Supplier#000007731|sandy navajo salmon dim cream|
+49.97|1977.95|1927.98|Supplier#000001957|seashell navajo plum dim black|
+49.97|1822.77|1772.80|Supplier#000005318|beige frosted maroon chiffon spring|
+49.97|1721.62|1671.65|Supplier#000001143|firebrick deep antique medium linen|
+---------------------------------------------------
+Planning time: 18.84 ms
+Data Load Time (Disk+Upload): 1148.82 ms
+GPU kernels time: 10.22 ms
+CPU postprocess time: 75.21 ms
+Total Internal Pipeline time: 1234.25 ms
+Total Host Execution time: 1247.39 ms
+Total Wall time (Plan+Exec): 1266.23 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    1.088 ms (10.638%) [2 calls]
+  filter         :    1.882 ms (18.409%) [2 calls]
+  gather         :    6.417 ms (62.770%) [18 calls]
+  hash_join_probe_u32:    0.435 ms (4.256%) [2 calls]
+  sort           :    0.401 ms (3.927%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 10.224 ms
+  Kernel invocations: 26
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_gt_f32                   0.994         200000        201.114
+ops::compact_indices                 0.286         200000        700.219
+ops::filter_lt_f32                   0.888         800000        901.239
+ops::compact_indices                 0.802         800000        997.557
+ops::gather_col_u32                  0.829          38769         46.745
+ops::gather_col_u32                  0.275          38769        140.829
+ops::gather_col_f32                  0.213          38769        182.300
+ops::gather_col_u32                  0.949          38769         40.847
+ops::gather_col_u32                  0.674          38769         57.560
+ops::gather_col_f32                  0.881          38769         44.016
+ops::gather_col_u32                  0.238          99900        419.307
+ops::gather_col_u32                  0.222          99900        450.168
+ops::gather_col_f32                  0.215          99900        465.643
+ops::gather_col_u32                  0.225          99900        444.741
+ops::gather_col_u32                  0.226          99900        442.198
+ops::gather_col_f32                  0.230          99900        434.743
+ops::gather_col_u32                  0.232          99900        430.449
+hash_join_probe_write_multi          0.211          38769        183.813
+ops::gather_col_u32                  0.228          19362         84.843
+hash_join_probe_write_multi          0.224          19362         86.341
+ops::gather_col_u32                  0.195          19362         99.527
+ops::gather_col_u32                  0.193          19362        100.148
+radix_sort_u64                       0.000          19362          0.000
+orderby_gpu_gather                   0.401         135534        337.604
+ops::gather_col_u32                  0.194          19362         99.761
+ops::gather_col_u32                  0.199          19362         97.154
+─────────────────────────────────────────────────────────────────
+TOTAL: 10.224 ms

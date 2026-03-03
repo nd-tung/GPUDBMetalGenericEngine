@@ -1,0 +1,132 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'total_bal' -> 'sum(s_acctbal)'
+[Planner]   'sum(s_acctbal)' -> 'total_bal'
+[Planner]   'num_suppliers' -> 'count(*)'
+[Planner]   'count(*)' -> 'num_suppliers'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table nation
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_nationkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6159169056
+[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: s_nationkey
+[Planner] Proj: s_acctbal
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Generating Scan: supplier at index 0 Plan: 6159182184
+[Planner] Node SEQ_SCAN  output projections: s_nationkey, s_acctbal, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 4
+  #0: s_nationkey
+  #1: s_acctbal
+  #2: n_nationkey
+  #3: n_name
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+[Planner] Join Key Analysis: l => supplier, r => nation
+[Planner] Captured RHS Table: nation
+[Planner] RHS Tables: nation, 
+[Planner] Checking matchesRHS: supplier
+[Planner] Checking matchesRHS: nation
+[Planner] Node HASH_JOIN output projections: s_nationkey, s_acctbal, n_nationkey, n_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: s_nationkey
+[Planner] Proj: s_acctbal
+[Planner] Forcing keep of global column: n_name
+[Planner] Forcing keep of global column: n_nationkey
+[Planner] Node PROJECTION output projections: s_nationkey, s_acctbal, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_name
+[Planner] Proj: s_acctbal
+[Planner] Forcing keep of global column: s_nationkey
+[Planner] Node PROJECTION output projections: n_name, s_acctbal, 
+[Planner] Parsing agg string: 'count_star()'
+[Planner] Resolved agg: count_star()
+[Planner] Looking up agg alias: 'count_star()'
+[Planner] Found alias for agg: num_suppliers
+[Planner] Pushing spec with outputName='num_suppliers'
+[Planner] Parsing agg string: 'sum(#1)'
+[Planner] Resolved agg: sum(s_acctbal)
+[Planner] inputExpr 's_acctbal' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(s_acctbal)'
+[Planner] Found alias for agg: total_bal
+[Planner] Pushing spec with outputName='total_bal'
+[Planner] Node HASH_GROUP_BY output projections: n_name, num_suppliers, total_bal, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_name
+[Planner] Proj: num_suppliers
+[Planner] Proj: total_bal
+[Planner] Node PROJECTION output projections: n_name, num_suppliers, total_bal, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'n_name'
+[Planner]   'num_suppliers'
+[Planner]   'total_bal'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+num_suppliers|total_bal|n_name|
+---------------------------------------------------
+Planning time: 18.79 ms
+Data Load Time (Disk+Upload): 29.40 ms
+GPU kernels time: 2.52 ms
+CPU postprocess time: 2.07 ms
+Total Internal Pipeline time: 33.99 ms
+Total Host Execution time: 34.00 ms
+Total Wall time (Plan+Exec): 52.80 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    0.195 ms (7.740%) [1 calls]
+  filter         :    0.835 ms (33.144%) [1 calls]
+  gather         :    1.281 ms (50.861%) [6 calls]
+  hash_join_probe_u32:    0.208 ms (8.255%) [1 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 2.518 ms
+  Kernel invocations: 9
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                0.835             25          0.030
+ops::compact_indices                 0.195             25          0.128
+ops::gather_col_u32                  0.189              1          0.005
+ops::gather_col_u32                  0.235              1          0.004
+ops::gather_col_u32                  0.218              1          0.005
+ops::gather_col_u32                  0.185              1          0.005
+ops::gather_col_u32                  0.184              1          0.005
+hash_join_probe_write_multi          0.208          10000         48.116
+ops::gather_col_u32                  0.270            402          1.488
+─────────────────────────────────────────────────────────────────
+TOTAL: 2.518 ms

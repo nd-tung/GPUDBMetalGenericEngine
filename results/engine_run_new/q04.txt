@@ -10,25 +10,25 @@ order_count|o_orderpriority|
 10556.00|4-NOT SPECIFIED|
 10487.00|5-LOW|
 ---------------------------------------------------
-Planning time: 20.14 ms
-Data Load Time (Disk+Upload): 8518.28 ms
-GPU kernels time: 18.44 ms
-CPU postprocess time: 93.29 ms
-Total Internal Pipeline time: 8630.00 ms
-Total Host Execution time: 8632.17 ms
-Total Wall time (Plan+Exec): 8652.32 ms
+Planning time: 20.04 ms
+Data Load Time (Disk+Upload): 8139.10 ms
+GPU kernels time: 19.04 ms
+CPU postprocess time: 100.04 ms
+Total Internal Pipeline time: 8258.17 ms
+Total Host Execution time: 8260.23 ms
+Total Wall time (Plan+Exec): 8280.27 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.914 ms (4.955%) [2 calls]
-  filter         :    9.767 ms (52.977%) [2 calls]
-  gather         :    5.741 ms (31.139%) [9 calls]
-  groupby        :    0.849 ms (4.605%) [3 calls]
-  hash_join_probe_u32:    0.910 ms (4.935%) [1 calls]
-  sort           :    0.256 ms (1.389%) [3 calls]
+  compact        :    1.918 ms (10.078%) [2 calls]
+  filter         :    2.101 ms (11.039%) [2 calls]
+  gather         :   13.223 ms (69.463%) [36 calls]
+  groupby        :    0.716 ms (3.763%) [3 calls]
+  hash_join_probe_u32:    0.862 ms (4.528%) [1 calls]
+  sort           :    0.215 ms (1.129%) [5 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 18.437 ms
-  Kernel invocations: 20
+  TOTAL GPU TIME: 19.036 ms
+  Kernel invocations: 49
 [Planner] Parsed aliases:
 [Planner]   'order_count' -> 'count(*)'
 [Planner]   'count(*)' -> 'order_count'
@@ -70,7 +70,7 @@ GPU Kernel Timing Summary:
 [Planner] checkDelim visiting: delim_scan
 [Planner] checkDelim FOUND: delim_scan
 [Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6090549288
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6171011112
 [Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -80,9 +80,9 @@ GPU Kernel Timing Summary:
 [Planner] Proj: o_orderpriority
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 0 Plan: 6090549288
+[Planner] Generating Scan: orders at index 0 Plan: 6171011112
 [Planner] Node SEQ_SCAN  output projections: o_orderkey, o_orderpriority, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_1 at index 1 Plan: 6090549288
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_1 at index 1 Plan: 6171011112
 [Planner] Created Save Node with type: 9
 [Planner] CONFIRMED: Back node is Save.
 [Planner] Post-Emit Size: 2
@@ -97,7 +97,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
 [Planner] Traversing: DUMMY_SCAN
 [Planner] Entering children traversal block. Name: dummy_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_1 at index 2 Plan: 6090549288
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_1 at index 2 Plan: 6171011112
 [Planner] Traversing node: PROJECTION
 [Planner] Traversing: PROJECTION
 [Planner] Entering children traversal block. Name: projection Children: 1
@@ -111,7 +111,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
 [Planner] Traversing: DELIM_SCAN
 [Planner] Entering children traversal block. Name: delim_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_1 at index 4 Plan: 6090549288
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_1 at index 4 Plan: 6171011112
 [Planner] Traversing node: PROJECTION
 [Planner] Traversing: PROJECTION
 [Planner] Entering children traversal block. Name: projection Children: 1
@@ -127,7 +127,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
 [Planner] Proj: l_receiptdate
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 6 Plan: 6090549288
+[Planner] Generating Scan: lineitem at index 6 Plan: 6171011112
 [Planner] Node SEQ_SCAN  output projections: l_orderkey, l_commitdate, l_receiptdate, 
 Expression: (l_commitdate < l_receiptdate)
 [Planner] DEBUG FILTER CHILD PROJS: l_orderkey, l_commitdate, l_receiptdate, 
@@ -202,4 +202,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner]   'order_count'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

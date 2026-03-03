@@ -7,25 +7,25 @@ high_line_count|low_line_count|l_shipmode|
 6202.00|9324.00|MAIL|
 6200.00|9262.00|SHIP|
 ---------------------------------------------------
-Planning time: 20.41 ms
-Data Load Time (Disk+Upload): 15232.60 ms
-GPU kernels time: 28.53 ms
-CPU postprocess time: 72.23 ms
-Total Internal Pipeline time: 15333.36 ms
-Total Host Execution time: 15333.93 ms
-Total Wall time (Plan+Exec): 15354.34 ms
+Planning time: 20.35 ms
+Data Load Time (Disk+Upload): 12733.24 ms
+GPU kernels time: 25.35 ms
+CPU postprocess time: 88.59 ms
+Total Internal Pipeline time: 12847.17 ms
+Total Host Execution time: 12847.74 ms
+Total Wall time (Plan+Exec): 12868.09 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    5.855 ms (20.522%) [12 calls]
-  filter         :   14.764 ms (51.746%) [12 calls]
-  gather         :    4.824 ms (16.908%) [13 calls]
-  groupby        :    1.635 ms (5.729%) [3 calls]
-  hash_join_probe_u32:    1.201 ms (4.210%) [3 calls]
-  sort           :    0.253 ms (0.885%) [2 calls]
+  compact        :    5.840 ms (23.042%) [12 calls]
+  filter         :    6.685 ms (26.372%) [12 calls]
+  gather         :    9.529 ms (37.596%) [24 calls]
+  groupby        :    1.861 ms (7.341%) [3 calls]
+  hash_join_probe_u32:    1.174 ms (4.633%) [3 calls]
+  sort           :    0.258 ms (1.016%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 28.531 ms
-  Kernel invocations: 45
+  TOTAL GPU TIME: 25.347 ms
+  Kernel invocations: 56
 [Planner] Parsed aliases:
 [Planner]   'high_line_count' -> 'sum(case
         when o_orderpriority = '1-URGENT'
@@ -85,7 +85,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: l_shipdate
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6096807976
+[Planner] Generating Scan: lineitem at index 0 Plan: 6131099688
 [Planner] Node SEQ_SCAN  output projections: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
 Expression: ((l_commitdate < l_receiptdate) AND (l_shipdate < l_commitdate) AND ((l_shipmode = 'MAIL') OR (l_shipmode = 'SHIP')))
 [Planner] DEBUG FILTER CHILD PROJS: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
@@ -105,7 +105,7 @@ Expression: ((l_commitdate < l_receiptdate) AND (l_shipdate < l_commitdate) AND 
 [Planner] Proj: o_orderpriority
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 4 Plan: 6096807976
+[Planner] Generating Scan: orders at index 4 Plan: 6131099688
 [Planner] Node SEQ_SCAN  output projections: o_orderkey, o_orderpriority, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
 [Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
@@ -172,4 +172,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner]   'low_line_count'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

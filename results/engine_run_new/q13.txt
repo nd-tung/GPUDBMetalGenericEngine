@@ -47,25 +47,26 @@ custdist|c_count|
 2.00|41.00|
 1.00|39.00|
 ---------------------------------------------------
-Planning time: 19.95 ms
-Data Load Time (Disk+Upload): 2091.77 ms
-GPU kernels time: 24.70 ms
-CPU postprocess time: 223.97 ms
-Total Internal Pipeline time: 2340.43 ms
-Total Host Execution time: 2366.32 ms
-Total Wall time (Plan+Exec): 2386.28 ms
+Planning time: 19.44 ms
+Data Load Time (Disk+Upload): 2288.13 ms
+GPU kernels time: 21.30 ms
+CPU postprocess time: 414.44 ms
+Total Internal Pipeline time: 2723.87 ms
+Total Host Execution time: 2804.05 ms
+Total Wall time (Plan+Exec): 2823.49 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.438 ms (1.774%) [1 calls]
-  filter         :   10.009 ms (40.522%) [1 calls]
-  gather         :    2.261 ms (9.154%) [3 calls]
-  groupby        :   11.019 ms (44.615%) [6 calls]
-  hash_join_probe_u32:    0.751 ms (3.042%) [1 calls]
-  sort           :    0.220 ms (0.892%) [2 calls]
+  cast           :    1.153 ms (5.414%) [1 calls]
+  compact        :    0.463 ms (2.174%) [1 calls]
+  filter         :    1.712 ms (8.037%) [1 calls]
+  gather         :    4.838 ms (22.711%) [8 calls]
+  groupby        :   11.967 ms (56.176%) [6 calls]
+  hash_join_probe_u32:    0.892 ms (4.189%) [1 calls]
+  sort           :    0.277 ms (1.298%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 24.699 ms
-  Kernel invocations: 14
+  TOTAL GPU TIME: 21.303 ms
+  Kernel invocations: 20
 [Planner] Parsed aliases:
 [Planner]   'c_count' -> 'count(o_orderkey)'
 [Planner]   'count(o_orderkey)' -> 'c_count'
@@ -102,7 +103,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: c_custkey
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6129524960
+[Planner] Generating Scan: customer at index 0 Plan: 6098641088
 [Planner] Node SEQ_SCAN  output projections: c_custkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -112,7 +113,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
 [Planner] Proj: o_orderkey
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 0 Plan: 6129543208
+[Planner] Generating Scan: orders at index 0 Plan: 6098659368
 [Planner] Node SEQ_SCAN  output projections: o_custkey, o_orderkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
 [Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
@@ -160,4 +161,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='custo
 [Planner]   'custdist'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

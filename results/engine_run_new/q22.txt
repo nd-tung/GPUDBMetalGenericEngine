@@ -4,33 +4,33 @@
 ======================RESULT=======================
 ---------------------------------------------------
 totacctbal|numcust|cntrycode|
-6737715.00|888.00|13|
-6460571.50|861.00|17|
-7236686.50|964.00|18|
-6701459.50|892.00|23|
-7158866.00|948.00|29|
+6737713.50|888.00|13|
+6460573.50|861.00|17|
+7236687.50|964.00|18|
+6701457.50|892.00|23|
+7158865.00|948.00|29|
 6808437.50|909.00|30|
-6806670.50|922.00|31|
+6806671.00|922.00|31|
 ---------------------------------------------------
-Planning time: 20.72 ms
-Data Load Time (Disk+Upload): 755.81 ms
-GPU kernels time: 20.70 ms
-CPU postprocess time: 52.20 ms
-Total Internal Pipeline time: 828.71 ms
-Total Host Execution time: 829.15 ms
-Total Wall time (Plan+Exec): 849.87 ms
+Planning time: 21.76 ms
+Data Load Time (Disk+Upload): 776.91 ms
+GPU kernels time: 16.73 ms
+CPU postprocess time: 56.38 ms
+Total Internal Pipeline time: 850.02 ms
+Total Host Execution time: 850.89 ms
+Total Wall time (Plan+Exec): 872.65 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    3.552 ms (17.164%) [16 calls]
-  filter         :   11.912 ms (57.561%) [16 calls]
-  gather         :    2.365 ms (11.428%) [9 calls]
-  groupby        :    0.656 ms (3.168%) [3 calls]
-  hash_join_probe_u32:    1.992 ms (9.623%) [8 calls]
-  sort           :    0.219 ms (1.056%) [2 calls]
+  compact        :    3.667 ms (21.913%) [16 calls]
+  filter         :    4.335 ms (25.909%) [16 calls]
+  gather         :    5.867 ms (35.061%) [17 calls]
+  groupby        :    0.691 ms (4.128%) [3 calls]
+  hash_join_probe_u32:    1.954 ms (11.679%) [8 calls]
+  sort           :    0.219 ms (1.310%) [4 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 20.695 ms
-  Kernel invocations: 54
+  TOTAL GPU TIME: 16.733 ms
+  Kernel invocations: 64
 [Planner] Parsed aliases:
 [Planner]   'cntrycode' -> 'substring(c_phone from 1 for 2)'
 [Planner]   'substring(c_phonefrom1for2)' -> 'cntrycode'
@@ -72,7 +72,7 @@ GPU Kernel Timing Summary:
 [Planner] checkDelim visiting: delim_scan
 [Planner] checkDelim FOUND: delim_scan
 [Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6158919720
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6161016872
 [Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
 [Planner] Traversing node: NESTED_LOOP_JOIN
 [Planner] Traversing: NESTED_LOOP_JOIN
@@ -102,7 +102,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: c_acctbal
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6158919720
+[Planner] Generating Scan: customer at index 0 Plan: 6161016872
 [Planner] Node SEQ_SCAN  output projections: c_acctbal, 
 [Planner] Parsing Projections for PROJECTION
 [Planner] Proj: c_acctbal
@@ -128,7 +128,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
 [Planner] Proj: c_custkey
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 8 Plan: 6158919720
+[Planner] Generating Scan: customer at index 8 Plan: 6161016872
 [Planner] Node SEQ_SCAN  output projections: c_phone, c_acctbal, c_custkey, 
 [Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_7'
 [Planner] Pre-resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
@@ -141,7 +141,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
 [Planner] Resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
 DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
 [Planner] Node NESTED_LOOP_JOIN output projections: c_phone, c_acctbal, c_custkey, CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_10 at index 10 Plan: 6158919720
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_10 at index 10 Plan: 6161016872
 [Planner] Created Save Node with type: 9
 [Planner] CONFIRMED: Back node is Save.
 [Planner] Post-Emit Size: 11
@@ -156,7 +156,7 @@ DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable
 [Planner] Traversing: DUMMY_SCAN
 [Planner] Entering children traversal block. Name: dummy_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 11 Plan: 6158919720
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 11 Plan: 6161016872
 [Planner] Traversing node: PROJECTION
 [Planner] Traversing: PROJECTION
 [Planner] Entering children traversal block. Name: projection Children: 1
@@ -170,7 +170,7 @@ DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable
 [Planner] Traversing: DELIM_SCAN
 [Planner] Entering children traversal block. Name: delim_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 13 Plan: 6158919720
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 13 Plan: 6161016872
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
 [Planner] Entering children traversal block. Name: seq_scan  Children: 0
@@ -178,7 +178,7 @@ DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable
 [Planner] Proj: o_custkey
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 15 Plan: 6158919720
+[Planner] Generating Scan: orders at index 15 Plan: 6161016872
 [Planner] Node SEQ_SCAN  output projections: o_custkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
 [Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
@@ -243,4 +243,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner]   'totacctbal'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

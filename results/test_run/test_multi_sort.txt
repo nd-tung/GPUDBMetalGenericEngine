@@ -1,0 +1,137 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner] Traversing node: TOP_N
+[Planner] Traversing: TOP_N
+[Planner] Entering children traversal block. Name: top_n Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table orders
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_orderkey
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 0 Plan: 6101912128
+[Planner] Node SEQ_SCAN  output projections: o_orderkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 0 Plan: 6101920104
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_extendedprice, l_discount, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
+[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
+[Planner] ChildProjs size: 4
+  #0: l_orderkey
+  #1: l_extendedprice
+  #2: l_discount
+  #3: o_orderkey
+[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
+[Planner] Join Key Analysis: l => lineitem, r => orders
+[Planner] Captured RHS Table: orders
+[Planner] RHS Tables: orders, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: orders
+[Planner] Node HASH_JOIN output projections: l_orderkey, l_extendedprice, l_discount, o_orderkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+[Planner] Forcing keep of global column: o_orderkey
+[Planner] Node PROJECTION output projections: l_orderkey, l_extendedprice, l_discount, 
+[Planner] Node TOP_N output projections: l_orderkey, l_extendedprice, l_discount, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'l_orderkey'
+[Planner]   'l_extendedprice'
+[Planner]   'l_discount'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_orderkey|l_extendedprice|l_discount|
+3968390|103548.50|0.06|
+498754|102799.50|0.06|
+1646183|102497.50|0.09|
+1073120|102448.50|0.05|
+4734020|102147.00|0.01|
+5485888|101547.50|0.08|
+2462596|101184.02|0.07|
+4800896|101085.53|0.02|
+5866753|100998.50|0.07|
+1075395|100997.00|0.04|
+5227840|100939.02|0.06|
+2946054|100899.50|0.06|
+2689669|100749.50|0.03|
+2439557|100743.51|0.00|
+430945|100498.50|0.06|
+1333127|100497.04|0.04|
+3804551|100400.02|0.08|
+1517925|100148.00|0.05|
+4542784|100099.00|0.01|
+5133760|100006.55|0.07|
+3946468|99995.00|0.01|
+3050944|99847.50|0.03|
+4521476|99797.50|0.09|
+30470|99697.00|0.07|
+2050272|99598.56|0.09|
+---------------------------------------------------
+Planning time: 18.73 ms
+Data Load Time (Disk+Upload): 10898.62 ms
+GPU kernels time: 16.81 ms
+CPU postprocess time: 40.13 ms
+Total Internal Pipeline time: 10955.55 ms
+Total Host Execution time: 10955.57 ms
+Total Wall time (Plan+Exec): 10974.30 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    1.838 ms (10.934%) [3 calls]
+  filter         :   10.220 ms (60.810%) [3 calls]
+  gather         :    4.134 ms (24.597%) [10 calls]
+  hash_join_probe_u32:    0.285 ms (1.694%) [1 calls]
+  sort           :    0.330 ms (1.966%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 16.806 ms
+  Kernel invocations: 19
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_ge_u32                   9.118        6001215        658.139
+ops::compact_indices                 0.976        6001215       6150.361
+ops::filter_lt_u32_indexed           0.568        4336142       7631.809
+ops::compact_indices_indexed         0.614        4336142       7060.683
+ops::filter_eq_u32_indexed           0.533          76742        143.970
+ops::compact_indices_indexed         0.248          76742        309.912
+ops::gather_col_u32                  0.299          38526        128.688
+ops::gather_col_u32                  0.528          38526         73.000
+ops::gather_col_u32                  0.252          38526        152.805
+ops::gather_col_f32                  0.457          38526         84.264
+ops::gather_col_f32                  0.452          38526         85.313
+ops::gather_col_u32                  0.356          38526        108.105
+ops::gather_col_u32                  0.599          38526         64.290
+ops::gather_col_u32                  0.406          38526         94.892
+ops::gather_col_f32                  0.395          38526         97.586
+ops::gather_col_f32                  0.389          38526         98.964
+hash_join_probe_write_multi          0.285          38526        135.317
+radix_sort_u64                       0.000          38526          0.000
+orderby_gpu_gather                   0.330         154104        466.452
+─────────────────────────────────────────────────────────────────
+TOTAL: 16.806 ms

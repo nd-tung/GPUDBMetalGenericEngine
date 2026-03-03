@@ -1,130 +1,5 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
----------------------------------------------------
-======================RESULT=======================
----------------------------------------------------
-numwait|s_name|
-20.00|Supplier#000002829|
-18.00|Supplier#000005808|
-17.00|Supplier#000000262|
-17.00|Supplier#000000496|
-17.00|Supplier#000002160|
-17.00|Supplier#000002301|
-17.00|Supplier#000002540|
-17.00|Supplier#000003063|
-17.00|Supplier#000005178|
-17.00|Supplier#000008331|
-16.00|Supplier#000002005|
-16.00|Supplier#000002095|
-16.00|Supplier#000005799|
-16.00|Supplier#000005842|
-16.00|Supplier#000006450|
-16.00|Supplier#000006939|
-16.00|Supplier#000009200|
-16.00|Supplier#000009727|
-15.00|Supplier#000000486|
-15.00|Supplier#000000565|
-15.00|Supplier#000001046|
-15.00|Supplier#000001047|
-15.00|Supplier#000001161|
-15.00|Supplier#000001336|
-15.00|Supplier#000001435|
-15.00|Supplier#000003075|
-15.00|Supplier#000003335|
-15.00|Supplier#000005649|
-15.00|Supplier#000006027|
-15.00|Supplier#000006795|
-15.00|Supplier#000006800|
-15.00|Supplier#000006824|
-15.00|Supplier#000007131|
-15.00|Supplier#000007382|
-15.00|Supplier#000008913|
-15.00|Supplier#000009787|
-14.00|Supplier#000000633|
-14.00|Supplier#000001960|
-14.00|Supplier#000002323|
-14.00|Supplier#000002490|
-14.00|Supplier#000002993|
-14.00|Supplier#000003101|
-14.00|Supplier#000004489|
-14.00|Supplier#000005435|
-14.00|Supplier#000005583|
-14.00|Supplier#000005774|
-14.00|Supplier#000007579|
-14.00|Supplier#000008180|
-14.00|Supplier#000008695|
-14.00|Supplier#000009224|
-13.00|Supplier#000000357|
-13.00|Supplier#000000436|
-13.00|Supplier#000000610|
-13.00|Supplier#000000788|
-13.00|Supplier#000000889|
-13.00|Supplier#000001062|
-13.00|Supplier#000001498|
-13.00|Supplier#000002056|
-13.00|Supplier#000002312|
-13.00|Supplier#000002344|
-13.00|Supplier#000002596|
-13.00|Supplier#000002615|
-13.00|Supplier#000002978|
-13.00|Supplier#000003048|
-13.00|Supplier#000003234|
-13.00|Supplier#000003727|
-13.00|Supplier#000003806|
-13.00|Supplier#000004472|
-13.00|Supplier#000005236|
-13.00|Supplier#000005906|
-13.00|Supplier#000006241|
-13.00|Supplier#000006326|
-13.00|Supplier#000006384|
-13.00|Supplier#000006394|
-13.00|Supplier#000006624|
-13.00|Supplier#000006629|
-13.00|Supplier#000006682|
-13.00|Supplier#000006737|
-13.00|Supplier#000006825|
-13.00|Supplier#000007021|
-13.00|Supplier#000007417|
-13.00|Supplier#000007497|
-13.00|Supplier#000007602|
-13.00|Supplier#000008134|
-13.00|Supplier#000008234|
-13.00|Supplier#000009435|
-13.00|Supplier#000009436|
-13.00|Supplier#000009564|
-13.00|Supplier#000009896|
-12.00|Supplier#000000379|
-12.00|Supplier#000000673|
-12.00|Supplier#000000762|
-12.00|Supplier#000000811|
-12.00|Supplier#000000821|
-12.00|Supplier#000001337|
-12.00|Supplier#000001916|
-12.00|Supplier#000001925|
-12.00|Supplier#000002039|
-12.00|Supplier#000002357|
-12.00|Supplier#000002483|
----------------------------------------------------
-Planning time: 21.96 ms
-Data Load Time (Disk+Upload): 9835.47 ms
-GPU kernels time: 36.16 ms
-CPU postprocess time: 272.40 ms
-Total Internal Pipeline time: 10144.03 ms
-Total Host Execution time: 10145.12 ms
-Total Wall time (Plan+Exec): 10167.08 ms
----------------------------------------------------
-GPU Kernel Timing Summary:
-─────────────────────────────────────────
-  compact        :    0.756 ms (2.091%) [2 calls]
-  filter         :    9.167 ms (25.354%) [2 calls]
-  gather         :   18.278 ms (50.552%) [48 calls]
-  groupby        :    0.628 ms (1.737%) [3 calls]
-  hash_join_probe_u32:    6.050 ms (16.734%) [5 calls]
-  hash_join_probe_u64:    1.070 ms (2.960%) [4 calls]
-  sort           :    0.207 ms (0.572%) [7 calls]
-─────────────────────────────────────────
-  TOTAL GPU TIME: 36.157 ms
-  Kernel invocations: 71
 [Planner] Parsed aliases:
 [Planner]   'numwait' -> 'count(*)'
 [Planner]   'count(*)' -> 'numwait'
@@ -164,7 +39,7 @@ GPU Kernel Timing Summary:
 [Planner] checkDelim visiting: column_data_scan
 [Planner] checkDelim FOUND: column_data_scan
 [Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6126905384
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6168520744
 [Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
 [Planner] Traversing node: RIGHT_DELIM_JOIN
 [Planner] Traversing: RIGHT_DELIM_JOIN
@@ -189,7 +64,7 @@ GPU Kernel Timing Summary:
 [Planner] checkDelim visiting: delim_scan
 [Planner] checkDelim FOUND: delim_scan
 [Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6126905384
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6168520744
 [Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
 [Planner] Traversing node: HASH_JOIN
 [Planner] Traversing: HASH_JOIN
@@ -216,7 +91,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: n_nationkey
 DEBUG: Scan table determined as: 'nation'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6126884560
+[Planner] Generating Scan: nation at index 0 Plan: 6168499888
 [Planner] Node SEQ_SCAN  output projections: n_nationkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -227,7 +102,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
 [Planner] Proj: s_name
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 0 Plan: 6126905384
+[Planner] Generating Scan: supplier at index 0 Plan: 6168520744
 [Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, s_name, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
 [Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
@@ -260,7 +135,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='natio
 [Planner] Proj: l_commitdate
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 3 Plan: 6126905384
+[Planner] Generating Scan: lineitem at index 3 Plan: 6168520744
 [Planner] Node SEQ_SCAN  output projections: l_suppkey, l_orderkey, l_receiptdate, l_commitdate, 
 Expression: (l_receiptdate > l_commitdate)
 [Planner] DEBUG FILTER CHILD PROJS: l_suppkey, l_orderkey, l_receiptdate, l_commitdate, 
@@ -295,7 +170,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: o_orderkey
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 8 Plan: 6126905384
+[Planner] Generating Scan: orders at index 8 Plan: 6168520744
 [Planner] Node SEQ_SCAN  output projections: o_orderkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_7'
 [Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
@@ -315,7 +190,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Checking matchesRHS: orders
 [Planner] Checking matchesRHS: lineitem
 [Planner] Node HASH_JOIN output projections: o_orderkey, l_suppkey, l_orderkey, s_suppkey, s_nationkey, s_name, n_nationkey, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_10 at index 10 Plan: 6126905384
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_10 at index 10 Plan: 6168520744
 [Planner] Created Save Node with type: 9
 [Planner] CONFIRMED: Back node is Save.
 [Planner] Post-Emit Size: 11
@@ -330,7 +205,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Traversing: DUMMY_SCAN
 [Planner] Entering children traversal block. Name: dummy_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 11 Plan: 6126905384
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 11 Plan: 6168520744
 [Planner] Traversing node: PROJECTION
 [Planner] Traversing: PROJECTION
 [Planner] Entering children traversal block. Name: projection Children: 1
@@ -344,7 +219,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Traversing: DELIM_SCAN
 [Planner] Entering children traversal block. Name: delim_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 13 Plan: 6126905384
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 13 Plan: 6168520744
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
 [Planner] Entering children traversal block. Name: seq_scan  Children: 0
@@ -353,7 +228,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: l_suppkey
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 15 Plan: 6126905384
+[Planner] Generating Scan: lineitem at index 15 Plan: 6168520744
 [Planner] Node SEQ_SCAN  output projections: l_orderkey, l_suppkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
 [Planner] Pre-resolved Condition: 'l_orderkey = l_orderkey AND l_suppkey != l_suppkey'
@@ -395,7 +270,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Refined DELIM_JOIN condition: l_suppkey = l_suppkey AND l_orderkey = l_orderkey -> l_suppkey = l_suppkey AND l_orderkey = l_orderkey
 [Planner] DELIM_JOIN read Join Type from plan: 'RIGHT_SEMI'
 [Planner] DELIM_JOIN emitting join type: 5 (0=Inner, 1=Left, 4=Semi, 5=Anti)
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_22 at index 22 Plan: 6126905384
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_22 at index 22 Plan: 6168520744
 [Planner] Created Save Node with type: 9
 [Planner] CONFIRMED: Back node is Save.
 [Planner] Post-Emit Size: 23
@@ -419,7 +294,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Traversing: DELIM_SCAN
 [Planner] Entering children traversal block. Name: delim_scan Children: 0
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_22 at index 23 Plan: 6126905384
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_22 at index 23 Plan: 6168520744
 [Planner] Traversing node: PROJECTION
 [Planner] Traversing: PROJECTION
 [Planner] Entering children traversal block. Name: projection Children: 1
@@ -436,7 +311,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: l_commitdate
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 25 Plan: 6126905384
+[Planner] Generating Scan: lineitem at index 25 Plan: 6168520744
 [Planner] Node SEQ_SCAN  output projections: l_orderkey, l_suppkey, l_receiptdate, l_commitdate, 
 Expression: (l_receiptdate > l_commitdate)
 [Planner] DEBUG FILTER CHILD PROJS: l_orderkey, l_suppkey, l_receiptdate, l_commitdate, 
@@ -470,7 +345,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] DEBUG: COLUMN_DATA_SCAN found
 DEBUG: COLUMN_DATA_SCAN extra_info keys: 
 [Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_22 at index 31 Plan: 6126905384
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_22 at index 31 Plan: 6168520744
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_30'
 [Planner] Pre-resolved Condition: 'l_suppkey IS NOT DISTINCT FROM l_suppkey AND l_orderkey IS NOT DISTINCT FROM l_orderkey'
 [Planner] ChildProjs size: 2
@@ -516,4 +391,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner]   'numwait'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

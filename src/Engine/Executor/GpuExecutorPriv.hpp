@@ -1,5 +1,7 @@
 #pragma once
 #include "GpuExecutor.hpp"
+#include "Operators.hpp"
+#include "EnvUtil.hpp"
 
 #include <Metal/Metal.hpp>
 #include <string>
@@ -22,16 +24,75 @@ struct FlatStringCol {
     MTL::Buffer* lengths = nullptr;  // uint32_t[rowCount] length per string
     uint32_t rowCount   = 0;
     uint32_t totalBytes = 0;
+
+    void release() {
+        if (chars)   { chars->release();   chars   = nullptr; }
+        if (offsets) { offsets->release();  offsets = nullptr; }
+        if (lengths) { lengths->release();  lengths = nullptr; }
+        rowCount = 0;
+        totalBytes = 0;
+    }
 };
 
 // Dictionary-encoded string column: sorted unique strings with per-row IDs.
 // Provides collision-free integer encoding (unlike FNV1a hashes) and O(1) reverse mapping.
-// Standalone struct so it can be forward-declared in public headers.
+// GPU-native: dictionary IDs are the primary representation on GPU; strings are only
+// materialized at output time. Dict IDs compact/gather like any u32 column.
 struct DictEncoded {
     std::vector<std::string> dictionary;  // sorted unique strings
-    std::vector<uint32_t> ids;            // per-row dictionary ID (CPU)
-    MTL::Buffer* idsGPU = nullptr;        // per-row dictionary ID (GPU)
+    std::vector<uint32_t> ids;            // per-row dictionary ID (CPU mirror, may be lazy)
+    MTL::Buffer* idsGPU = nullptr;        // per-row dictionary ID (GPU) — primary representation
     uint32_t rowCount = 0;
+
+    // Lookup: given a string value, return its dictionary ID (or UINT32_MAX if not found)
+    uint32_t lookupId(const std::string& value) const {
+        // Binary search since dictionary is sorted
+        auto it = std::lower_bound(dictionary.begin(), dictionary.end(), value);
+        if (it != dictionary.end() && *it == value)
+            return static_cast<uint32_t>(it - dictionary.begin());
+        return UINT32_MAX;
+    }
+
+    // Reverse lookup: given a dictionary ID, return the string (or "" if out of range)
+    const std::string& lookupString(uint32_t id) const {
+        static const std::string empty;
+        return (id < dictionary.size()) ? dictionary[id] : empty;
+    }
+
+    // Sync CPU mirror from GPU buffer (lazy — call when CPU ids needed)
+    void ensureIdsCPU() {
+        if (idsGPU && ids.size() != rowCount) {
+            ids.resize(rowCount);
+            if (rowCount > 0) {
+                std::memcpy(ids.data(), idsGPU->contents(), rowCount * sizeof(uint32_t));
+            }
+        }
+    }
+
+    // Materialize full string column from dict IDs (for output or legacy consumers)
+    std::vector<std::string> materialize() const {
+        std::vector<std::string> result(rowCount);
+        const uint32_t* idPtr = nullptr;
+        if (idsGPU) idPtr = static_cast<const uint32_t*>(idsGPU->contents());
+        else if (!ids.empty()) idPtr = ids.data();
+        if (!idPtr) return result;
+        for (uint32_t i = 0; i < rowCount; ++i) {
+            uint32_t id = idPtr[i];
+            if (id < dictionary.size()) result[i] = dictionary[id];
+        }
+        return result;
+    }
+
+    // Check if this dict encoding is valid and has data
+    bool valid() const { return !dictionary.empty() && (idsGPU || !ids.empty()) && rowCount > 0; }
+
+    // Release GPU resources
+    void release() {
+        if (idsGPU) { idsGPU->release(); idsGPU = nullptr; }
+        ids.clear();
+        dictionary.clear();
+        rowCount = 0;
+    }
 };
 
 // Move EvalContext definition here so it can be shared across translation units
@@ -45,13 +106,20 @@ struct EvalContext {
     std::unordered_map<std::string, MTL::Buffer*> f32ColsGPU;
     
     // Raw string columns for pattern matching (LIKE, CONTAINS)
+    // NOTE: With GPU-native dictionary encoding, stringCols is now a LAZY CACHE.
+    // Primary string data lives in dictCols. stringCols is populated on-demand
+    // when pattern matching needs raw strings (LIKE, CONTAINS) or at final output.
     std::unordered_map<std::string, std::vector<std::string>> stringCols;
 
     // Pre-flattened string columns (Arrow-style GPU buffers, created at load time)
     // Uses standalone FlatStringCol struct above.
+    // NOTE: Built lazily from dictCols when GPU string pattern matching is needed.
     std::unordered_map<std::string, FlatStringCol> flatStringCols;
     
-    // Dictionary-encoded string columns (uses standalone DictEncoded struct above)
+    // Dictionary-encoded string columns — PRIMARY string representation.
+    // Dict IDs are GPU-resident u32 values that propagate through the pipeline
+    // like normal u32 columns (compact, gather, join, groupby all work on IDs).
+    // Strings are only materialized from dict at output time.
     std::unordered_map<std::string, DictEncoded> dictCols;
     
     // Column aliases: maps alias -> canonical name
@@ -82,13 +150,171 @@ struct EvalContext {
 
     // Flag to indicate if this context represents a scalar result (even if broadcasted)
     bool isScalarResult = false;
-    
+
+    // Ensure stringCols[colName] is populated from dictCols (lazy materialization).
+    // Call before any code path that needs raw string data (LIKE, CONTAINS).
+    void ensureStringCol(const std::string& colName) {
+        if (stringCols.count(colName) && !stringCols[colName].empty()) return;
+        auto dit = dictCols.find(colName);
+        if (dit != dictCols.end() && dit->second.valid()) {
+            stringCols[colName] = dit->second.materialize();
+        }
+    }
+
+    // Ensure flatStringCols[colName] is built from stringCols (lazy).
+    // Needs forward-declared flattenStringCol — implemented externally.
+    // Callers should check flatStringCols.count(colName) first if possible.
+
+    // Check if a column has dictionary encoding available
+    bool hasDictCol(const std::string& colName) const {
+        auto it = dictCols.find(colName);
+        return it != dictCols.end() && it->second.valid();
+    }
+
+    // Compact dictCols using activeRowsGPU (GPU gather of dict IDs)
+    void compactDictCols(uint32_t compactCount) {
+        for (auto& [name, dict] : dictCols) {
+            if (dict.idsGPU) {
+                uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
+                if (bufRows > compactCount) {
+                    MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, activeRowsGPU, compactCount, true);
+                    if (compacted) {
+                        // NOTE: do NOT release old idsGPU — may be shared with tableContexts
+                        dict.idsGPU = compacted;
+                        dict.rowCount = compactCount;
+                        dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
+                    }
+                }
+            }
+        }
+    }
+
+    // Compact dictCols using an explicit index buffer (GPU gather of dict IDs)
+    void compactDictCols(MTL::Buffer* indexBuf, uint32_t newCount) {
+        for (auto& [name, dict] : dictCols) {
+            if (dict.idsGPU) {
+                MTL::Buffer* gathered = GpuOps::gatherU32(dict.idsGPU, indexBuf, newCount, false);
+                if (gathered) {
+                    dict.idsGPU->release();
+                    dict.idsGPU = gathered;
+                    dict.rowCount = newCount;
+                    dict.ids.clear();
+                }
+            }
+        }
+    }
+
+    // Compact flatStringCols using activeRowsGPU (GPU gather of chars/offsets/lengths)
+    void compactFlatStringCols(uint32_t compactCount) {
+        for (auto& [name, flat] : flatStringCols) {
+            if (flat.chars && flat.offsets && flat.lengths && flat.rowCount > compactCount) {
+                auto r = GpuOps::gatherFlatString(
+                    flat.chars, flat.offsets, flat.lengths,
+                    activeRowsGPU, compactCount, true);
+                if (r.chars) {
+                    // NOTE: do NOT release old buffers — may be shared with tableContexts
+                    flat.chars = r.chars;
+                    flat.offsets = r.offsets;
+                    flat.lengths = r.lengths;
+                    flat.rowCount = r.rowCount;
+                    flat.totalBytes = r.totalBytes;
+                }
+            }
+        }
+    }
+
+    // Compact flatStringCols using an explicit index buffer
+    void compactFlatStringCols(MTL::Buffer* indexBuf, uint32_t newCount) {
+        for (auto& [name, flat] : flatStringCols) {
+            if (flat.chars && flat.offsets && flat.lengths) {
+                auto r = GpuOps::gatherFlatString(
+                    flat.chars, flat.offsets, flat.lengths,
+                    indexBuf, newCount, true);
+                if (r.chars) {
+                    // NOTE: do NOT release old buffers — may be shared with tableContexts
+                    flat.chars = r.chars;
+                    flat.offsets = r.offsets;
+                    flat.lengths = r.lengths;
+                    flat.rowCount = r.rowCount;
+                    flat.totalBytes = r.totalBytes;
+                }
+            }
+        }
+    }
+
+    // Ensure flatStringCols[colName] is built from dictCols or stringCols (lazy).
+    // Implementation uses flattenStringCol() free function (declared below struct).
+    void ensureFlatStringCol(const std::string& colName);
+
+    // Safely erase a flat string column, releasing its GPU buffers first
+    void eraseFlatStringCol(const std::string& colName) {
+        auto it = flatStringCols.find(colName);
+        if (it != flatStringCols.end()) {
+            it->second.release();
+            flatStringCols.erase(it);
+        }
+    }
+
+    // Gather all GPU-side columns (u32, f32, dict, flat string) by index array.
+    // Releases old GPU buffers and replaces with gathered versions.
+    void gatherAllGPU(MTL::Buffer* indices, uint32_t count) {
+        for (auto& [name, buf] : u32ColsGPU) {
+            if (!buf) continue;
+            MTL::Buffer* gathered = GpuOps::gatherU32(buf, indices, count);
+            buf->release();
+            buf = gathered;
+        }
+        for (auto& [name, buf] : f32ColsGPU) {
+            if (!buf) continue;
+            MTL::Buffer* gathered = GpuOps::gatherF32(buf, indices, count);
+            buf->release();
+            buf = gathered;
+        }
+        compactDictCols(indices, count);
+        compactFlatStringCols(indices, count);
+    }
+
+    // Sync CPU u32Cols/f32Cols from their GPU counterparts.
+    void syncCPUFromGPU(uint32_t count) {
+        for (auto& [name, buf] : u32ColsGPU) {
+            if (!buf) continue;
+            u32Cols[name].resize(count);
+            memcpy(u32Cols[name].data(), buf->contents(), count * sizeof(uint32_t));
+        }
+        for (auto& [name, buf] : f32ColsGPU) {
+            if (!buf) continue;
+            f32Cols[name].resize(count);
+            memcpy(f32Cols[name].data(), buf->contents(), count * sizeof(float));
+        }
+    }
+
+    // Invalidate stringCols entries that have dict or flat-string equivalents.
+    void invalidateStringColsForDictFlat() {
+        for (const auto& [name, dc] : dictCols)
+            stringCols.erase(name);
+        for (const auto& [name, fc] : flatStringCols)
+            stringCols.erase(name);
+    }
+
+    // Reset active rows tracking (releases activeRowsGPU if set).
+    void clearActiveRows() {
+        activeRows.clear();
+        if (activeRowsGPU) {
+            activeRowsGPU->release();
+            activeRowsGPU = nullptr;
+        }
+        activeRowsCountGPU = 0;
+    }
+
     // Which table is "current" for column lookups
     std::string currentTable;
     
     // Columns originating from DELIM_SCAN (correlation keys)
     // These should be prioritized during join column name collision resolution
     std::unordered_set<std::string> isDelimCorrelation;
+
+    // Sequential counter for positional aggregate output columns (#0, #1, ...)
+    size_t aggregateCounter = 0;
 };
 
 struct ScanInstance {
@@ -119,14 +345,57 @@ struct IRGpuLoader {
     );
 };
 
-// Inline helpers
+// Inline helpers  (env_truthy is in EnvUtil.hpp)
 
-inline bool env_truthy(const char* name) {
-    const char* v = std::getenv(name);
-    if (!v) return false;
-    std::string s(v);
-    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-    return (s == "1" || s == "true" || s == "on" || s == "yes");
+// Split a condition string by " AND " into parts.
+inline std::vector<std::string> splitConditionByAND(const std::string& s) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (start < s.size()) {
+        size_t andPos = s.find(" AND ", start);
+        if (andPos == std::string::npos) {
+            parts.push_back(s.substr(start));
+            break;
+        }
+        parts.push_back(s.substr(start, andPos - start));
+        start = andPos + 5;
+    }
+    return parts;
+}
+
+// Parse a self-comparison condition ("col IS NOT DISTINCT FROM col" or "col = col").
+// Returns the column name if it is a self-comparison, empty string otherwise.
+// If isINDF is non-null, sets it to true when the pattern is IS NOT DISTINCT FROM.
+inline std::string parseSelfComparison(const std::string& part, bool* isINDF = nullptr) {
+    if (isINDF) *isINDF = false;
+    // Check "col IS NOT DISTINCT FROM col"
+    size_t indfPos = part.find("IS NOT DISTINCT FROM");
+    if (indfPos != std::string::npos) {
+        std::string lhs = part.substr(0, indfPos);
+        std::string rhs = part.substr(indfPos + 20);
+        while (!lhs.empty() && std::isspace(static_cast<unsigned char>(lhs.back()))) lhs.pop_back();
+        while (!lhs.empty() && std::isspace(static_cast<unsigned char>(lhs.front()))) lhs.erase(0, 1);
+        while (!rhs.empty() && std::isspace(static_cast<unsigned char>(rhs.back()))) rhs.pop_back();
+        while (!rhs.empty() && std::isspace(static_cast<unsigned char>(rhs.front()))) rhs.erase(0, 1);
+        // Strip trailing garbage (e.g., closing parentheses)
+        auto endPos = rhs.find_first_of(" )");
+        if (endPos != std::string::npos) rhs = rhs.substr(0, endPos);
+        if (lhs == rhs || (!lhs.empty() && !rhs.empty() && lhs.find(rhs) != std::string::npos)) {
+            if (isINDF) *isINDF = true;
+            return lhs;
+        }
+        return "";
+    }
+    // Check "col = col"
+    size_t eqPos = part.find(" = ");
+    if (eqPos != std::string::npos) {
+        std::string lhs = part.substr(0, eqPos);
+        std::string rhs = part.substr(eqPos + 3);
+        while (!lhs.empty() && std::isspace(static_cast<unsigned char>(lhs.back()))) lhs.pop_back();
+        while (!rhs.empty() && std::isspace(static_cast<unsigned char>(rhs.front()))) rhs.erase(0, 1);
+        if (lhs == rhs) return lhs;
+    }
+    return "";
 }
 
 inline std::string trim_copy(std::string s) {
@@ -226,8 +495,6 @@ inline bool isColumnEqualsLiteral(const TypedExprPtr& expr, std::string& colName
     }
     return false;
 }
-
-extern thread_local size_t g_aggregateCounter;
 
 inline TypedExprPtr makeCompareWithColumn(const TypedExprPtr& original, const std::string& newColName) {
     if (!original || original->kind != TypedExpr::Kind::Compare) return original;

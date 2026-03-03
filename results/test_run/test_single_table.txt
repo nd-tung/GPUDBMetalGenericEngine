@@ -1,0 +1,163 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'avg(l_discount)' -> 'avg_disc'
+[Planner]   'sum_price' -> 'sum(l_extendedprice)'
+[Planner]   'sum(l_extendedprice)' -> 'sum_price'
+[Planner]   'avg_disc' -> 'avg(l_discount)'
+[Planner]   'count(*)' -> 'cnt'
+[Planner]   'cnt' -> 'count(*)'
+[Planner]   'sum_qty' -> 'sum(l_quantity)'
+[Planner]   'sum(l_quantity)' -> 'sum_qty'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: ORDER_BY
+[Planner] Traversing: ORDER_BY
+[Planner] Entering children traversal block. Name: order_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PERFECT_HASH_GROUP_BY
+[Planner] Traversing: PERFECT_HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: perfect_hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_returnflag
+[Planner] Proj: l_linestatus
+[Planner] Proj: l_quantity
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 0 Plan: 6099642728
+[Planner] Node SEQ_SCAN  output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_returnflag
+[Planner] Proj: l_linestatus
+[Planner] Proj: l_quantity
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_returnflag
+[Planner] Proj: l_linestatus
+[Planner] Proj: l_quantity
+[Planner] Proj: l_extendedprice
+[Planner] Proj: l_discount
+[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, 
+[Planner] Parsing agg string: 'count_star()'
+[Planner] Resolved agg: count_star()
+[Planner] Looking up agg alias: 'count_star()'
+[Planner] Found alias for agg: cnt
+[Planner] Pushing spec with outputName='cnt'
+[Planner] Parsing agg string: 'sum_no_overflow(#2)'
+[Planner] Resolved agg: sum_no_overflow(l_quantity)
+[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(l_quantity)'
+[Planner] Found alias for agg: sum_qty
+[Planner] Pushing spec with outputName='sum_qty'
+[Planner] Parsing agg string: 'sum_no_overflow(#3)'
+[Planner] Resolved agg: sum_no_overflow(l_extendedprice)
+[Planner] inputExpr 'l_extendedprice' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(l_extendedprice)'
+[Planner] Found alias for agg: sum_price
+[Planner] Pushing spec with outputName='sum_price'
+[Planner] Parsing agg string: 'avg(#4)'
+[Planner] Resolved agg: avg(l_discount)
+[Planner] inputExpr 'l_discount' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'avg(l_discount)'
+[Planner] Found alias for agg: avg_disc
+[Planner] Pushing spec with outputName='avg_disc'
+[Planner] Node PERFECT_HASH_GROUP_BY output projections: l_returnflag, l_linestatus, cnt, sum_qty, sum_price, avg_disc, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_returnflag
+[Planner] Proj: l_linestatus
+[Planner] Proj: cnt
+[Planner] Proj: sum_qty
+[Planner] Proj: sum_price
+[Planner] Proj: avg_disc
+[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, cnt, sum_qty, sum_price, avg_disc, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_returnflag
+[Planner] Proj: l_linestatus
+[Planner] Proj: cnt
+[Planner] Proj: sum_qty
+[Planner] Proj: sum_price
+[Planner] Proj: avg_disc
+[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, cnt, sum_qty, sum_price, avg_disc, 
+[Planner] Node ORDER_BY output projections: l_returnflag, l_linestatus, cnt, sum_qty, sum_price, avg_disc, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_returnflag
+[Planner] Proj: l_linestatus
+[Planner] Proj: cnt
+[Planner] Proj: sum_qty
+[Planner] Proj: sum_price
+[Planner] Proj: avg_disc
+[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, cnt, sum_qty, sum_price, avg_disc, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'l_returnflag'
+[Planner]   'l_linestatus'
+[Planner]   'cnt'
+[Planner]   'sum_qty'
+[Planner]   'sum_price'
+[Planner]   'avg_disc'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_returnflag|l_linestatus|cnt|sum_qty|sum_price|avg_disc|
+A|F|111907.00|2858742.00|4285925376.00|0.05|
+R|F|112215.00|2857833.00|4286650368.00|0.05|
+---------------------------------------------------
+Planning time: 18.81 ms
+Data Load Time (Disk+Upload): 12573.37 ms
+GPU kernels time: 29.16 ms
+CPU postprocess time: 24.42 ms
+Total Internal Pipeline time: 12626.95 ms
+Total Host Execution time: 12626.97 ms
+Total Wall time (Plan+Exec): 12645.78 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    1.587 ms (5.444%) [2 calls]
+  filter         :    9.901 ms (33.959%) [2 calls]
+  gather         :    2.958 ms (10.146%) [5 calls]
+  groupby        :   14.042 ms (48.160%) [3 calls]
+  sort           :    0.668 ms (2.292%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 29.157 ms
+  Kernel invocations: 14
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_ge_u32                   9.271        6001215        647.313
+ops::compact_indices                 0.951        6001215       6309.046
+ops::filter_lt_u32_indexed           0.630        4336142       6880.035
+ops::compact_indices_indexed         0.636        4336142       6818.273
+ops::gather_col_u32                  0.612         224122        366.487
+ops::gather_col_u32                  0.533         224122        420.754
+ops::gather_col_f32                  0.580         224122        386.389
+ops::gather_col_f32                  0.519         224122        431.972
+ops::gather_col_f32                  0.715         224122        313.403
+ops::groupby_agg_multi_key_ty       13.453         224122         16.660
+ops::ht_mark_valid                   0.334         524288       1571.093
+ops::ht_extract_compact              0.255              2          0.008
+block_sort_kv_u64                    0.000              2          0.000
+orderby_gpu_gather                   0.668             12          0.018
+─────────────────────────────────────────────────────────────────
+TOTAL: 29.157 ms

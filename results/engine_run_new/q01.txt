@@ -4,28 +4,28 @@
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|l_linestatus|sum_qty|sum_base_price|sum_disc_price|sum_charge|avg_qty|avg_price|avg_disc|count_order|
-A|F|37734324.00|56586530816.00|53757886464.00|55909208064.00|25.52|38273.11|0.05|1478493.00|
-N|F|991417.00|1487500928.00|1413075712.00|1469652352.00|25.52|38284.38|0.05|38854.00|
-N|O|74475968.00|111703384064.00|106117742592.00|110367244288.00|25.50|38249.68|0.05|2920374.00|
-R|F|37719768.00|56567300096.00|53741780992.00|55889588224.00|25.51|38250.35|0.05|1478870.00|
+A|F|37734064.00|56586731520.00|53758160896.00|55909163008.00|25.52|38273.24|0.05|1478493.00|
+N|F|991417.00|1487503616.00|1413085440.00|1469650944.00|25.52|38284.43|0.05|38854.00|
+N|O|74476080.00|111702704128.00|106117922816.00|110366064640.00|25.50|38249.46|0.05|2920374.00|
+R|F|37719400.00|56568205312.00|53741199360.00|55889436672.00|25.51|38250.93|0.05|1478870.00|
 ---------------------------------------------------
-Planning time: 20.39 ms
-Data Load Time (Disk+Upload): 14646.69 ms
-GPU kernels time: 201.93 ms
-CPU postprocess time: 251.86 ms
-Total Internal Pipeline time: 15100.48 ms
-Total Host Execution time: 15100.52 ms
-Total Wall time (Plan+Exec): 15120.91 ms
+Planning time: 20.33 ms
+Data Load Time (Disk+Upload): 14694.01 ms
+GPU kernels time: 313.71 ms
+CPU postprocess time: 255.79 ms
+Total Internal Pipeline time: 15263.51 ms
+Total Host Execution time: 15263.54 ms
+Total Wall time (Plan+Exec): 15283.87 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.951 ms (0.471%) [1 calls]
-  filter         :    9.192 ms (4.552%) [1 calls]
-  gather         :   18.023 ms (8.925%) [11 calls]
-  groupby        :  167.154 ms (82.778%) [3 calls]
-  sort           :    6.612 ms (3.274%) [2 calls]
+  compact        :    1.023 ms (0.326%) [1 calls]
+  filter         :    9.387 ms (2.992%) [1 calls]
+  gather         :   18.559 ms (5.916%) [11 calls]
+  groupby        :  277.789 ms (88.548%) [3 calls]
+  sort           :    6.956 ms (2.217%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 201.931 ms
+  TOTAL GPU TIME: 313.714 ms
   Kernel invocations: 18
 [Planner] Parsed aliases:
 [Planner]   'count(*)' -> 'count_order'
@@ -80,7 +80,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: l_tax
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6123808808
+[Planner] Generating Scan: lineitem at index 0 Plan: 6099937320
 [Planner] Node SEQ_SCAN  output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, l_tax, 
 [Planner] Parsing Projections for PROJECTION
 [Planner] Proj: l_returnflag
@@ -212,4 +212,4 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
 [Planner]   'count_order'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

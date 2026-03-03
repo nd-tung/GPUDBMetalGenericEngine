@@ -15,7 +15,8 @@
 namespace engine {
 
 bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
-                                 const std::unordered_map<std::string, DictEncoded>& dictCols) {
+                                 const std::unordered_map<std::string, DictEncoded>& dictCols,
+                                 const std::unordered_map<std::string, FlatStringCol>& flatStringCols) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     
     if (debug) {
@@ -367,8 +368,8 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             srcF32Bufs[i]->release();
         }
 
-        // String columns: reorder via GPU dict ID gather when available,
-        // otherwise CPU random-access move
+        // String columns: reorder via GPU dict ID gather, GPU flat string gather,
+        // or CPU random-access move (in that priority order)
         if (!table.string_cols.empty()) {
             std::vector<uint32_t> sortedIdx(n);
             std::memcpy(sortedIdx.data(), idxBuf->contents(), n * sizeof(uint32_t));
@@ -389,6 +390,27 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
                     if (debug)
                         std::cerr << "[Exec] OrderBy: GPU dict reorder '" << colName << "'\n";
                 } else {
+                    // Try GPU flat string gather
+                    auto fit = flatStringCols.find(colName);
+                    if (fit != flatStringCols.end() && fit->second.chars && fit->second.rowCount == n) {
+                        auto r = GpuOps::gatherFlatString(
+                            fit->second.chars, fit->second.offsets, fit->second.lengths,
+                            idxBuf, n, true);
+                        if (r.chars) {
+                            const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                            const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                            const char* ch = static_cast<const char*>(r.chars->contents());
+                            auto& col = table.string_cols[ci];
+                            for (uint32_t i = 0; i < n; ++i) col[i].assign(ch + offs[i], lens[i]);
+                            // Release gathered GPU buffers
+                            r.chars->release();
+                            r.offsets->release();
+                            r.lengths->release();
+                            if (debug)
+                                std::cerr << "[Exec] OrderBy: GPU flat string reorder '" << colName << "'\n";
+                            continue;
+                        }
+                    }
                     // CPU fallback: random-access string move
                     auto& col = table.string_cols[ci];
                     std::vector<std::string> tmp(n);

@@ -5,23 +5,23 @@
 ---------------------------------------------------
 Scalar sum((l_extendedprice * (1.00 - l_discount))): 3083843.25
 ---------------------------------------------------
-Planning time: 20.98 ms
-Data Load Time (Disk+Upload): 18031.80 ms
-GPU kernels time: 43.25 ms
-CPU postprocess time: 167.49 ms
-Total Internal Pipeline time: 18242.54 ms
-Total Host Execution time: 18243.16 ms
-Total Wall time (Plan+Exec): 18264.14 ms
+Planning time: 20.96 ms
+Data Load Time (Disk+Upload): 13627.27 ms
+GPU kernels time: 49.55 ms
+CPU postprocess time: 196.31 ms
+Total Internal Pipeline time: 13873.13 ms
+Total Host Execution time: 13873.60 ms
+Total Wall time (Plan+Exec): 13894.56 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    9.329 ms (21.569%) [28 calls]
-  filter         :   20.266 ms (46.857%) [28 calls]
-  gather         :    9.484 ms (21.929%) [37 calls]
-  hash_join_probe_u32:    4.171 ms (9.645%) [18 calls]
+  compact        :   10.261 ms (20.710%) [28 calls]
+  filter         :   13.708 ms (27.667%) [28 calls]
+  gather         :   21.412 ms (43.217%) [64 calls]
+  hash_join_probe_u32:    4.165 ms (8.406%) [18 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 43.250 ms
-  Kernel invocations: 111
+  TOTAL GPU TIME: 49.546 ms
+  Kernel invocations: 138
 [Planner] Parsed aliases:
 [Planner]   'revenue' -> 'sum(l_extendedprice* (1 - l_discount))'
 [Planner]   'sum(l_extendedprice*(1-l_discount))' -> 'revenue'
@@ -60,7 +60,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: l_discount
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6131001384
+[Planner] Generating Scan: lineitem at index 0 Plan: 6129018920
 [Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, l_shipmode, l_extendedprice, l_discount, 
 Expression: ((l_shipmode = 'AIR') OR (l_shipmode = 'AIR REG'))
 [Planner] DEBUG FILTER CHILD PROJS: l_partkey, l_quantity, l_shipmode, l_extendedprice, l_discount, 
@@ -82,7 +82,7 @@ Expression: ((l_shipmode = 'AIR') OR (l_shipmode = 'AIR REG'))
 [Planner] Proj: p_size
 DEBUG: Scan table determined as: 'part'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 4 Plan: 6131001384
+[Planner] Generating Scan: part at index 4 Plan: 6129018920
 [Planner] Node SEQ_SCAN  output projections: p_partkey, p_brand, p_container, p_size, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
 [Planner] Pre-resolved Condition: 'p_partkey = l_partkey'
@@ -133,5 +133,5 @@ DEBUG: Is End? 0
 [Planner]   'revenue'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
 GpuOps::gatherU32: Input or Indices buffer is NULL

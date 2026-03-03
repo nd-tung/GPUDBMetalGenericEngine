@@ -4,27 +4,27 @@
 ======================RESULT=======================
 ---------------------------------------------------
 s_suppkey|total_revenue|s_name|s_address|s_phone|
-8449|1772627.38|Supplier#000008449|Wp34zim9qYFbVctdW|20-469-856-8873|
+8449|1772627.25|Supplier#000008449|Wp34zim9qYFbVctdW|20-469-856-8873|
 ---------------------------------------------------
-Planning time: 20.88 ms
-Data Load Time (Disk+Upload): 8400.78 ms
-GPU kernels time: 19.39 ms
-CPU postprocess time: 35.11 ms
-Total Internal Pipeline time: 8455.27 ms
-Total Host Execution time: 8455.32 ms
-Total Wall time (Plan+Exec): 8476.19 ms
+Planning time: 21.00 ms
+Data Load Time (Disk+Upload): 8436.27 ms
+GPU kernels time: 17.45 ms
+CPU postprocess time: 24.19 ms
+Total Internal Pipeline time: 8477.92 ms
+Total Host Execution time: 8478.16 ms
+Total Wall time (Plan+Exec): 8499.16 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    1.647 ms (8.497%) [3 calls]
-  filter         :   12.293 ms (63.411%) [3 calls]
-  gather         :    3.351 ms (17.285%) [9 calls]
-  groupby        :    1.536 ms (7.922%) [3 calls]
-  hash_join_probe_u32:    0.205 ms (1.059%) [1 calls]
-  sort           :    0.354 ms (1.826%) [1 calls]
+  compact        :    1.669 ms (9.561%) [3 calls]
+  filter         :    9.017 ms (51.666%) [3 calls]
+  gather         :    4.671 ms (26.762%) [15 calls]
+  groupby        :    1.632 ms (9.350%) [3 calls]
+  hash_join_probe_u32:    0.222 ms (1.274%) [1 calls]
+  sort           :    0.242 ms (1.387%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 19.386 ms
-  Kernel invocations: 20
+  TOTAL GPU TIME: 17.453 ms
+  Kernel invocations: 26
 [Planner] Parsed aliases:
 [Planner]   'total_revenue' -> 'sum(l_extendedprice * (1 - l_discount))'
 [Planner]   'sum(l_extendedprice*(1-l_discount))' -> 'total_revenue'
@@ -57,7 +57,7 @@ DEBUG: CTE Node extra_info keys:
 [Planner] Proj: l_discount
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6133311528
+[Planner] Generating Scan: lineitem at index 0 Plan: 6099314728
 [Planner] Node SEQ_SCAN  output projections: l_suppkey, l_extendedprice, l_discount, 
 [Planner] Parsing Projections for PROJECTION
 [Planner] Proj: l_suppkey
@@ -124,7 +124,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
 DEBUG: Resolved CTE_SCAN table from index 0 -> revenue
 DEBUG: Scan table determined as: 'revenue'
 DEBUG: Pushing SCAN node for CTE_SCAN. Table=revenue
-[Planner] Generating Scan: revenue at index 6 Plan: 6133311528
+[Planner] Generating Scan: revenue at index 6 Plan: 6099314728
 [Planner] Node CTE_SCAN output projections: 
 [Planner] Parsing Projections for PROJECTION
 [Planner] Proj: total_revenue
@@ -148,7 +148,7 @@ DEBUG: Pushing SCAN node for CTE_SCAN. Table=revenue
 DEBUG: Resolved CTE_SCAN table from index 0 -> revenue
 DEBUG: Scan table determined as: 'revenue'
 DEBUG: Pushing SCAN node for CTE_SCAN. Table=revenue
-[Planner] Generating Scan: revenue at index 14 Plan: 6133311528
+[Planner] Generating Scan: revenue at index 14 Plan: 6099314728
 [Planner] Node CTE_SCAN output projections: 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_13'
 [Planner] Pre-resolved Condition: 'total_revenue = SUBQUERY'
@@ -173,7 +173,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: s_phone
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 17 Plan: 6133311528
+[Planner] Generating Scan: supplier at index 17 Plan: 6099314728
 [Planner] Node SEQ_SCAN  output projections: s_suppkey, s_name, s_address, s_phone, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_16'
 [Planner] Pre-resolved Condition: 's_suppkey = supplier_no'
@@ -214,4 +214,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner]   'total_revenue'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

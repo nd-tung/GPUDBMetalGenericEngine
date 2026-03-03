@@ -1,0 +1,355 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'avg_yearly' -> 'sum(l_extendedprice) / 7.0'
+[Planner]   'sum(l_extendedprice)/7.0' -> 'avg_yearly'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: UNGROUPED_AGGREGATE
+[Planner] Traversing: UNGROUPED_AGGREGATE
+[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: LEFT_DELIM_JOIN
+[Planner] Traversing: LEFT_DELIM_JOIN
+[Planner] [TraverseNode] Logic for JOIN: LEFT_DELIM_JOIN
+[Planner] Entering children traversal block. Name: left_delim_join Children: 3
+[Planner] Checking LHS (kids[0]) for delim...
+[Planner] checkDelim visiting: hash_join
+[Planner] checkDelim visiting: seq_scan 
+[Planner] checkDelim visiting: seq_scan 
+[Planner] Result LHS: 0
+[Planner] Checking RHS (kids[1]) for delim...
+[Planner] checkDelim visiting: hash_join
+[Planner] checkDelim visiting: column_data_scan
+[Planner] checkDelim FOUND: column_data_scan
+[Planner] Result RHS: 1
+[Planner] Processing DELIM_JOIN at node 0 Plan: 6167390584
+[Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Skipping capture for 'part' table to force full Traversal
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_partkey
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 0 Plan: 6167390584
+[Planner] Node SEQ_SCAN  output projections: p_partkey, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+[Planner] Proj: l_extendedprice
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 2 Plan: 6167390584
+[Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, l_extendedprice, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
+[Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
+[Planner] ChildProjs size: 4
+  #0: l_partkey
+  #1: l_quantity
+  #2: l_extendedprice
+  #3: p_partkey
+[Planner] Resolved Condition: 'l_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_1'
+[Planner] Join Key Analysis: l => lineitem, r => part
+[Planner] Captured RHS Table: tmpl_join_1
+[Planner] RHS Tables: tmpl_join_1, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: l_partkey, l_quantity, l_extendedprice, p_partkey, 
+[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_4 at index 4 Plan: 6167390584
+[Planner] Created Save Node with type: 9
+[Planner] CONFIRMED: Back node is Save.
+[Planner] Post-Emit Size: 5
+[Planner] Pushed DELIM context: tmpl_delim_lhs_4 (stack size=1)
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node PROJECTION
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node DELIM_SCAN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: DELIM_SCAN
+[Planner] Traversing: DELIM_SCAN
+[Planner] Entering children traversal block. Name: delim_scan Children: 0
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 5 Plan: 6167390584
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node DELIM_SCAN
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: DELIM_SCAN
+[Planner] Traversing: DELIM_SCAN
+[Planner] Entering children traversal block. Name: delim_scan Children: 0
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 7 Plan: 6167390584
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_partkey
+[Planner] Proj: l_quantity
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 9 Plan: 6167390584
+[Planner] Node SEQ_SCAN  output projections: l_partkey, l_quantity, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_8'
+[Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
+[Planner] ChildProjs size: 2
+  #0: l_partkey
+  #1: l_quantity
+[Planner] Resolved Condition: 'l_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_8'
+[Planner] Join Key Analysis: l => lineitem, r => part
+[Planner] Captured RHS Table: tmpl_join_8
+[Planner] RHS Tables: tmpl_join_8, 
+[Planner] Checking matchesRHS: lineitem
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: l_partkey, l_quantity, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: p_partkey
+[Planner] Proj: l_quantity
+[Planner] Forcing keep of global column: l_partkey
+[Planner] Node PROJECTION output projections: p_partkey, l_quantity, 
+[Planner] Parsing agg string: 'avg(#1)'
+[Planner] Resolved agg: avg(l_quantity)
+[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'avg(l_quantity)'
+[Planner] No alias found for agg, using generated name: avg(l_quantity)
+[Planner] Pushing spec with outputName='avg(l_quantity)'
+[Planner] Node HASH_GROUP_BY output projections: p_partkey, avg(l_quantity), 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_6'
+[Planner] Pre-resolved Condition: '#0 IS NOT DISTINCT FROM p_partkey'
+[Planner] ChildProjs size: 2
+  #0: p_partkey
+  #1: avg(l_quantity)
+[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_6'
+[Planner] Join Key Analysis: l => part, r => part
+[Planner] Captured RHS Table: tmpl_join_6
+[Planner] RHS Tables: tmpl_join_6, 
+[Planner] Checking matchesRHS: part
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: p_partkey, avg(l_quantity), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: (0.2 * avg(l_quantity))
+[Planner] Proj: p_partkey
+[Planner] Node PROJECTION output projections: (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Traversing node: COLUMN_DATA_SCAN
+[Planner] Traversing: COLUMN_DATA_SCAN
+[Planner] Entering children traversal block. Name: column_data_scan Children: 0
+[Planner] DEBUG: COLUMN_DATA_SCAN found
+DEBUG: COLUMN_DATA_SCAN extra_info keys: 
+[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
+[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_4 at index 16 Plan: 6167390584
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
+[Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+[Planner] ChildProjs size: 2
+  #0: (0.2 * avg(l_quantity))
+  #1: p_partkey
+[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_15'
+[Planner] Join Key Analysis: l => part, r => part
+[Planner] Captured RHS Table: tmpl_join_15
+[Planner] RHS Tables: tmpl_join_15, 
+[Planner] Checking matchesRHS: part
+[Planner] Checking matchesRHS: part
+[Planner] Node HASH_JOIN output projections: (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Popping DELIM context: tmpl_delim_lhs_4
+[Planner] DELIM_JOIN condition: p_partkey IS NOT DISTINCT FROM p_partkey
+[Planner] Refined DELIM_JOIN condition: p_partkey = p_partkey -> p_partkey = p_partkey
+[Planner] DELIM_JOIN read Join Type from plan: 'SINGLE'
+[Planner] DELIM_JOIN emitting join type: 0 (0=Inner, 1=Left, 4=Semi, 5=Anti)
+Expression: (CAST(l_quantity AS DOUBLE) < SUBQUERY)
+[Planner] DEBUG FILTER CHILD PROJS: l_partkey, l_quantity, l_extendedprice, p_partkey, (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Attempting to replace SUBQUERY in: (CAST(l_quantity AS DOUBLE) < SUBQUERY)
+[Planner]   Checking candidate: p_partkey
+[Planner]   Checking candidate: (0.2 * avg(l_quantity))
+[Planner] Replaced SUBQUERY with (0.2 * avg(l_quantity))
+[Planner] Node FILTER output projections: l_partkey, l_quantity, l_extendedprice, p_partkey, (0.2 * avg(l_quantity)), p_partkey, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_quantity
+[Planner] Forcing keep of global column: p_partkey
+[Planner] Forcing keep of global column: l_extendedprice
+[Planner] Forcing keep of global column: l_partkey
+[Planner] Node PROJECTION output projections: l_quantity, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_extendedprice
+[Planner] Forcing keep of global column: l_quantity
+[Planner] Node PROJECTION output projections: l_extendedprice, 
+[Planner] Processing aggregate: 'sum(l_extendedprice)'
+[Planner] Node UNGROUPED_AGGREGATE output projections: sum(l_extendedprice), 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: avg_yearly
+[Planner] Projection: resolving alias 'avg_yearly' -> 'sum(l_extendedprice) / 7.0'
+[Planner] Node PROJECTION output projections: avg_yearly, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'avg_yearly'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar avg_yearly: 348406.06
+---------------------------------------------------
+Planning time: 19.83 ms
+Data Load Time (Disk+Upload): 6205.60 ms
+GPU kernels time: 31.07 ms
+CPU postprocess time: 57.65 ms
+Total Internal Pipeline time: 6294.32 ms
+Total Host Execution time: 6294.64 ms
+Total Wall time (Plan+Exec): 6314.47 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    0.533 ms (1.715%) [2 calls]
+  filter         :    1.154 ms (3.712%) [2 calls]
+  gather         :   16.405 ms (52.793%) [82 calls]
+  groupby        :    0.646 ms (2.078%) [3 calls]
+  hash_join_probe_u32:   12.337 ms (39.701%) [6 calls]
+  sort           :    0.000 ms (0.000%) [5 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 31.074 ms
+  Kernel invocations: 100
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                0.883         200000        226.394
+ops::compact_indices                 0.275         200000        726.723
+ops::filter_string_eq                0.270         200000        740.168
+ops::compact_indices                 0.258         200000        776.072
+hash_join_probe_write_multi          0.248           5043         20.355
+ops::gather_col_u32                  0.207            204          0.986
+ops::gather_col_u32                  0.824            204          0.248
+ops::gather_col_u32                  0.249            204          0.819
+ops::gather_col_u32                  0.206            204          0.988
+ops::gather_col_u32                  0.226            204          0.905
+ops::gather_col_u32                  0.226            204          0.903
+ops::gather_col_u32                  0.227            204          0.897
+ops::gather_col_u32                  0.227            204          0.900
+ops::gather_col_u32                  0.233            204          0.875
+hash_join_probe_write_multi          5.765        6001215       1041.004
+ops::gather_col_u32                  0.619           6088          9.837
+ops::gather_col_u32                  0.168           6088         36.274
+radix_sort_u32                       0.000           6088          0.000
+ops::gather_col_u32                  0.159            204          1.280
+ops::gather_col_u32                  0.159            204          1.287
+ops::gather_col_u32                  0.154            204          1.327
+ops::gather_col_u32                  0.172            204          1.187
+ops::gather_col_f32                  0.161            204          1.265
+ops::gather_col_f32                  0.321            204          0.636
+ops::gather_col_f32                  0.161            204          1.265
+ops::gather_col_f32                  0.163            204          1.253
+ops::gather_col_u32                  0.157            204          1.304
+ops::gather_col_u32                  0.157            204          1.302
+radix_sort_u32                       0.000           6088          0.000
+ops::gather_col_u32                  0.172            204          1.187
+ops::gather_col_u32                  0.180            204          1.130
+ops::gather_col_u32                  0.181            204          1.130
+ops::gather_col_u32                  0.185            204          1.105
+ops::gather_col_f32                  0.182            204          1.123
+ops::gather_col_f32                  0.181            204          1.127
+ops::gather_col_f32                  0.182            204          1.122
+ops::gather_col_f32                  0.168            204          1.215
+ops::gather_col_u32                  0.174            204          1.170
+ops::gather_col_u32                  0.185            204          1.103
+hash_join_probe_write_multi          5.763        6001215       1041.358
+ops::gather_col_u32                  0.296           6088         20.559
+ops::gather_col_u32                  0.177           6088         34.355
+ops::groupby_agg_multi_key_ty        0.287           6088         21.231
+ops::ht_mark_valid                   0.181          16384         90.478
+ops::ht_extract_compact              0.178            204          1.146
+block_sort_kv_u32                    0.000            204          0.000
+hash_join_probe_write_multi          0.187            204          1.092
+ops::gather_col_u32                  0.270            204          0.757
+ops::gather_col_u32                  0.174            204          1.174
+ops::gather_col_u32                  0.181            204          1.126
+ops::gather_col_u32                  0.185            204          1.105
+block_sort_kv_u32                    0.000            204          0.000
+hash_join_probe_write_multi          0.193           6088         31.585
+ops::gather_col_u32                  0.201           6088         30.345
+ops::gather_col_u32                  0.181           6088         33.550
+ops::gather_col_u32                  0.184           6088         33.155
+ops::gather_col_u32                  0.186           6088         32.761
+ops::gather_col_u32                  0.183           6088         33.306
+ops::gather_col_u32                  0.182           6088         33.405
+radix_sort_u32                       0.000           6088          0.000
+ops::gather_col_u32                  0.186            204          1.097
+ops::gather_col_u32                  0.183            204          1.117
+ops::gather_col_u32                  0.180            204          1.134
+ops::gather_col_u32                  0.181            204          1.129
+ops::gather_col_u32                  0.178            204          1.143
+ops::gather_col_u32                  0.182            204          1.123
+ops::gather_col_u32                  0.185            204          1.102
+ops::gather_col_f32                  0.184            204          1.108
+ops::gather_col_f32                  0.180            204          1.135
+ops::gather_col_f32                  0.186            204          1.098
+ops::gather_col_f32                  0.180            204          1.132
+ops::gather_col_f32                  0.176            204          1.157
+ops::gather_col_f32                  0.172            204          1.186
+ops::gather_col_f32                  0.176            204          1.162
+ops::gather_col_f32                  0.167            204          1.220
+hash_join_probe_write_multi          0.182           6088         33.451
+ops::gather_col_u32                  0.279           6088         21.847
+ops::gather_col_u32                  0.183           6088         33.306
+ops::gather_col_u32                  0.179           6088         33.964
+ops::gather_col_u32                  0.177           6088         34.331
+ops::gather_col_u32                  0.181           6088         33.721
+ops::gather_col_u32                  0.179           6088         33.987
+ops::gather_col_u32                  0.170            587          3.448
+ops::gather_col_u32                  0.177            587          3.307
+ops::gather_col_u32                  0.180            587          3.259
+ops::gather_col_u32                  0.181            587          3.245
+ops::gather_col_u32                  0.183            587          3.213
+ops::gather_col_u32                  0.175            587          3.346
+ops::gather_col_f32                  0.168            587          3.491
+ops::gather_col_f32                  0.175            587          3.356
+ops::gather_col_f32                  0.179            587          3.279
+ops::gather_col_f32                  0.178            587          3.295
+ops::gather_col_f32                  0.178            587          3.301
+ops::gather_col_f32                  0.178            587          3.306
+ops::gather_col_f32                  0.175            587          3.360
+ops::gather_col_f32                  0.179            587          3.273
+ops::gather_col_u32                  0.170            587          3.447
+ops::gather_col_u32                  0.175            587          3.362
+ops::gather_col_u32                  0.168            587          3.493
+ops::gather_col_u32                  0.180            587          3.266
+─────────────────────────────────────────────────────────────────
+TOTAL: 31.074 ms

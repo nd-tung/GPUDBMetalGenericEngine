@@ -289,6 +289,20 @@ public:
     // 8-byte big-endian prefix extraction for sort-compatible string keys.
     static MTL::Buffer* stringPrefixU64(
         MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
+
+    // GPU gather for FlatStringCol: gather chars/offsets/lengths by an index buffer.
+    // Produces a new compacted FlatStringCol. Uses gatherU32 for lengths,
+    // prefix-sum for new offsets, and a char-copy kernel for the char buffer.
+    struct FlatStringGatherResult {
+        MTL::Buffer* chars   = nullptr;
+        MTL::Buffer* offsets = nullptr;
+        MTL::Buffer* lengths = nullptr;
+        uint32_t rowCount    = 0;
+        uint32_t totalBytes  = 0;
+    };
+    static FlatStringGatherResult gatherFlatString(
+        MTL::Buffer* srcChars, MTL::Buffer* srcOffsets, MTL::Buffer* srcLengths,
+        MTL::Buffer* indices, uint32_t count, bool sync = true);
 };
 
 } // namespace engine

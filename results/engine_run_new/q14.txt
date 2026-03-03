@@ -5,23 +5,23 @@
 ---------------------------------------------------
 Scalar promo_revenue: 16.38
 ---------------------------------------------------
-Planning time: 20.56 ms
-Data Load Time (Disk+Upload): 8591.31 ms
-GPU kernels time: 14.10 ms
-CPU postprocess time: 37.37 ms
-Total Internal Pipeline time: 8642.79 ms
-Total Host Execution time: 8644.28 ms
-Total Wall time (Plan+Exec): 8664.84 ms
+Planning time: 20.29 ms
+Data Load Time (Disk+Upload): 8579.07 ms
+GPU kernels time: 8.30 ms
+CPU postprocess time: 42.60 ms
+Total Internal Pipeline time: 8629.97 ms
+Total Host Execution time: 8631.43 ms
+Total Wall time (Plan+Exec): 8651.72 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    1.512 ms (10.723%) [2 calls]
-  filter         :    9.494 ms (67.324%) [2 calls]
-  gather         :    2.829 ms (20.060%) [8 calls]
-  hash_join_probe_u32:    0.267 ms (1.893%) [1 calls]
+  compact        :    1.454 ms (17.533%) [2 calls]
+  filter         :    2.026 ms (24.421%) [2 calls]
+  gather         :    4.557 ms (54.933%) [13 calls]
+  hash_join_probe_u32:    0.258 ms (3.113%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 14.101 ms
-  Kernel invocations: 13
+  TOTAL GPU TIME: 8.296 ms
+  Kernel invocations: 18
 [Planner] Parsed aliases:
 [Planner]   'promo_revenue' -> '100.00 * sum(case
         when p_type like 'PROMO%'
@@ -53,7 +53,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: p_type
 DEBUG: Scan table determined as: 'part'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 0 Plan: 6168897576
+[Planner] Generating Scan: part at index 0 Plan: 6157609000
 [Planner] Node SEQ_SCAN  output projections: p_partkey, p_type, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -64,7 +64,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
 [Planner] Proj: l_discount
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 2 Plan: 6168897576
+[Planner] Generating Scan: lineitem at index 2 Plan: 6157609000
 [Planner] Node SEQ_SCAN  output projections: l_partkey, l_extendedprice, l_discount, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
 [Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
@@ -113,4 +113,4 @@ DEBUG: Is End? 0
 [Planner]   'promo_revenue'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

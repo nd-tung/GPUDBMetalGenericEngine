@@ -7,25 +7,25 @@ o_year|mkt_share|
 1995|0.03|
 1996|0.04|
 ---------------------------------------------------
-Planning time: 21.95 ms
-Data Load Time (Disk+Upload): 11494.35 ms
-GPU kernels time: 20.98 ms
-CPU postprocess time: 42.34 ms
-Total Internal Pipeline time: 11557.67 ms
-Total Host Execution time: 11559.33 ms
-Total Wall time (Plan+Exec): 11581.29 ms
+Planning time: 21.73 ms
+Data Load Time (Disk+Upload): 11476.53 ms
+GPU kernels time: 18.88 ms
+CPU postprocess time: 39.09 ms
+Total Internal Pipeline time: 11534.51 ms
+Total Host Execution time: 11536.11 ms
+Total Wall time (Plan+Exec): 11557.84 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    1.615 ms (7.695%) [6 calls]
-  filter         :   10.290 ms (49.036%) [6 calls]
-  gather         :    3.095 ms (14.751%) [10 calls]
-  groupby        :    0.574 ms (2.736%) [3 calls]
-  hash_join_probe_u32:    5.224 ms (24.894%) [7 calls]
-  sort           :    0.186 ms (0.887%) [2 calls]
+  compact        :    1.600 ms (8.472%) [6 calls]
+  filter         :    1.653 ms (8.751%) [6 calls]
+  gather         :    9.476 ms (50.181%) [32 calls]
+  groupby        :    0.638 ms (3.377%) [3 calls]
+  hash_join_probe_u32:    5.316 ms (28.153%) [7 calls]
+  sort           :    0.201 ms (1.066%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 20.984 ms
-  Kernel invocations: 34
+  TOTAL GPU TIME: 18.883 ms
+  Kernel invocations: 56
 [Planner] Parsed aliases:
 [Planner]   'n2.n_name' -> 'nation'
 [Planner]   'nation' -> 'n2.n_name'
@@ -79,7 +79,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: n_name
 DEBUG: Scan table determined as: 'nation'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6131303088
+[Planner] Generating Scan: nation at index 0 Plan: 6169903760
 [Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
 [Planner] Traversing node: HASH_JOIN
 [Planner] Traversing: HASH_JOIN
@@ -106,7 +106,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
 [Planner] Proj: r_regionkey
 DEBUG: Scan table determined as: 'region'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
-[Planner] Generating Scan: region at index 0 Plan: 6131295360
+[Planner] Generating Scan: region at index 0 Plan: 6169896032
 [Planner] Node SEQ_SCAN  output projections: r_regionkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -116,7 +116,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
 [Planner] Proj: n_regionkey
 DEBUG: Scan table determined as: 'nation'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6131329064
+[Planner] Generating Scan: nation at index 0 Plan: 6169929768
 [Planner] Node SEQ_SCAN  output projections: n_nationkey, n_regionkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
 [Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
@@ -158,7 +158,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='regio
 [Planner] Proj: p_partkey
 DEBUG: Scan table determined as: 'part'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 3 Plan: 6131329064
+[Planner] Generating Scan: part at index 3 Plan: 6169929768
 [Planner] Node SEQ_SCAN  output projections: p_partkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -171,7 +171,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
 [Planner] Proj: l_discount
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 5 Plan: 6131329064
+[Planner] Generating Scan: lineitem at index 5 Plan: 6169929768
 [Planner] Node SEQ_SCAN  output projections: l_partkey, l_suppkey, l_orderkey, l_extendedprice, l_discount, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_4'
 [Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
@@ -199,7 +199,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: o_orderdate
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 8 Plan: 6131329064
+[Planner] Generating Scan: orders at index 8 Plan: 6169929768
 [Planner] Node SEQ_SCAN  output projections: o_orderkey, o_custkey, o_orderdate, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_7'
 [Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
@@ -229,7 +229,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: c_nationkey
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 11 Plan: 6131329064
+[Planner] Generating Scan: customer at index 11 Plan: 6169929768
 [Planner] Node SEQ_SCAN  output projections: c_custkey, c_nationkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_10'
 [Planner] Pre-resolved Condition: 'c_custkey = o_custkey'
@@ -286,7 +286,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: s_nationkey
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 15 Plan: 6131329064
+[Planner] Generating Scan: supplier at index 15 Plan: 6169929768
 [Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
 [Planner] Pre-resolved Condition: 's_suppkey = l_suppkey'
@@ -446,4 +446,4 @@ DEBUG: Is End? 0
 [Planner]   'mkt_share'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

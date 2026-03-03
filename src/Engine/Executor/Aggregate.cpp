@@ -18,7 +18,6 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
         if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] CountStar: activeRowsCountGPU " << ctx.activeRowsCountGPU << " > rowCount " << ctx.rowCount << ", ignoring GPU selection\n";
         count = ctx.rowCount;
     }
-    if (count == 0 && ctx.rowCount > 0 && !ctx.activeRowsGPU) count = ctx.rowCount;
 
     // Scalar context: treat as single row
     if (ctx.isScalarResult) {

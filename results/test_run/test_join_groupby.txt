@@ -1,0 +1,128 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'total_acctbal' -> 'sum(s_acctbal)'
+[Planner]   'sum(s_acctbal)' -> 'total_acctbal'
+[Planner]   'supplier_count' -> 'count(*)'
+[Planner]   'count(*)' -> 'supplier_count'
+[Planner] Traversing node: TOP_N
+[Planner] Traversing: TOP_N
+[Planner] Entering children traversal block. Name: top_n Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table nation
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_nationkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6164048912
+[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: s_nationkey
+[Planner] Proj: s_acctbal
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Generating Scan: supplier at index 0 Plan: 6164064616
+[Planner] Node SEQ_SCAN  output projections: s_nationkey, s_acctbal, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 4
+  #0: s_nationkey
+  #1: s_acctbal
+  #2: n_nationkey
+  #3: n_name
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+[Planner] Join Key Analysis: l => supplier, r => nation
+[Planner] Captured RHS Table: nation
+[Planner] RHS Tables: nation, 
+[Planner] Checking matchesRHS: supplier
+[Planner] Checking matchesRHS: nation
+[Planner] Node HASH_JOIN output projections: s_nationkey, s_acctbal, n_nationkey, n_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: s_nationkey
+[Planner] Proj: s_acctbal
+[Planner] Forcing keep of global column: n_nationkey
+[Planner] Forcing keep of global column: n_name
+[Planner] Node PROJECTION output projections: s_nationkey, s_acctbal, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_name
+[Planner] Proj: s_acctbal
+[Planner] Forcing keep of global column: s_nationkey
+[Planner] Node PROJECTION output projections: n_name, s_acctbal, 
+[Planner] Parsing agg string: 'count_star()'
+[Planner] Resolved agg: count_star()
+[Planner] Looking up agg alias: 'count_star()'
+[Planner] Found alias for agg: supplier_count
+[Planner] Pushing spec with outputName='supplier_count'
+[Planner] Parsing agg string: 'sum(#1)'
+[Planner] Resolved agg: sum(s_acctbal)
+[Planner] inputExpr 's_acctbal' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(s_acctbal)'
+[Planner] Found alias for agg: total_acctbal
+[Planner] Pushing spec with outputName='total_acctbal'
+[Planner] Node HASH_GROUP_BY output projections: n_name, supplier_count, total_acctbal, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_name
+[Planner] Proj: supplier_count
+[Planner] Proj: total_acctbal
+[Planner] Node PROJECTION output projections: n_name, supplier_count, total_acctbal, 
+[Planner] ORDER BY looking up alias: 'count_star()'
+[Planner] Node TOP_N output projections: n_name, supplier_count, total_acctbal, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'n_name'
+[Planner]   'supplier_count'
+[Planner]   'total_acctbal'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+supplier_count|total_acctbal|n_name|
+---------------------------------------------------
+Planning time: 18.78 ms
+Data Load Time (Disk+Upload): 29.25 ms
+GPU kernels time: 0.50 ms
+CPU postprocess time: 5.53 ms
+Total Internal Pipeline time: 35.28 ms
+Total Host Execution time: 35.29 ms
+Total Wall time (Plan+Exec): 54.07 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  gather         :    0.283 ms (56.204%) [1 calls]
+  hash_join_probe_u32:    0.220 ms (43.796%) [1 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 0.503 ms
+  Kernel invocations: 2
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+hash_join_probe_write_multi          0.220          10000         45.394
+ops::gather_col_u32                  0.283          10000         35.372
+─────────────────────────────────────────────────────────────────
+TOTAL: 0.503 ms

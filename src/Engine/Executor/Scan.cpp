@@ -53,6 +53,15 @@ void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     ctx.flatStringCols[colName] = flat;
 }
 
+// EvalContext::ensureFlatStringCol — implemented here because it needs flattenStringCol.
+void EvalContext::ensureFlatStringCol(const std::string& colName) {
+    if (flatStringCols.count(colName) && flatStringCols[colName].chars) return;
+    ensureStringCol(colName);
+    if (stringCols.count(colName) && !stringCols[colName].empty()) {
+        flattenStringCol(*this, colName);
+    }
+}
+
 // Helper: compute FNV1a-32 hashes on GPU from flat string buffers.
 // Replaces CPU per-row hashing (loadStringHashU32) with GPU batch computation.
 static void computeGpuHash(EvalContext& ctx, const std::string& colName) {
@@ -186,7 +195,7 @@ std::unordered_map<std::string, std::set<std::string>> collectNeededColumns(cons
                 for (const auto& k : node.asJoin().rightKeys) collectColumnsFromExpr(k, tmp);
                 collectColumnsFromExpr(node.asJoin().rightFilter, tmp);
                 
-                if (std::getenv("GPUDB_DEBUG_OPS")) {
+                if (env_truthy("GPUDB_DEBUG_OPS")) {
                      std::cerr << "[Exec] DEBUG: Join collected cols:";
                      for(const auto& c : tmp) std::cerr << " " << c;
                      std::cerr << "\n";

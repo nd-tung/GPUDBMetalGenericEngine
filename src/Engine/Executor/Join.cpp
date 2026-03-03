@@ -53,7 +53,7 @@ static void extractJoinKeyPairs(const TypedExprPtr& expr,
     }
 }
 
-bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath,
+bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPath*/,
                                    EvalContext& leftCtx, EvalContext& rightCtx, EvalContext& outCtx) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     
@@ -74,6 +74,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
         std::cerr << "[Exec] Join: type=" << static_cast<int>(join.type) 
                   << " isLeft=" << isLeftJoin << " isRight=" << isRightJoin 
                   << " isSemi=" << isSemiJoin << " isAnti=" << isAntiJoin << "\n";
+        std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, "
+                  << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows";
+        for (const auto& [k, v] : leftCtx.u32Cols) std::cerr << " " << k;
+        std::cerr << "\n";
+        std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
+                  << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows";
+        for (const auto& [k, v] : rightCtx.u32Cols) std::cerr << " " << k;
+        std::cerr << "\n";
     }
     
     // Extract all join key pairs from the condition
@@ -132,10 +140,29 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
     // Fallback: parse from condition string (single pair only)
     if (!isCrossJoin && keyPairs.empty()) {
         std::string cond = join.conditionStr;
-        // Simple parsing - split by AND and extract each equality
-        std::istringstream iss(cond);
-        std::string part;
-        while (std::getline(iss, part, 'A')) {
+        // Split by " AND " (case-insensitive) to extract each equality
+        size_t pos = 0;
+        while (pos < cond.size()) {
+            // Find next " AND " delimiter (case-insensitive)
+            size_t andPos = std::string::npos;
+            for (size_t j = pos; j + 5 <= cond.size(); ++j) {
+                if ((cond[j] == ' ') &&
+                    (cond[j+1] == 'A' || cond[j+1] == 'a') &&
+                    (cond[j+2] == 'N' || cond[j+2] == 'n') &&
+                    (cond[j+3] == 'D' || cond[j+3] == 'd') &&
+                    (cond[j+4] == ' ')) {
+                    andPos = j;
+                    break;
+                }
+            }
+            std::string part;
+            if (andPos != std::string::npos) {
+                part = cond.substr(pos, andPos - pos);
+                pos = andPos + 5; // skip " AND "
+            } else {
+                part = cond.substr(pos);
+                pos = cond.size();
+            }
             auto eq = part.find('=');
             if (eq != std::string::npos) {
                 std::string left = base_ident(part.substr(0, eq));
@@ -487,18 +514,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                 }
             }
         }
-        // Compact CPU string columns
-        uint32_t* indices = (uint32_t*)ctx.activeRowsGPU->contents();
-        for (auto& [name, vec] : ctx.stringCols) {
-            if (vec.size() > count) {
-                std::vector<std::string> c;
-                c.reserve(count);
-                for (uint32_t i = 0; i < count; ++i)
-                    c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : std::string());
-                vec = std::move(c);
-            }
-        }
-        // Compact dictCols (GPU gather first, then sync CPU mirror)
+        // GPU-native dict compaction: gather dict IDs on GPU, invalidate CPU stringCols
         for (auto& [name, dict] : ctx.dictCols) {
             if (dict.idsGPU) {
                 uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
@@ -506,24 +522,71 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                     MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, true);
                     if (compacted) {
                         dict.idsGPU = compacted;
-                        // Sync CPU mirror from GPU result
-                        dict.ids.resize(count);
-                        std::memcpy(dict.ids.data(), compacted->contents(), count * sizeof(uint32_t));
                         dict.rowCount = count;
+                        dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
                     }
                 }
             } else if (dict.ids.size() > count) {
                 // CPU-only fallback (no GPU buffer)
+                uint32_t* indices2 = (uint32_t*)ctx.activeRowsGPU->contents();
                 std::vector<uint32_t> c;
                 c.reserve(count);
                 for (uint32_t i = 0; i < count; ++i)
-                    c.push_back(indices[i] < (uint32_t)dict.ids.size() ? dict.ids[indices[i]] : 0u);
+                    c.push_back(indices2[i] < (uint32_t)dict.ids.size() ? dict.ids[indices2[i]] : 0u);
                 dict.ids = std::move(c);
                 dict.rowCount = count;
             }
         }
-        // Compact flatStringCols
-        // (Not needed here: flat buffers are rebuilt after join if needed)
+        // Compact CPU string columns: prefer invalidation if dictCol exists, else GPU/CPU gather
+        {
+            for (auto& [name, vec] : ctx.stringCols) {
+                if (ctx.dictCols.count(name) && ctx.dictCols[name].valid()) {
+                    vec.clear();  // Will be rebuilt from dict on demand
+                } else if (vec.size() > count) {
+                    // Try GPU gather via flatStringCols
+                    auto fit = ctx.flatStringCols.find(name);
+                    if (fit != ctx.flatStringCols.end() && fit->second.chars && ctx.activeRowsGPU) {
+                        auto r = GpuOps::gatherFlatString(
+                            fit->second.chars, fit->second.offsets, fit->second.lengths,
+                            ctx.activeRowsGPU, count, true);
+                        if (r.chars) {
+                            const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                            const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                            const char* ch = static_cast<const char*>(r.chars->contents());
+                            vec.resize(count);
+                            for (uint32_t i = 0; i < count; ++i) vec[i].assign(ch + offs[i], lens[i]);
+                            // Update flatStringCols to compacted version
+                            fit->second.chars = r.chars;
+                            fit->second.offsets = r.offsets;
+                            fit->second.lengths = r.lengths;
+                            fit->second.rowCount = r.rowCount;
+                            fit->second.totalBytes = r.totalBytes;
+                            continue;
+                        }
+                    }
+                    // CPU fallback
+                    uint32_t* indices = (uint32_t*)ctx.activeRowsGPU->contents();
+                    std::vector<std::string> c;
+                    c.reserve(count);
+                    for (uint32_t i = 0; i < count; ++i)
+                        c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : std::string());
+                    vec = std::move(c);
+                }
+            }
+        }
+        // Compact flatStringCols that don't have matching stringCols (handled above)
+        if (ctx.activeRowsGPU) {
+            for (auto& [name, flat] : ctx.flatStringCols) {
+                if (!ctx.stringCols.count(name) && flat.chars && flat.rowCount > count) {
+                    auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
+                                                       ctx.activeRowsGPU, count, true);
+                    if (r.chars) {
+                        flat.chars = r.chars; flat.offsets = r.offsets; flat.lengths = r.lengths;
+                        flat.rowCount = r.rowCount; flat.totalBytes = r.totalBytes;
+                    }
+                }
+            }
+        }
         // Clear selection vector — data is now dense
         ctx.activeRowsGPU = nullptr;
         ctx.activeRowsCountGPU = 0;
@@ -548,6 +611,11 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             uint64_t totalCount = (uint64_t)lCount * (uint64_t)rCount;
              
             auto device = ColumnStoreGPU::instance().device();
+            if (totalCount > UINT32_MAX) {
+                std::cerr << "[Exec] WARNING: Cross join produces " << totalCount 
+                          << " rows, exceeding uint32_t max. Clamping to " << UINT32_MAX << ".\n";
+                totalCount = UINT32_MAX;
+            }
             jRes.count = (uint32_t)totalCount;
             jRes.probeIndices = device->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
             jRes.buildIndices = device->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -608,7 +676,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             if (leftCtx.activeRowsGPU) {
                 uint32_t* leftIndices = (uint32_t*)leftCtx.activeRowsGPU->contents();
                 std::cerr << "[Exec] GPU Join: leftActiveIndices first 5: ";
-                for (int i = 0; i < std::min(5u, leftCtx.activeRowsCountGPU); ++i) std::cerr << leftIndices[i] << " ";
+                for (uint32_t i = 0; i < std::min(5u, leftCtx.activeRowsCountGPU); ++i) std::cerr << leftIndices[i] << " ";
                 std::cerr << "\n";
             }
         }
@@ -794,6 +862,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
         for (const auto& [name, _] : leftCtx.u32Cols) leftColumnNames.insert(name);
         for (const auto& [name, _] : leftCtx.f32Cols) leftColumnNames.insert(name);
         for (const auto& [name, _] : leftCtx.stringCols) leftColumnNames.insert(name);
+        for (const auto& [name, _] : leftCtx.dictCols) leftColumnNames.insert(name);
     }
     
     // Pre-compute the rename mapping for ALL right column names
@@ -802,6 +871,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
     for (const auto& [name, _] : rightCtx.u32Cols) rightColumnNames.insert(name);
     for (const auto& [name, _] : rightCtx.f32Cols) rightColumnNames.insert(name);
     for (const auto& [name, _] : rightCtx.stringCols) rightColumnNames.insert(name);
+    for (const auto& [name, _] : rightCtx.dictCols) rightColumnNames.insert(name);
     
     // Map from original right column name to output column name
     std::unordered_map<std::string, std::string> rightColumnMapping;
@@ -855,6 +925,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
         for (const auto& [name, _] : leftCtx.stringCols) {
             outCtx.stringCols[name] = {};
         }
+        for (const auto& [name, dict] : leftCtx.dictCols) {
+            DictEncoded emptyDict;
+            emptyDict.dictionary = dict.dictionary;
+            emptyDict.rowCount = 0;
+            outCtx.dictCols[name] = std::move(emptyDict);
+        }
         // Right columns - rename only if collision
         for (const auto& [name, _] : rightCtx.u32Cols) {
             std::string outName = getRightColumnName(name);
@@ -868,6 +944,13 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             std::string outName = getRightColumnName(name);
             outCtx.stringCols[outName] = {};
         }
+        for (const auto& [name, dict] : rightCtx.dictCols) {
+            std::string outName = getRightColumnName(name);
+            DictEncoded emptyDict;
+            emptyDict.dictionary = dict.dictionary;
+            emptyDict.rowCount = 0;
+            outCtx.dictCols[outName] = std::move(emptyDict);
+        }
         return true;
     }
 
@@ -877,7 +960,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
     if (debug && jRes.probeIndices) {
         uint32_t* probePtr = (uint32_t*)jRes.probeIndices->contents();
         std::cerr << "[Exec] Join: probeIndices first 5: ";
-        for (int i = 0; i < std::min(5u, resCount); ++i) std::cerr << probePtr[i] << " ";
+        for (uint32_t i = 0; i < std::min(5u, resCount); ++i) std::cerr << probePtr[i] << " ";
         std::cerr << "\n";
     }
     for (const auto& [name, valid] : leftCtx.u32Cols) {
@@ -960,7 +1043,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
     }
 
     // CPU Gather for String Columns (or GPU dict-id gather when available)
-    if (!leftCtx.stringCols.empty() || !rightCtx.stringCols.empty()) {
+    if (!leftCtx.stringCols.empty() || !rightCtx.stringCols.empty() ||
+        !leftCtx.dictCols.empty() || !rightCtx.dictCols.empty()) {
         std::vector<uint32_t> cpuProbeIndices(resCount);
         std::vector<uint32_t> cpuBuildIndices(resCount);
         // Copy back
@@ -994,7 +1078,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
              for (auto& f : futures) f.wait();
         };
 
-        // Helper: gather string column via GPU dict ID gather + sequential dictionary lookup
+        // Helper: gather string column via GPU dict ID gather (stringCols materialized lazily)
         auto dictGather = [&](const std::string& name, const EvalContext& srcCtx,
                               MTL::Buffer* indexBuf, const std::string& outName) {
             auto dictIt = srcCtx.dictCols.find(name);
@@ -1005,28 +1089,40 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             MTL::Buffer* gatheredIds = GpuOps::gatherU32(srcDict.idsGPU, indexBuf, resCount);
             if (!gatheredIds) return false;
 
-            // Download gathered IDs
-            std::vector<uint32_t> ids(resCount);
-            std::memcpy(ids.data(), gatheredIds->contents(), resCount * sizeof(uint32_t));
-
-            // Sequential dictionary lookup to rebuild strings
-            const auto& dict = srcDict.dictionary;
-            std::vector<std::string> newVec(resCount);
-            for (uint32_t i = 0; i < resCount; ++i) {
-                if (ids[i] < dict.size()) newVec[i] = dict[ids[i]];
-            }
-            outCtx.stringCols[outName] = std::move(newVec);
-
-            // Propagate dict to outCtx
+            // Propagate dict to outCtx (stringCols NOT rebuilt — lazy materialization)
             DictEncoded outDict;
             outDict.dictionary = srcDict.dictionary;
-            outDict.ids = std::move(ids);
             outDict.idsGPU = gatheredIds; // keep GPU buffer
             outDict.rowCount = resCount;
             outCtx.dictCols[outName] = std::move(outDict);
 
+            // Invalidate stale stringCols/flatStringCols for this column
+            outCtx.stringCols.erase(outName);
+            outCtx.flatStringCols.erase(outName);
+
             if (debug) std::cerr << "[Exec] Join: GPU dict gather " << name << " -> " << outName
-                                 << " (" << dict.size() << " unique, " << resCount << " rows)\n";
+                                 << " (" << srcDict.dictionary.size() << " unique, " << resCount << " rows)\n";
+            return true;
+        };
+
+        // Helper: GPU gather for FlatStringCol (lazy — no CPU materialization)
+        auto flatGather = [&](const EvalContext& srcCtx, const std::string& name,
+                              MTL::Buffer* indexBuf, const std::string& outName) -> bool {
+            auto fit = srcCtx.flatStringCols.find(name);
+            if (fit == srcCtx.flatStringCols.end() || !fit->second.chars) return false;
+            auto& flat = fit->second;
+            auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
+                                               indexBuf, resCount, true);
+            if (!r.chars) return false;
+            // Store compacted FlatStringCol in outCtx (stringCols materialized lazily via ensureStringCol)
+            FlatStringCol outFlat;
+            outFlat.chars = r.chars; outFlat.offsets = r.offsets; outFlat.lengths = r.lengths;
+            outFlat.rowCount = r.rowCount; outFlat.totalBytes = r.totalBytes;
+            outCtx.flatStringCols[outName] = outFlat;
+            // Erase any stale stringCols — will be rebuilt on demand
+            outCtx.stringCols.erase(outName);
+            if (debug) std::cerr << "[Exec] Join: GPU flat string gather " << name << " -> " << outName
+                                 << " (" << resCount << " rows, " << r.totalBytes << " bytes)\n";
             return true;
         };
 
@@ -1034,6 +1130,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             if (rightAntiGather) continue; // Skip left columns for RIGHT ANTI
             // Try GPU dict gather first
             if (dictGather(name, leftCtx, jRes.probeIndices, name)) continue;
+            // Try GPU flat string gather
+            if (flatGather(leftCtx, name, jRes.probeIndices, name)) continue;
             // Fallback: CPU string gather
             if (debug) std::cerr << "[Exec] Join: gathering L_STR " << name << " srcSize=" << vec.size() << " resCount=" << resCount << "\n";
             std::vector<std::string> newVec;
@@ -1047,12 +1145,38 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
              std::string outName = getRightColumnName(name);
              // Try GPU dict gather first
              if (dictGather(name, rightCtx, jRes.buildIndices, outName)) continue;
+             // Try GPU flat string gather
+             if (flatGather(rightCtx, name, jRes.buildIndices, outName)) continue;
              // Fallback: CPU string gather
              if (debug) std::cerr << "[Exec] Join: gathering R_STR " << name << " -> " << outName << " srcSize=" << vec.size() << " resCount=" << resCount << "\n";
              std::vector<std::string> newVec;
              parallelGather(cpuBuildIndices, vec, newVec);
              if (debug) std::cerr << "[Exec] Join: gathered R_STR " << name << " newVec.size=" << newVec.size() << "\n";
              outCtx.stringCols[outName] = std::move(newVec);
+        }
+        // GPU dict gather for dict-only columns (no corresponding stringCol)
+        for (const auto& [name, dc] : leftCtx.dictCols) {
+            if (rightAntiGather) continue;
+            if (leftCtx.stringCols.count(name)) continue; // already handled above
+            dictGather(name, leftCtx, jRes.probeIndices, name);
+        }
+        for (const auto& [name, dc] : rightCtx.dictCols) {
+            if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
+            if (rightCtx.stringCols.count(name)) continue; // already handled above
+            std::string outName = getRightColumnName(name);
+            dictGather(name, rightCtx, jRes.buildIndices, outName);
+        }
+        // GPU flat string gather for flat-only columns (no stringCol or dictCol)
+        for (const auto& [name, flat] : leftCtx.flatStringCols) {
+            if (rightAntiGather) continue;
+            if (leftCtx.stringCols.count(name) || leftCtx.dictCols.count(name)) continue;
+            flatGather(leftCtx, name, jRes.probeIndices, name);
+        }
+        for (const auto& [name, flat] : rightCtx.flatStringCols) {
+            if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
+            if (rightCtx.stringCols.count(name) || rightCtx.dictCols.count(name)) continue;
+            std::string outName = getRightColumnName(name);
+            flatGather(rightCtx, name, jRes.buildIndices, outName);
         }
     }
     
@@ -1088,10 +1212,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             for (auto& [name, buf] : outCtx.u32ColsGPU) {
                 if (leftCtx.u32Cols.count(name) || leftCtx.u32ColsGPU.count(name)) {
                     MTL::Buffer* leftSrc = nullptr;
+                    bool leftSrcAllocated = false;
                     if (leftCtx.u32ColsGPU.count(name)) leftSrc = leftCtx.u32ColsGPU.at(name);
                     else if (leftCtx.u32Cols.count(name) && !leftCtx.u32Cols.at(name).empty()) {
                         const auto& vec = leftCtx.u32Cols.at(name);
                         leftSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                        leftSrcAllocated = true;
                     }
                     if (leftSrc) {
                         MTL::Buffer* g = GpuOps::gatherU32(leftSrc, unmatchedBuf, unmatchedCount, false);
@@ -1099,6 +1225,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                         std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
                                     g->contents(), unmatchedCount * sizeof(uint32_t));
+                        if (leftSrcAllocated) leftSrc->release();
                         buf->release(); g->release(); buf = combined;
                     }
                 } else {
@@ -1111,10 +1238,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             for (auto& [name, buf] : outCtx.f32ColsGPU) {
                 if (leftCtx.f32Cols.count(name) || leftCtx.f32ColsGPU.count(name)) {
                     MTL::Buffer* leftSrc = nullptr;
+                    bool leftSrcAllocated = false;
                     if (leftCtx.f32ColsGPU.count(name)) leftSrc = leftCtx.f32ColsGPU.at(name);
                     else if (leftCtx.f32Cols.count(name) && !leftCtx.f32Cols.at(name).empty()) {
                         const auto& vec = leftCtx.f32Cols.at(name);
                         leftSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                        leftSrcAllocated = true;
                     }
                     if (leftSrc) {
                         MTL::Buffer* g = GpuOps::gatherF32(leftSrc, unmatchedBuf, unmatchedCount, false);
@@ -1122,6 +1251,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                         std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
                                     g->contents(), unmatchedCount * sizeof(float));
+                        if (leftSrcAllocated) leftSrc->release();
                         buf->release(); g->release(); buf = combined;
                     }
                 } else {
@@ -1142,6 +1272,36 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                 } else {
                     for (uint32_t i = 0; i < unmatchedCount; ++i) vec.push_back("");
                 }
+            }
+
+            // Dict columns: GPU gather unmatched left dict IDs + append zeros for right
+            for (auto& [name, dc] : outCtx.dictCols) {
+                if (!dc.idsGPU) continue;
+                // Check if this is a left-side column
+                auto leftDictIt = leftCtx.dictCols.find(name);
+                if (leftDictIt != leftCtx.dictCols.end() && leftDictIt->second.idsGPU) {
+                    // GPU gather unmatched left dict IDs
+                    MTL::Buffer* g = GpuOps::gatherU32(leftDictIt->second.idsGPU, unmatchedBuf, unmatchedCount, false);
+                    // Concatenate matched + unmatched
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
+                                g->contents(), unmatchedCount * sizeof(uint32_t));
+                    dc.idsGPU->release(); g->release();
+                    dc.idsGPU = combined;
+                } else {
+                    // Right-side column: pad with sentinel (0) for unmatched left rows
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                    dc.idsGPU->release();
+                    dc.idsGPU = combined;
+                }
+                dc.ids.clear(); // invalidate CPU mirror
+                dc.rowCount = totalCount;
+                // Invalidate stale stringCols for this column
+                outCtx.stringCols.erase(name);
+                outCtx.flatStringCols.erase(name);
             }
 
             // Sync CPU-side u32/f32 cols via GPU gather or GPU buffer download
@@ -1185,8 +1345,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
 
             outCtx.rowCount = totalCount;
             resCount = totalCount;
-            // Dict IDs are stale after unmatched row append — clear to avoid inconsistency
-            outCtx.dictCols.clear();
+            // Dict IDs already updated with unmatched rows above
             if (debug) std::cerr << "[Exec] Left Join: total output rows = " << totalCount << "\n";
         }
         if (unmatchedBuf) unmatchedBuf->release();
@@ -1222,10 +1381,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                         if (mappedName == name) { srcName = origName; break; }
                     }
                     MTL::Buffer* rightSrc = nullptr;
+                    bool rightSrcAllocated = false;
                     if (rightCtx.u32ColsGPU.count(srcName)) rightSrc = rightCtx.u32ColsGPU.at(srcName);
                     else if (rightCtx.u32Cols.count(srcName) && !rightCtx.u32Cols.at(srcName).empty()) {
                         const auto& vec = rightCtx.u32Cols.at(srcName);
                         rightSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                        rightSrcAllocated = true;
                     }
                     if (rightSrc) {
                         MTL::Buffer* g = GpuOps::gatherU32(rightSrc, unmatchedBuf, unmatchedCount, false);
@@ -1233,6 +1394,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                         std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
                                     g->contents(), unmatchedCount * sizeof(uint32_t));
+                        if (rightSrcAllocated) rightSrc->release();
                         buf->release(); g->release(); buf = combined;
                     } else {
                         MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -1250,6 +1412,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             for (auto& [name, buf] : outCtx.f32ColsGPU) {
                 if (rightCtx.f32Cols.count(name) || rightCtx.f32ColsGPU.count(name)) {
                     MTL::Buffer* rightSrc = nullptr;
+                    bool rightSrcAllocated = false;
                     std::string srcName = name;
                     for (const auto& [origName, mappedName] : rightColumnMapping) {
                         if (mappedName == name) { srcName = origName; break; }
@@ -1258,6 +1421,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                     else if (rightCtx.f32Cols.count(srcName) && !rightCtx.f32Cols.at(srcName).empty()) {
                         const auto& vec = rightCtx.f32Cols.at(srcName);
                         rightSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                        rightSrcAllocated = true;
                     }
                     if (rightSrc) {
                         MTL::Buffer* g = GpuOps::gatherF32(rightSrc, unmatchedBuf, unmatchedCount, false);
@@ -1265,6 +1429,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                         std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
                                     g->contents(), unmatchedCount * sizeof(float));
+                        if (rightSrcAllocated) rightSrc->release();
                         buf->release(); g->release(); buf = combined;
                     } else {
                         MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
@@ -1294,6 +1459,37 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                 } else {
                     for (uint32_t i = 0; i < unmatchedCount; ++i) vec.push_back("");
                 }
+            }
+
+            // Dict columns: GPU gather unmatched right dict IDs + append zeros for left
+            for (auto& [name, dc] : outCtx.dictCols) {
+                if (!dc.idsGPU) continue;
+                std::string srcName = name;
+                for (const auto& [origName, mappedName] : rightColumnMapping) {
+                    if (mappedName == name) { srcName = origName; break; }
+                }
+                auto rightDictIt = rightCtx.dictCols.find(srcName);
+                if (rightDictIt != rightCtx.dictCols.end() && rightDictIt->second.idsGPU) {
+                    // GPU gather unmatched right dict IDs
+                    MTL::Buffer* g = GpuOps::gatherU32(rightDictIt->second.idsGPU, unmatchedBuf, unmatchedCount, false);
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
+                                g->contents(), unmatchedCount * sizeof(uint32_t));
+                    dc.idsGPU->release(); g->release();
+                    dc.idsGPU = combined;
+                } else {
+                    // Left-side column: pad with sentinel (0) for unmatched right rows
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                    dc.idsGPU->release();
+                    dc.idsGPU = combined;
+                }
+                dc.ids.clear();
+                dc.rowCount = totalCount;
+                outCtx.stringCols.erase(name);
+                outCtx.flatStringCols.erase(name);
             }
 
             // Sync CPU-side u32/f32 cols via GPU gather or GPU buffer download
@@ -1349,8 +1545,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
             unmatchedBuf->release();
             outCtx.rowCount = totalCount;
             resCount = totalCount;
-            // Dict IDs are stale after unmatched row append — clear to avoid inconsistency
-            outCtx.dictCols.clear();
+            // Dict IDs already updated with unmatched rows above
             if (debug) std::cerr << "[Exec] Right Join: total output rows = " << totalCount << "\n";
         } else {
             if (unmatchedBuf) unmatchedBuf->release();
@@ -1385,6 +1580,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
                 // Swap f32 GPU buffers
                 if (outCtx.f32ColsGPU.count(col) && outCtx.f32ColsGPU.count(renamedCol)) {
                     std::swap(outCtx.f32ColsGPU[col], outCtx.f32ColsGPU[renamedCol]);
+                }
+                // Swap dict columns
+                if (outCtx.dictCols.count(col) && outCtx.dictCols.count(renamedCol)) {
+                    std::swap(outCtx.dictCols[col], outCtx.dictCols[renamedCol]);
+                }
+                // Swap string columns
+                if (outCtx.stringCols.count(col) && outCtx.stringCols.count(renamedCol)) {
+                    std::swap(outCtx.stringCols[col], outCtx.stringCols[renamedCol]);
                 }
             }
         }
@@ -1510,10 +1713,10 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& datasetPath
     }
     
     // Rebuild flat string buffers and dictionary encoding for downstream operators
-    // (GroupBy, OrderBy, Filter all expect these after scan-time construction)
+    // Skip columns that already have a valid dictCol (GPU-native path)
     if (outCtx.rowCount > 0) {
         for (const auto& [name, vec] : outCtx.stringCols) {
-            if (!vec.empty()) {
+            if (!vec.empty() && !outCtx.hasDictCol(name)) {
                 flattenStringCol(outCtx, name);
                 buildDictCol(outCtx, name);
             }
@@ -1564,24 +1767,11 @@ bool GpuExecutor::orchestrateJoin(
                 
                 // Check for IS NOT DISTINCT FROM pattern (DuckDB's DELIM_SCAN correlation marker)
                 if (join.conditionStr.find("IS NOT DISTINCT FROM") != std::string::npos) {
-                    // Check if condition is a self-comparison (col = col)
-                    size_t isNotPos = join.conditionStr.find("IS NOT DISTINCT FROM");
-                    if (isNotPos != std::string::npos) {
-                        std::string leftPart = join.conditionStr.substr(0, isNotPos);
-                        std::string rightPart = join.conditionStr.substr(isNotPos + 20); // len("IS NOT DISTINCT FROM") = 20
-                        // Trim whitespace
-                        while (!leftPart.empty() && std::isspace(leftPart.back())) leftPart.pop_back();
-                        while (!rightPart.empty() && std::isspace(rightPart.front())) rightPart.erase(0, 1);
-                        // Remove trailing garbage from rightPart
-                        size_t endPos = rightPart.find_first_of(" )");
-                        if (endPos != std::string::npos) rightPart = rightPart.substr(0, endPos);
-                        
-                        if (leftPart == rightPart || 
-                            (!leftPart.empty() && !rightPart.empty() && 
-                             leftPart.find(rightPart) != std::string::npos)) {
+                    std::string selfCol = parseSelfComparison(join.conditionStr);
+                    if (!selfCol.empty()) {
                             // Verify column is in currentCtx (may be hidden by GroupBy).
-                            bool colInContext = (currentCtx.u32Cols.find(leftPart) != currentCtx.u32Cols.end() ||
-                                                 currentCtx.f32Cols.find(leftPart) != currentCtx.f32Cols.end());
+                            bool colInContext = (currentCtx.u32Cols.find(selfCol) != currentCtx.u32Cols.end() ||
+                                                 currentCtx.f32Cols.find(selfCol) != currentCtx.f32Cols.end());
                             
                             if (colInContext) {
                                 // Don't skip LEFT joins (needed for DELIM joins)
@@ -1595,13 +1785,12 @@ bool GpuExecutor::orchestrateJoin(
                                 }
                                 if (debug && isTrivialSelfJoin) {
                                     std::cerr << "[Exec] Join: IS NOT DISTINCT FROM self-comparison: '" 
-                                              << leftPart << "' vs '" << rightPart << "' (col in context)\n";
+                                              << selfCol << "' (col in context)\n";
                                 }
                             } else if (debug) {
                                 std::cerr << "[Exec] Join: IS NOT DISTINCT FROM self-comparison: '" 
-                                          << leftPart << "' vs '" << rightPart << "' BUT col not in context, may need re-join\n";
+                                          << selfCol << "' BUT col not in context, may need re-join\n";
                             }
-                        }
                     }
                 }
                 
@@ -1881,6 +2070,7 @@ bool GpuExecutor::orchestrateJoin(
                         case engine::expr::CompOp::LE: typedOp = CompareOp::Le; break;
                         case engine::expr::CompOp::EQ: typedOp = CompareOp::Eq; break;
                         case engine::expr::CompOp::NE: typedOp = CompareOp::Ne; break;
+                        default: break;
                     }
                     auto filterPred = TypedExpr::compare(
                         typedOp,
@@ -2211,8 +2401,10 @@ bool GpuExecutor::orchestrateJoin(
                                 newBuf->release();
                             }
                             
-                            // Handle strings on CPU (unavoidable materialization)
+                            // Handle strings on CPU (fallback when dict/flat not available)
                             for (auto& [name, vals] : dataCtx.stringCols) {
+                                if (dataCtx.dictCols.count(name)) continue; // dict path below
+                                if (dataCtx.flatStringCols.count(name)) continue; // flat path below
                                 std::vector<std::string> compacted;
                                 compacted.reserve(passingIndices.size());
                                 for (uint32_t idx : passingIndices) {
@@ -2222,20 +2414,19 @@ bool GpuExecutor::orchestrateJoin(
                                 vals = std::move(compacted);
                             }
 
+                            // GPU gather for dict and flat string columns
+                            dataCtx.compactDictCols(indices, newCount);
+                            dataCtx.compactFlatStringCols(indices, newCount);
+                            dataCtx.invalidateStringColsForDictFlat();
+
                             // Update Context
                             dataCtx.rowCount = newCount;
                             
-                            // After gather, buffers are dense; clear activeRowsGPU.
-                            if (dataCtx.activeRowsGPU) {
-                                dataCtx.activeRowsGPU->release();
-                                dataCtx.activeRowsGPU = nullptr;
-                            }
-                            dataCtx.activeRowsCountGPU = 0;
+                            dataCtx.clearActiveRows();
                             
                             // Clear CPU vectors to enforce GPU usage
                             for(auto& [n, v] : dataCtx.u32Cols) v.clear(); 
                             for(auto& [n, v] : dataCtx.f32Cols) v.clear();
-                            dataCtx.activeRows.clear();
                             
                             indices->release();
                         }
@@ -2540,20 +2731,25 @@ bool GpuExecutor::orchestrateJoin(
                                                         }
                                                         GpuOps::sync();
 
-                                                        // CPU gather for string columns (not on GPU)
+                                                        // CPU gather for string columns (fallback when dict/flat not available)
                                                         // Read keepIndices back to CPU for string compaction
                                                         std::vector<uint32_t> keepIdx(keepCount);
                                                         if (keepCount > 0) {
                                                             memcpy(keepIdx.data(), keepIndicesGPU->contents(), keepCount * sizeof(uint32_t));
                                                         }
                                                         for (auto& [name, vec] : currentCtx.stringCols) {
-                                                            if (!vec.empty()) {
+                                                            if (!vec.empty() && !currentCtx.dictCols.count(name) && !currentCtx.flatStringCols.count(name)) {
                                                                 std::vector<std::string> compact(keepCount);
                                                                 for (uint32_t i = 0; i < keepCount; ++i)
                                                                     compact[i] = vec[keepIdx[i]];
                                                                 vec = std::move(compact);
                                                             }
                                                         }
+
+                                                        // GPU gather for dict and flat string columns
+                                                        currentCtx.compactDictCols(keepIndicesGPU, keepCount);
+                                                        currentCtx.compactFlatStringCols(keepIndicesGPU, keepCount);
+                                                        currentCtx.invalidateStringColsForDictFlat();
 
                                                         // Materialize GPU back to CPU vectors for downstream use
                                                         for (auto& [name, vec] : currentCtx.u32Cols) {
@@ -2822,23 +3018,13 @@ bool GpuExecutor::orchestrateJoin(
                         // and this is a self-comparison (same col = same col), skip it
                         if (potentialRight.rowCount <= 1 && 
                             join.conditionStr.find("IS NOT DISTINCT FROM") != std::string::npos) {
-                            // Parse condition string to check for self-comparison
-                            // Format: "col IS NOT DISTINCT FROM col"
-                            std::string cond = join.conditionStr;
-                            size_t pos = cond.find(" IS NOT DISTINCT FROM ");
-                            if (pos != std::string::npos) {
-                                std::string left = cond.substr(0, pos);
-                                std::string right = cond.substr(pos + 22); // " IS NOT DISTINCT FROM " = 22 chars
-                                // Trim whitespace
-                                while (!left.empty() && std::isspace(left.back())) left.pop_back();
-                                while (!right.empty() && std::isspace(right.front())) right.erase(0, 1);
-                                if (left == right) {
-                                    if (debug) {
-                                        std::cerr << "[Exec] Join: skipping spurious ANTI join with scalar table "
-                                                  << unjoinedTableForJoin << " after GroupBy\n";
-                                    }
-                                    skipSpuriousAntiJoin = true;
+                            std::string selfCol = parseSelfComparison(join.conditionStr);
+                            if (!selfCol.empty()) {
+                                if (debug) {
+                                    std::cerr << "[Exec] Join: skipping spurious ANTI join with scalar table "
+                                              << unjoinedTableForJoin << " after GroupBy\n";
                                 }
+                                skipSpuriousAntiJoin = true;
                             }
                         }
                     }
@@ -2986,41 +3172,10 @@ bool GpuExecutor::orchestrateJoin(
                     std::vector<std::string> delimDedupKeys;
                     bool hasINDFKey = false; // Has "IS NOT DISTINCT FROM" pattern
                     
-                    // Split condition by AND and check each part for self-comparison
-                    std::string condStr = join.conditionStr;
-                    std::vector<std::string> parts;
-                    size_t start = 0;
-                    while (start < condStr.size()) {
-                        size_t andPos = condStr.find(" AND ", start);
-                        if (andPos == std::string::npos) {
-                            parts.push_back(condStr.substr(start));
-                            break;
-                        }
-                        parts.push_back(condStr.substr(start, andPos - start));
-                        start = andPos + 5;
-                    }
-                    
+                    auto parts = splitConditionByAND(join.conditionStr);
                     for (const auto& part : parts) {
-                        std::string col;
                         bool isINDF = false;
-                        // Check "col IS NOT DISTINCT FROM col"
-                        size_t isNotPos = part.find("IS NOT DISTINCT FROM");
-                        if (isNotPos != std::string::npos) {
-                            col = part.substr(0, isNotPos);
-                            while (!col.empty() && std::isspace(col.back())) col.pop_back();
-                            while (!col.empty() && std::isspace(col.front())) col.erase(0, 1);
-                            isINDF = true;
-                        } else {
-                            // Check "col = col"
-                            size_t eqPos = part.find(" = ");
-                            if (eqPos != std::string::npos) {
-                                std::string lhs = part.substr(0, eqPos);
-                                std::string rhs = part.substr(eqPos + 3);
-                                while (!lhs.empty() && std::isspace(lhs.back())) lhs.pop_back();
-                                while (!rhs.empty() && std::isspace(rhs.front())) rhs.erase(0, 1);
-                                if (lhs == rhs) col = lhs;
-                            }
-                        }
+                        std::string col = parseSelfComparison(part, &isINDF);
                         if (!col.empty()) {
                             delimDedupKeys.push_back(col);
                             hasINDFKey = hasINDFKey || isINDF;
@@ -3030,10 +3185,34 @@ bool GpuExecutor::orchestrateJoin(
                     // Only apply RHS dedup when:
                     // 1. IS NOT DISTINCT FROM conditions (standard DELIM_JOIN marker), OR
                     // 2. For "=" self-comparison: only when the left side has fewer rows
-                    //    (indicating it's a DELIM_SCAN result, not a pipeline with 
-                    //    the same row count).
+                    //    (indicating it's a DELIM correlation join, not a regular inner
+                    //    join inside a DELIM subquery). Without this check, regular joins
+                    //    like "l_orderkey = l_orderkey AND l_suppkey != l_suppkey" inside
+                    //    EXISTS subqueries would incorrectly dedup the build side by a
+                    //    subset of keys, losing correlation information (Q21 bug).
                     bool shouldDedup = !delimDedupKeys.empty() && !join.rightTable.empty() && rightCtx.rowCount > 1;
+                    if (shouldDedup && !hasINDFKey) {
+                        // Non-INDF self-comparison: only dedup when left has fewer rows
+                        // (DELIM correlation pattern: small subquery result on left,
+                        // large original context on right needing dedup)
+                        shouldDedup = (currentCtx.rowCount < rightCtx.rowCount);
+                    }
                     if (shouldDedup) {
+                        // Compact rightCtx GPU buffers if activeRowsGPU is set (e.g., from
+                        // post-join filter). Without this, GPU buffers have more elements
+                        // than rowCount and the first rowCount elements are NOT the valid
+                        // filtered rows — the dedup would operate on wrong data.
+                        if (rightCtx.activeRowsGPU && rightCtx.activeRowsCountGPU > 0) {
+                            uint32_t compactCount = rightCtx.activeRowsCountGPU;
+                            if (debug) {
+                                std::cerr << "[Exec] Join: DELIM dedup: compacting rightCtx GPU buffers via activeRowsGPU ("
+                                          << compactCount << " active rows)\n";
+                            }
+                            rightCtx.gatherAllGPU(rightCtx.activeRowsGPU, compactCount);
+                            rightCtx.syncCPUFromGPU(compactCount);
+                            rightCtx.clearActiveRows();
+                            rightCtx.rowCount = compactCount;
+                        }
                         // Resolve key columns from GPU buffers (avoid CPU materialization)
                         std::vector<std::string> resolvedKeys;
                         std::vector<MTL::Buffer*> gpuKeys;
@@ -3101,34 +3280,9 @@ bool GpuExecutor::orchestrateJoin(
                                     for (size_t ri=0; ri<resolvedKeys.size(); ++ri) { if (ri) std::cerr << ","; std::cerr << resolvedKeys[ri]; }
                                     std::cerr << "]: " << rightCtx.rowCount << " -> " << newCount << "\n";
                                 }
-                                // GPU gather all GPU columns
-                                for (auto& [name, buf] : rightCtx.u32ColsGPU) {
-                                    if (buf) {
-                                        MTL::Buffer* gathered = GpuOps::gatherU32(buf, uniqueIdx, newCount);
-                                        buf->release();
-                                        rightCtx.u32ColsGPU[name] = gathered;
-                                    }
-                                }
-                                for (auto& [name, buf] : rightCtx.f32ColsGPU) {
-                                    if (buf) {
-                                        MTL::Buffer* gathered = GpuOps::gatherF32(buf, uniqueIdx, newCount);
-                                        buf->release();
-                                        rightCtx.f32ColsGPU[name] = gathered;
-                                    }
-                                }
-                                // Sync CPU vectors from GPU
-                                for (auto& [name, buf] : rightCtx.u32ColsGPU) {
-                                    if (buf) {
-                                        rightCtx.u32Cols[name].resize(newCount);
-                                        memcpy(rightCtx.u32Cols[name].data(), buf->contents(), newCount * sizeof(uint32_t));
-                                    }
-                                }
-                                for (auto& [name, buf] : rightCtx.f32ColsGPU) {
-                                    if (buf) {
-                                        rightCtx.f32Cols[name].resize(newCount);
-                                        memcpy(rightCtx.f32Cols[name].data(), buf->contents(), newCount * sizeof(float));
-                                    }
-                                }
+                                // GPU gather all GPU columns (u32, f32, dict, flat string)
+                                rightCtx.gatherAllGPU(uniqueIdx, newCount);
+                                rightCtx.syncCPUFromGPU(newCount);
                                 // CPU-only columns: download uniqueIdx and gather
                                 std::vector<uint32_t> keepIdx(newCount);
                                 memcpy(keepIdx.data(), uniqueIdx->contents(), newCount * sizeof(uint32_t));
@@ -3147,12 +3301,13 @@ bool GpuExecutor::orchestrateJoin(
                                     }
                                 }
                                 for (auto& [name, vec] : rightCtx.stringCols) {
-                                    if (vec.size() == rightCtx.rowCount) {
+                                    if (vec.size() == rightCtx.rowCount && !rightCtx.dictCols.count(name) && !rightCtx.flatStringCols.count(name)) {
                                         std::vector<std::string> compact(newCount);
                                         for (uint32_t i = 0; i < newCount; ++i) compact[i] = vec[keepIdx[i]];
                                         vec = std::move(compact);
                                     }
                                 }
+                                rightCtx.invalidateStringColsForDictFlat();
                                 uniqueIdx->release();
                                 
                                 rightCtx.rowCount = newCount;

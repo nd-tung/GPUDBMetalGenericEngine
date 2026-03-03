@@ -20,8 +20,8 @@ static int runEngineSQL(const std::string& sql) {
     using namespace engine;
     std::cout << "--- Running (Engine Host) ---" << std::endl;
 
-    // Initialize schema registry for TPC-H
-    SchemaRegistry::instance().initTPCH();
+    // Initialize schema registry for TPC-H (redundant with constructor, but explicit)
+    // SchemaRegistry::instance().initTPCH();  // Already called in singleton constructor
 
     // V2 Planner: Full SQL support (Q1-Q22)
     auto t_plan_start = std::chrono::high_resolution_clock::now();
@@ -92,8 +92,7 @@ static int runEngineSQL(const std::string& sql) {
         std::cout << std::endl;
         
         // Print rows
-        const size_t rows_to_print = t.rowCount;
-        for (size_t i = 0; i < rows_to_print; ++i) {
+        for (size_t i = 0; i < t.rowCount; ++i) {
             if (!t.order.empty()) {
                 for (const auto& ref : t.order) {
                     if (ref.kind == TableResult::ColRef::Kind::U32) {
@@ -151,10 +150,6 @@ static int runEngineSQL(const std::string& sql) {
                 }
             }
             std::cout << "\n";
-        }
-        
-        if (t.rowCount > rows_to_print) {
-            std::cout << "... (" << (t.rowCount - rows_to_print) << " more rows)" << std::endl;
         }
     }
     

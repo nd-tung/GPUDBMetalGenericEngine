@@ -1,0 +1,225 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'high_line_count' -> 'sum(case
+        when o_orderpriority = '1-URGENT'
+            or o_orderpriority = '2-HIGH'
+            then 1
+        else 0
+    end)'
+[Planner]   'low_line_count' -> 'sum(case
+        when o_orderpriority <> '1-URGENT'
+            and o_orderpriority <> '2-HIGH'
+            then 1
+        else 0
+    end)'
+[Planner]   'sum(casewheno_orderpriority!='1-urgent'ando_orderpriority!='2-high'then1else0end)' -> 'low_line_count'
+[Planner]   'sum(casewheno_orderpriority='1-urgent'oro_orderpriority='2-high'then1else0end)' -> 'high_line_count'
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: ORDER_BY
+[Planner] Traversing: ORDER_BY
+[Planner] Entering children traversal block. Name: order_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node PROJECTION
+[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: FILTER
+[Planner] Traversing: FILTER
+[Planner] Entering children traversal block. Name: filter Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_shipmode
+[Planner] Proj: l_commitdate
+[Planner] Proj: l_receiptdate
+[Planner] Proj: l_shipdate
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Generating Scan: lineitem at index 0 Plan: 6100330872
+[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
+Expression: ((l_commitdate < l_receiptdate) AND (l_shipdate < l_commitdate) AND ((l_shipmode = 'MAIL') OR (l_shipmode = 'SHIP')))
+[Planner] DEBUG FILTER CHILD PROJS: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
+[Planner] Node FILTER output projections: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_orderkey
+[Planner] Proj: l_shipmode
+[Planner] Forcing keep of global column: l_commitdate
+[Planner] Forcing keep of global column: l_shipdate
+[Planner] Forcing keep of global column: l_receiptdate
+[Planner] Node PROJECTION output projections: l_orderkey, l_shipmode, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_orderpriority
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Generating Scan: orders at index 4 Plan: 6100330872
+[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_orderpriority, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
+[Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
+[Planner] ChildProjs size: 4
+  #0: o_orderkey
+  #1: o_orderpriority
+  #2: l_orderkey
+  #3: l_shipmode
+[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_3'
+[Planner] Join Key Analysis: l => orders, r => lineitem
+[Planner] Captured RHS Table: tmpl_join_3
+[Planner] RHS Tables: tmpl_join_3, 
+[Planner] Checking matchesRHS: orders
+[Planner] Checking matchesRHS: lineitem
+[Planner] Node HASH_JOIN output projections: o_orderkey, o_orderpriority, l_orderkey, l_shipmode, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: o_orderkey
+[Planner] Proj: o_orderpriority
+[Planner] Forcing keep of global column: l_orderkey
+[Planner] Forcing keep of global column: l_shipmode
+[Planner] Node PROJECTION output projections: o_orderkey, o_orderpriority, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_shipmode
+[Planner] Proj: CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END
+[Planner] Proj: CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END
+[Planner] Forcing keep of global column: o_orderpriority
+[Planner] Forcing keep of global column: o_orderkey
+[Planner] Node PROJECTION output projections: l_shipmode, CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END, CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END, 
+[Planner] Parsing agg string: 'sum(#1)'
+[Planner] Resolved agg: sum(CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END)
+[Planner] inputExpr 'CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(casewhen(((o_orderpriority='1-urgent')or(o_orderpriority='2-high')))then(1)else0end)'
+[Planner] Found alias via stripped comparison: 'high_line_count'
+[Planner] Found alias for agg: high_line_count
+[Planner] Pushing spec with outputName='high_line_count'
+[Planner] Parsing agg string: 'sum(#2)'
+[Planner] Resolved agg: sum(CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END)
+[Planner] inputExpr 'CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END' exists in child projections. Treating as Column.
+[Planner] Looking up agg alias: 'sum(casewhen(((o_orderpriority!='1-urgent')and(o_orderpriority!='2-high')))then(1)else0end)'
+[Planner] Found alias via stripped comparison: 'low_line_count'
+[Planner] Found alias for agg: low_line_count
+[Planner] Pushing spec with outputName='low_line_count'
+[Planner] Node HASH_GROUP_BY output projections: l_shipmode, high_line_count, low_line_count, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_shipmode
+[Planner] Proj: high_line_count
+[Planner] Proj: low_line_count
+[Planner] Node PROJECTION output projections: l_shipmode, high_line_count, low_line_count, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_shipmode
+[Planner] Proj: high_line_count
+[Planner] Proj: low_line_count
+[Planner] Node PROJECTION output projections: l_shipmode, high_line_count, low_line_count, 
+[Planner] Node ORDER_BY output projections: l_shipmode, high_line_count, low_line_count, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: l_shipmode
+[Planner] Proj: high_line_count
+[Planner] Proj: low_line_count
+[Planner] Node PROJECTION output projections: l_shipmode, high_line_count, low_line_count, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'l_shipmode'
+[Planner]   'high_line_count'
+[Planner]   'low_line_count'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+high_line_count|low_line_count|l_shipmode|
+---------------------------------------------------
+Planning time: 20.35 ms
+Data Load Time (Disk+Upload): 12864.34 ms
+GPU kernels time: 23.51 ms
+CPU postprocess time: 99.01 ms
+Total Internal Pipeline time: 12986.87 ms
+Total Host Execution time: 12987.45 ms
+Total Wall time (Plan+Exec): 13007.80 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    6.969 ms (29.640%) [12 calls]
+  filter         :    7.885 ms (33.532%) [12 calls]
+  gather         :    7.372 ms (31.353%) [21 calls]
+  hash_join_probe_u32:    1.287 ms (5.475%) [3 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 23.513 ms
+  Kernel invocations: 48
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_string_eq                1.737        6001215       3455.014
+ops::compact_indices                 1.332        6001215       4505.136
+ops::filter_string_eq                0.919        6001215       6528.680
+ops::compact_indices                 1.525        6001215       3935.331
+ops::filter_lt_u32_indexed           0.979        1715437       1751.563
+ops::compact_indices_indexed         0.468        1715437       3665.135
+ops::filter_ge_u32_indexed           1.213         736521        607.022
+ops::compact_indices_indexed         0.313         736521       2354.358
+ops::filter_lt_u32_indexed           0.262         271043       1034.022
+ops::compact_indices_indexed         0.259         271043       1044.985
+ops::filter_lt_u32_indexed           0.531         252729        475.874
+ops::compact_indices_indexed         0.414         252729        609.720
+ops::gather_col_u32                  0.855         252729        295.633
+ops::gather_col_u32                  0.283         252729        893.958
+ops::gather_col_u32                  0.251         164472        654.615
+ops::gather_col_u32                  0.253         164472        649.017
+ops::gather_col_u32                  0.242         164472        680.925
+ops::gather_col_u32                  0.218          30988        141.875
+ops::filter_string_eq                0.737        6001215       8141.380
+ops::compact_indices                 0.882        6001215       6801.523
+hash_join_probe_write_multi          0.395         857401       2171.554
+ops::gather_col_u32                  0.226          15526         68.573
+ops::filter_string_eq                0.622        6001215       9644.379
+ops::compact_indices                 0.910        6001215       6591.424
+hash_join_probe_write_multi          0.385         858036       2231.325
+ops::gather_col_u32                  0.240          15462         64.425
+ops::gather_col_u32                  0.721          30988         42.984
+ops::gather_col_u32                  0.459          30988         67.586
+ops::gather_col_u32                  0.191          30988        162.099
+ops::gather_col_u32                  0.192          30988        161.361
+ops::gather_col_u32                  0.215          30988        144.242
+ops::gather_col_u32                  0.369          30988         83.950
+ops::gather_col_u32                  0.398          30988         77.957
+ops::gather_col_u32                  0.402          30988         77.109
+ops::gather_col_u32                  0.394          30988         78.575
+ops::gather_col_u32                  0.392          30988         78.992
+ops::gather_col_u32                  0.576          30988         53.837
+hash_join_probe_write_multi          0.508        1500000       2953.483
+ops::gather_col_u32                  0.276          30988        112.191
+ops::gather_col_u32                  0.219          30988        141.471
+ops::filter_string_eq                0.222          30988        139.796
+ops::compact_indices                 0.219          30988        141.390
+ops::filter_string_eq                0.221          30988        140.456
+ops::compact_indices                 0.221          30988        140.032
+ops::filter_ne_u32                   0.225          30988        137.980
+ops::compact_indices                 0.210          30988        147.299
+ops::filter_ne_u32_indexed           0.216          24705        114.265
+ops::compact_indices_indexed         0.214          24705        115.421
+─────────────────────────────────────────────────────────────────
+TOTAL: 23.513 ms

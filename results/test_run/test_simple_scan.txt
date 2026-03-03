@@ -1,0 +1,129 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: ORDER_BY
+[Planner] Traversing: ORDER_BY
+[Planner] Entering children traversal block. Name: order_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_JOIN
+[Planner] Traversing: HASH_JOIN
+[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
+[Planner] Checking RHS capture for Join HASH_JOIN
+[Planner] Inspecting RHS node SEQ_SCAN 
+[Planner] Captured Table region
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: r_regionkey
+[Planner] Proj: r_name
+DEBUG: Scan table determined as: 'region'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
+[Planner] Generating Scan: region at index 0 Plan: 6171508784
+[Planner] Node SEQ_SCAN  output projections: r_regionkey, r_name, 
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: n_regionkey
+[Planner] Proj: n_name
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Generating Scan: nation at index 0 Plan: 6171519336
+[Planner] Node SEQ_SCAN  output projections: n_regionkey, n_name, 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
+[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
+[Planner] ChildProjs size: 4
+  #0: n_regionkey
+  #1: n_name
+  #2: r_regionkey
+  #3: r_name
+[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
+[Planner] Join Key Analysis: l => nation, r => region
+[Planner] Captured RHS Table: region
+[Planner] RHS Tables: region, 
+[Planner] Checking matchesRHS: nation
+[Planner] Checking matchesRHS: region
+[Planner] Node HASH_JOIN output projections: n_regionkey, n_name, r_regionkey, r_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_regionkey
+[Planner] Proj: n_name
+[Planner] Forcing keep of global column: r_name
+[Planner] Forcing keep of global column: r_regionkey
+[Planner] Node PROJECTION output projections: n_regionkey, n_name, 
+[Planner] Node ORDER_BY output projections: n_regionkey, n_name, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: n_regionkey
+[Planner] Proj: n_name
+[Planner] Node PROJECTION output projections: n_regionkey, n_name, 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'n_name'
+[Planner]   'r_name'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+n_name|
+ALGERIA|
+ARGENTINA|
+BRAZIL|
+CANADA|
+CHINA|
+EGYPT|
+ETHIOPIA|
+FRANCE|
+GERMANY|
+INDIA|
+INDONESIA|
+IRAN|
+IRAQ|
+JAPAN|
+JORDAN|
+KENYA|
+MOROCCO|
+MOZAMBIQUE|
+PERU|
+ROMANIA|
+RUSSIA|
+SAUDI ARABIA|
+UNITED KINGDOM|
+UNITED STATES|
+VIETNAM|
+---------------------------------------------------
+Planning time: 19.12 ms
+Data Load Time (Disk+Upload): 23.23 ms
+GPU kernels time: 3.63 ms
+CPU postprocess time: 6.30 ms
+Total Internal Pipeline time: 33.16 ms
+Total Host Execution time: 33.17 ms
+Total Wall time (Plan+Exec): 52.29 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  gather         :    2.045 ms (56.277%) [4 calls]
+  hash_join_probe_u32:    0.728 ms (20.037%) [1 calls]
+  sort           :    0.861 ms (23.685%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 3.633 ms
+  Kernel invocations: 7
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+hash_join_probe_write_multi          0.728             25          0.034
+ops::gather_col_u32                  0.668             25          0.037
+ops::gather_col_u32                  0.930             25          0.027
+block_sort_kv_u64                    0.000             25          0.000
+orderby_gpu_gather                   0.861             50          0.058
+ops::gather_col_u32                  0.222             25          0.113
+ops::gather_col_u32                  0.226             25          0.111
+─────────────────────────────────────────────────────────────────
+TOTAL: 3.633 ms

@@ -1,0 +1,52 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'n_distinct_brands' -> 'count(*)'
+[Planner]   'count(*)' -> 'n_distinct_brands'
+[Planner] Traversing node: UNGROUPED_AGGREGATE
+[Planner] Traversing: UNGROUPED_AGGREGATE
+[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: HASH_GROUP_BY
+[Planner] Traversing: HASH_GROUP_BY
+[Planner] Entering children traversal block. Name: hash_group_by Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_brand
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 0 Plan: 6133295464
+[Planner] Node SEQ_SCAN  output projections: p_brand, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: p_brand
+[Planner] Node PROJECTION output projections: p_brand, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: p_brand
+[Planner] Node PROJECTION output projections: p_brand, 
+[Planner] Parsing agg string: ''
+[Planner] Resolved agg: 
+[Planner] Looking up agg alias: ''
+[Planner] No alias found for agg, using generated name: 
+[Planner] Pushing spec with outputName=''
+[Planner] Node HASH_GROUP_BY output projections: p_brand, , 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: p_brand
+[Planner] Node PROJECTION output projections: p_brand, 
+[Planner] Processing aggregate: 'count_star()'
+[Planner] Node UNGROUPED_AGGREGATE output projections: count_star(), 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'n_distinct_brands'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[Native] Execution failed: Failed to load table: part

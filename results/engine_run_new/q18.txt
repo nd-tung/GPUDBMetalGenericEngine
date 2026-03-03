@@ -62,25 +62,25 @@ o_orderdate|o_orderkey|c_custkey|sum(l_quantity)|o_totalprice|c_name|
 1994-02-07|857959|82441|305.00|382579.75|Customer#000082441|
 1994-01-30|2995076|88703|302.00|363812.12|Customer#000088703|
 ---------------------------------------------------
-Planning time: 20.53 ms
-Data Load Time (Disk+Upload): 5865.40 ms
-GPU kernels time: 35.52 ms
-CPU postprocess time: 184.61 ms
-Total Internal Pipeline time: 6085.53 ms
-Total Host Execution time: 6085.61 ms
-Total Wall time (Plan+Exec): 6106.14 ms
+Planning time: 20.43 ms
+Data Load Time (Disk+Upload): 5792.84 ms
+GPU kernels time: 44.67 ms
+CPU postprocess time: 175.94 ms
+Total Internal Pipeline time: 6013.46 ms
+Total Host Execution time: 6013.68 ms
+Total Wall time (Plan+Exec): 6034.11 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.547 ms (1.541%) [2 calls]
-  filter         :    5.797 ms (16.320%) [2 calls]
-  gather         :    1.371 ms (3.860%) [6 calls]
-  groupby        :   26.605 ms (74.898%) [6 calls]
-  hash_join_probe_u32:    0.926 ms (2.607%) [2 calls]
-  sort           :    0.275 ms (0.775%) [2 calls]
+  compact        :    0.548 ms (1.226%) [2 calls]
+  filter         :    5.838 ms (13.069%) [2 calls]
+  gather         :    4.028 ms (9.017%) [16 calls]
+  groupby        :   33.140 ms (74.182%) [6 calls]
+  hash_join_probe_u32:    0.830 ms (1.858%) [2 calls]
+  sort           :    0.289 ms (0.648%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 35.522 ms
-  Kernel invocations: 20
+  TOTAL GPU TIME: 44.674 ms
+  Kernel invocations: 30
 [Planner] Parsed aliases:
 [Planner] Traversing node: TOP_N
 [Planner] Traversing: TOP_N
@@ -111,7 +111,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: c_name
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6169670912
+[Planner] Generating Scan: customer at index 0 Plan: 6103561440
 [Planner] Node SEQ_SCAN  output projections: c_custkey, c_name, 
 [Planner] Traversing node: HASH_JOIN
 [Planner] Traversing: HASH_JOIN
@@ -139,7 +139,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
 [Planner] Proj: l_quantity
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6169684008
+[Planner] Generating Scan: lineitem at index 0 Plan: 6103574568
 [Planner] Node SEQ_SCAN  output projections: l_orderkey, l_quantity, 
 [Planner] Parsing Projections for PROJECTION
 [Planner] Proj: l_orderkey
@@ -168,7 +168,7 @@ Expression: (sum(l_quantity) > 300.00)
 [Planner] Proj: o_totalprice
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 6 Plan: 6169684008
+[Planner] Generating Scan: orders at index 6 Plan: 6103574568
 [Planner] Node SEQ_SCAN  output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
 [Planner] Pre-resolved Condition: 'o_orderkey = #0'
@@ -213,7 +213,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='custo
 [Planner] Proj: l_quantity
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 10 Plan: 6169684008
+[Planner] Generating Scan: lineitem at index 10 Plan: 6103574568
 [Planner] Node SEQ_SCAN  output projections: l_orderkey, l_quantity, 
 [Planner] Renamed duplicate column: l_orderkey -> l_orderkey_1
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_9'
@@ -262,4 +262,4 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner]   'sum(l_quantity)'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

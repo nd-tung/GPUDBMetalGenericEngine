@@ -1,0 +1,76 @@
+--- Running (Engine Host) ---
+[Planner] Parsed aliases:
+[Planner]   'max_size' -> 'max(p_size)'
+[Planner]   'max(p_size)' -> 'max_size'
+[Planner]   'min_size' -> 'min(p_size)'
+[Planner]   'min(p_size)' -> 'min_size'
+[Planner]   'avg_price' -> 'avg(p_retailprice)'
+[Planner]   'avg(p_retailprice)' -> 'avg_price'
+[Planner]   'sum(p_retailprice)' -> 'total_price'
+[Planner]   'total_price' -> 'sum(p_retailprice)'
+[Planner]   'total_parts' -> 'count(*)'
+[Planner]   'count(*)' -> 'total_parts'
+[Planner] Traversing node: UNGROUPED_AGGREGATE
+[Planner] Traversing: UNGROUPED_AGGREGATE
+[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
+[Planner] Traversing node: PROJECTION
+[Planner] Traversing: PROJECTION
+[Planner] Entering children traversal block. Name: projection Children: 1
+[Planner] Traversing node: SEQ_SCAN 
+[Planner] Traversing: SEQ_SCAN 
+[Planner] Entering children traversal block. Name: seq_scan  Children: 0
+[Planner] Parsing Projections for SEQ_SCAN 
+[Planner] Proj: p_retailprice
+[Planner] Proj: p_size
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+[Planner] Generating Scan: part at index 0 Plan: 6094186856
+[Planner] Node SEQ_SCAN  output projections: p_retailprice, p_size, 
+[Planner] Parsing Projections for PROJECTION
+[Planner] Proj: p_retailprice
+[Planner] Proj: p_retailprice
+[Planner] Proj: p_size
+[Planner] Proj: p_size
+[Planner] Node PROJECTION output projections: p_retailprice, p_retailprice, p_size, p_size, 
+[Planner] Processing aggregate: 'count_star()'
+[Planner] Processing aggregate: 'sum_no_overflow(p_retailprice)'
+[Planner] Processing aggregate: 'avg(p_retailprice)'
+[Planner] Processing aggregate: 'min(p_size)'
+[Planner] Processing aggregate: 'max(p_size)'
+[Planner] Node UNGROUPED_AGGREGATE output projections: count_star(), sum_no_overflow(p_retailprice), avg(p_retailprice), min(p_size), max(p_size), 
+[Planner] plan.outputColumns from SQL:
+[Planner]   'total_parts'
+[Planner]   'total_price'
+[Planner]   'avg_price'
+[Planner]   'min_size'
+[Planner]   'max_size'
+[Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar max(p_size): 36893488147419103232.00
+---------------------------------------------------
+Planning time: 18.17 ms
+Data Load Time (Disk+Upload): 147.15 ms
+GPU kernels time: 0.28 ms
+CPU postprocess time: 22.79 ms
+Total Internal Pipeline time: 170.22 ms
+Total Host Execution time: 170.24 ms
+Total Wall time (Plan+Exec): 188.41 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.281 ms (100.000%) [1 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 0.281 ms
+  Kernel invocations: 1
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::cast_u32_to_f32                 0.281         200000        712.802
+─────────────────────────────────────────────────────────────────
+TOTAL: 0.281 ms

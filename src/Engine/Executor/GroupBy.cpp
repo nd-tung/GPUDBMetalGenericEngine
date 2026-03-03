@@ -93,9 +93,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             size_t firstIdx = 0;
                             ctx.ensureActiveRowsCPU();
                             if (!ctx.activeRows.empty()) {
-                                if (ctx.activeRows.size() > 0) {
-                                    firstIdx = ctx.activeRows[0];
-                                }
+                                firstIdx = ctx.activeRows[0];
                             }
                             
                             if (firstIdx < origData.size() && origData[firstIdx] == posData[0]) {
@@ -166,13 +164,12 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             }
             
             
-            bool u32Valid = (it != ctx.u32Cols.end() && it->second.size() == expectedKeyRows);
             bool stringHandled = false;
             
             // (Path 0) Dictionary ID path — collision-free, no hashing or collision check needed.
             // Dict IDs are compact 0-based sequential integers, ideal as groupby keys.
             if (!stringHandled && ctx.dictCols.count(col) && !ctx.dictCols.at(col).dictionary.empty()) {
-                const auto& dict = ctx.dictCols.at(col);
+                auto& dict = ctx.dictCols[col];  // non-const: ensureIdsCPU may mutate
                 ctx.ensureActiveRowsCPU();
                 
                 std::vector<uint32_t> ids;
@@ -184,14 +181,24 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                         std::memcpy(ids.data(), gathered->contents(), expectedKeyRows * sizeof(uint32_t));
                         gathered->release();
                     } else {
+                        dict.ensureIdsCPU();
                         ids.reserve(expectedKeyRows);
                         for (uint32_t r : ctx.activeRows) {
                             ids.push_back(r < dict.ids.size() ? dict.ids[r] : 0);
                         }
                     }
                 } else {
-                    ids = dict.ids;
-                    if (ids.size() > expectedKeyRows) ids.resize(expectedKeyRows);
+                    // Dense data: download GPU IDs if CPU mirror is stale/empty
+                    if (dict.idsGPU && dict.ids.size() != expectedKeyRows) {
+                        uint32_t gpuRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
+                        ids.resize(gpuRows);
+                        std::memcpy(ids.data(), dict.idsGPU->contents(), gpuRows * sizeof(uint32_t));
+                        if (ids.size() > expectedKeyRows) ids.resize(expectedKeyRows);
+                    } else {
+                        dict.ensureIdsCPU();
+                        ids = dict.ids;
+                        if (ids.size() > expectedKeyRows) ids.resize(expectedKeyRows);
+                    }
                 }
                 
                 // Build ID→string reverse map for output recovery
@@ -214,7 +221,10 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             // (Path 1) String key encoding — GPU FNV1a hash with CPU collision check.
             // If collision-free, uses hash directly as groupby key (skips CPU std::map).
             // Falls back to CPU sequential ID encoding if collisions detected.
-            if (!stringHandled && ctx.stringCols.count(col) && !ctx.stringCols.at(col).empty()) {
+            if (!stringHandled && (ctx.stringCols.count(col) || ctx.hasDictCol(col))) {
+                // Materialize stringCols from dict if needed
+                ctx.ensureStringCol(col);
+                if (ctx.stringCols.count(col) && !ctx.stringCols.at(col).empty()) {
                 const auto& strData = ctx.stringCols.at(col);
                 
                 // If activeRowsGPU is set but activeRows (CPU) is empty, download indices
@@ -328,6 +338,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                          stringHandled = true;
                      }
                 }
+                } // end if stringCols non-empty
             }
             
             if (!stringHandled) {
@@ -357,6 +368,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     keyFromF32.push_back(false);
                     
                     // Build hash->string map for string output
+                    ctx.ensureStringCol(col); // materialize from dict if needed
                     if (ctx.stringCols.count(col)) {
                         const auto& strData = ctx.stringCols.at(col);
                         std::unordered_map<uint32_t, std::string> hashToStr;
@@ -913,15 +925,11 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
         }
     }
     
-    // Use consensus count for execution
-    size_t executionCount = consensusRowCount;
-    
     // GPU GroupBy path
     if (useGpu && !keyVecs.empty()) {
         auto& store = ColumnStoreGPU::instance();
         if (store.device() && store.library() && store.queue()) {
             
-            // ... inside GPU path use executionCount ...
 
             if (debug) {
                 std::cerr << "[Exec] GroupBy: Using GPU path with " << keyVecs.size() << " keys and " << aggFuncs.size() << " aggregates\n";

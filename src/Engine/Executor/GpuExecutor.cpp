@@ -97,33 +97,54 @@ uint32_t gpuDedupContext(EvalContext& ctx,
             if (!ctx.u32ColsGPU.count(name) && col.size() >= ctx.rowCount) {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                 MTL::Buffer* dst = GpuOps::gatherU32(src, uniqueIdx, uniqueCount);
-                col.resize(uniqueCount);
-                std::memcpy(col.data(), dst->contents(), uniqueCount * sizeof(uint32_t));
-                src->release(); dst->release();
+                if (dst) {
+                    col.resize(uniqueCount);
+                    std::memcpy(col.data(), dst->contents(), uniqueCount * sizeof(uint32_t));
+                    dst->release();
+                }
+                src->release();
             }
         }
         for (auto& [name, col] : ctx.f32Cols) {
             if (!ctx.f32ColsGPU.count(name) && col.size() >= ctx.rowCount) {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
                 MTL::Buffer* dst = GpuOps::gatherF32(src, uniqueIdx, uniqueCount);
-                col.resize(uniqueCount);
-                std::memcpy(col.data(), dst->contents(), uniqueCount * sizeof(float));
-                src->release(); dst->release();
+                if (dst) {
+                    col.resize(uniqueCount);
+                    std::memcpy(col.data(), dst->contents(), uniqueCount * sizeof(float));
+                    dst->release();
+                }
+                src->release();
             }
         }
     }
-    // String columns: CPU gather (no GPU string representation)
-    {
-        std::vector<uint32_t> keepIdx(uniqueCount);
-        memcpy(keepIdx.data(), uniqueIdx->contents(), uniqueCount * sizeof(uint32_t));
-        for (auto& [name, col] : ctx.stringCols) {
-            if (col.size() >= ctx.rowCount) {
-                std::vector<std::string> compact(uniqueCount);
-                for (uint32_t i = 0; i < uniqueCount; ++i) compact[i] = col[keepIdx[i]];
-                col = std::move(compact);
+    // String columns: GPU gather dict IDs (GPU-native dictionary encoding)
+    for (auto& [name, dict] : ctx.dictCols) {
+        if (dict.idsGPU) {
+            auto compacted = GpuOps::gatherU32(dict.idsGPU, uniqueIdx, uniqueCount);
+            if (compacted) {
+                dict.idsGPU = compacted;
+                dict.rowCount = uniqueCount;
+                dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
             }
         }
     }
+    // Sync stringCols: skip those covered by dict or flat, CPU gather orphans only
+    for (auto& [name, col] : ctx.stringCols) {
+        if (ctx.dictCols.count(name) || ctx.flatStringCols.count(name)) {
+            continue;  // Lazy — will be materialized on demand
+        } else if (col.size() >= ctx.rowCount) {
+            // Legacy fallback: CPU gather for orphan string cols without dict/flat
+            std::vector<uint32_t> keepIdx(uniqueCount);
+            memcpy(keepIdx.data(), uniqueIdx->contents(), uniqueCount * sizeof(uint32_t));
+            std::vector<std::string> compact(uniqueCount);
+            for (uint32_t i = 0; i < uniqueCount; ++i) compact[i] = col[keepIdx[i]];
+            col = std::move(compact);
+        }
+    }
+    // GPU gather for flat string columns
+    ctx.compactFlatStringCols(uniqueIdx, uniqueCount);
+    ctx.invalidateStringColsForDictFlat();
     uniqueIdx->release();
 
     ctx.rowCount = uniqueCount;
@@ -132,9 +153,6 @@ uint32_t gpuDedupContext(EvalContext& ctx,
     ctx.activeRowsCountGPU = 0;
     return uniqueCount;
 }
-
-// Thread-local aggregate counter for multi-aggregate projection resolution
-thread_local size_t g_aggregateCounter = 0;
 
 // --- Multi-Instance Column Resolution ---
 // Rewrites predicates to use suffixed column names (e.g. col_2) when the same
@@ -280,9 +298,6 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     
     // Reset kernel timer for this query
     KernelTimer::instance().reset();
-    
-    // Reset thread-local aggregate counter at start of each query
-    g_aggregateCounter = 0;
 
     if (!plan.isValid()) {
         result.error = "Invalid plan: " + plan.parseError;
@@ -374,43 +389,12 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 bool hasSelfComp = false;
                 std::vector<std::string> corrCols;
                 // Parse "colA IS NOT DISTINCT FROM colA" and "colA = colA" patterns
-                // Handle AND-separated multi-key conditions
-                std::string remaining = cond;
-                while (!remaining.empty()) {
-                    std::string part;
-                    size_t andPos = remaining.find(" AND ");
-                    if (andPos != std::string::npos) {
-                        part = remaining.substr(0, andPos);
-                        remaining = remaining.substr(andPos + 5);
-                    } else {
-                        part = remaining;
-                        remaining.clear();
-                    }
-                    // Check "X IS NOT DISTINCT FROM X"
-                    size_t indPos = part.find(" IS NOT DISTINCT FROM ");
-                    if (indPos != std::string::npos) {
-                        std::string lhs = part.substr(0, indPos);
-                        std::string rhs = part.substr(indPos + 22);
-                        // Trim
-                        while (!lhs.empty() && lhs.back() == ' ') lhs.pop_back();
-                        while (!rhs.empty() && rhs[0] == ' ') rhs.erase(0, 1);
-                        if (lhs == rhs) {
-                            hasSelfComp = true;
-                            corrCols.push_back(lhs);
-                        }
-                        continue;
-                    }
-                    // Check "X = X" (exact self-comparison, not like "a = b")
-                    size_t eqPos = part.find(" = ");
-                    if (eqPos != std::string::npos) {
-                        std::string lhs = part.substr(0, eqPos);
-                        std::string rhs = part.substr(eqPos + 3);
-                        while (!lhs.empty() && lhs.back() == ' ') lhs.pop_back();
-                        while (!rhs.empty() && rhs[0] == ' ') rhs.erase(0, 1);
-                        if (lhs == rhs && !lhs.empty()) {
-                            hasSelfComp = true;
-                            corrCols.push_back(lhs);
-                        }
+                auto condParts = splitConditionByAND(cond);
+                for (const auto& part : condParts) {
+                    std::string col = parseSelfComparison(part);
+                    if (!col.empty()) {
+                        hasSelfComp = true;
+                        corrCols.push_back(col);
                     }
                 }
                 if (hasSelfComp && !corrCols.empty()) {
@@ -719,6 +703,11 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                     cit = currentCtx.flatStringCols.erase(cit);
                                 else ++cit;
                             }
+                            for (auto cit = currentCtx.dictCols.begin(); cit != currentCtx.dictCols.end(); ) {
+                                if (!shouldKeep(cit->first))
+                                    cit = currentCtx.dictCols.erase(cit);
+                                else ++cit;
+                            }
                             if (debug) {
                                 std::cerr << "[Exec] Scan column filter: kept cols:";
                                 for (const auto& c : keepCols) std::cerr << " " << c;
@@ -913,14 +902,40 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                             src->release(); dst->release();
                         }
                         for (auto& col : tableResult.string_cols) {
-                            const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
-                            std::vector<std::string> filtered;
-                            filtered.reserve(arCount);
-                            for (uint32_t i = 0; i < arCount; ++i) {
-                                uint32_t idx = arPtr[i];
-                                if (idx < col.size()) filtered.push_back(col[idx]);
+                            // Try GPU gather via flatStringCols if available
+                            bool gpuDone = false;
+                            // Find matching column name from tableResult.string_names
+                            size_t colIdx = &col - &tableResult.string_cols[0];
+                            if (colIdx < tableResult.string_names.size()) {
+                                const auto& colName = tableResult.string_names[colIdx];
+                                auto fit = currentCtx.flatStringCols.find(colName);
+                                if (fit != currentCtx.flatStringCols.end() && fit->second.chars) {
+                                    auto r = GpuOps::gatherFlatString(
+                                        fit->second.chars, fit->second.offsets, fit->second.lengths,
+                                        currentCtx.activeRowsGPU, arCount, true);
+                                    if (r.chars) {
+                                        // Materialize gathered FlatStringCol to std::vector<std::string> for tableResult
+                                        const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                                        const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                                        const char* ch = static_cast<const char*>(r.chars->contents());
+                                        col.resize(arCount);
+                                        for (uint32_t i = 0; i < arCount; ++i) {
+                                            col[i].assign(ch + offs[i], lens[i]);
+                                        }
+                                        gpuDone = true;
+                                    }
+                                }
                             }
-                            col = std::move(filtered);
+                            if (!gpuDone) {
+                                const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
+                                std::vector<std::string> filtered;
+                                filtered.reserve(arCount);
+                                for (uint32_t i = 0; i < arCount; ++i) {
+                                    uint32_t idx = arPtr[i];
+                                    if (idx < col.size()) filtered.push_back(col[idx]);
+                                }
+                                col = std::move(filtered);
+                            }
                         }
                         tableResult.rowCount = arCount;
                     } else if (!sizeMatch) {
@@ -980,10 +995,20 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                             }
                         }
                     }
-                    // String columns stay CPU — no GPU representation
-                    const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
+                    // GPU-native dict compaction: gather dict IDs on GPU
+                    currentCtx.compactDictCols(compactCount);
+                    // GPU-native flat string compaction: gather chars/offsets/lengths on GPU
+                    currentCtx.compactFlatStringCols(compactCount);
+                    // Invalidate stale stringCols — will be lazily rebuilt from dictCols/flatStringCols if needed
                     for (auto& [name, col] : currentCtx.stringCols) {
-                        if (col.size() > compactCount) {
+                        auto dit = currentCtx.dictCols.find(name);
+                        auto fit = currentCtx.flatStringCols.find(name);
+                        if ((dit != currentCtx.dictCols.end() && dit->second.valid()) ||
+                            (fit != currentCtx.flatStringCols.end() && fit->second.chars)) {
+                            col.clear();  // Will be rebuilt from dict/flat on demand
+                        } else if (col.size() > compactCount) {
+                            // Legacy fallback for orphan string cols without dict or flat encoding
+                            const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
                             std::vector<std::string> filtered;
                             filtered.reserve(compactCount);
                             for (uint32_t i = 0; i < compactCount; ++i) {
@@ -1137,11 +1162,14 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     }
                 }
                 
-                // Populate stringCols from GroupBy result
+                // Populate stringCols from GroupBy result and build dictCols
                 for (size_t i = 0; i < tableResult.string_cols.size(); ++i) {
                     if (i < tableResult.string_names.size()) {
-                        currentCtx.stringCols[tableResult.string_names[i]] = tableResult.string_cols[i];
-                        if (debug) std::cerr << "[Exec] GroupBy: setting stringCol " << tableResult.string_names[i] 
+                        const std::string& sname = tableResult.string_names[i];
+                        currentCtx.stringCols[sname] = tableResult.string_cols[i];
+                        // Build dictionary encoding for downstream operators
+                        buildDictCol(currentCtx, sname);
+                        if (debug) std::cerr << "[Exec] GroupBy: setting stringCol+dictCol " << sname
                                             << " with " << tableResult.string_cols[i].size() << " rows\n";
                     }
                 }
@@ -1231,19 +1259,19 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 
                 // Create GPU buffer for the scalar result
                 MTL::Buffer* aggBuf = GpuOps::createBuffer(currentCtx.f32Cols[posKey].data(), sizeof(float));
-                currentCtx.f32ColsGPU[posKey] = aggBuf; 
-                aggBuf->retain(); // Keep alive for other references
+                currentCtx.f32ColsGPU[posKey] = aggBuf;
+                // No extra retain needed — createBuffer returns refcount=1 which covers the posKey map entry
                 
                 // Also store by name
                 if (!name.empty()) {
                     currentCtx.f32Cols[name] = std::vector<float>{static_cast<float>(value)};
                     currentCtx.f32ColsGPU[name] = aggBuf;
-                    aggBuf->retain();
+                    aggBuf->retain(); // +1 for name map entry
                 }
                 if (!agg.exprStr.empty() && agg.exprStr != name) {
                      currentCtx.f32Cols[agg.exprStr] = std::vector<float>{static_cast<float>(value)};
                      currentCtx.f32ColsGPU[agg.exprStr] = aggBuf;
-                     aggBuf->retain();
+                     aggBuf->retain(); // +1 for exprStr map entry
                 }
                 if (debug) {
                     std::cerr << "[Exec] Aggregate " << name << ": " << value 
@@ -1313,9 +1341,16 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                             tableResult.string_cols.push_back(vec);
                         }
                     }
+                    // Also materialize any dict-only string columns not yet in stringCols
+                    for (const auto& [name, dict] : currentCtx.dictCols) {
+                        if (dict.valid() && !currentCtx.stringCols.count(name)) {
+                            tableResult.string_names.push_back(name);
+                            tableResult.string_cols.push_back(dict.materialize());
+                        }
+                    }
                     tableResult.rowCount = currentCtx.rowCount;
                 }
-                if (!executeOrderBy(node.asOrderBy(), tableResult, currentCtx.dictCols)) {
+                if (!executeOrderBy(node.asOrderBy(), tableResult, currentCtx.dictCols, currentCtx.flatStringCols)) {
                     result.error = "OrderBy execution failed";
                     return result;
                 }
@@ -1330,8 +1365,12 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         currentCtx.f32Cols[tableResult.f32_names[i]] = tableResult.f32_cols[i];
                 }
                 for (size_t i = 0; i < tableResult.string_cols.size(); ++i) {
-                    if (i < tableResult.string_names.size())
-                        currentCtx.stringCols[tableResult.string_names[i]] = tableResult.string_cols[i];
+                    if (i < tableResult.string_names.size()) {
+                        const std::string& sname = tableResult.string_names[i];
+                        currentCtx.stringCols[sname] = tableResult.string_cols[i];
+                        // Rebuild dictionary encoding for sorted string columns
+                        buildDictCol(currentCtx, sname);
+                    }
                 }
                 if (debug) {
                     std::cerr << "[Exec] OrderBy applied\n";
@@ -1389,6 +1428,25 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     std::cerr << "[Exec] Save: storing " << currentCtx.rowCount << " rows into " << node.asSave().name << "\n";
                 }
                 tableContexts[node.asSave().name] = currentCtx;
+                // Retain GPU buffers so the saved copy owns its own references.
+                // Without this, shallow copies share raw GPU pointers, and if
+                // another copy's DELIM dedup releases a buffer, this saved copy
+                // ends up with dangling pointers (e.g., Q21 crash).
+                {
+                    auto& saved = tableContexts[node.asSave().name];
+                    for (auto& [n, buf] : saved.u32ColsGPU)
+                        if (buf) buf->retain();
+                    for (auto& [n, buf] : saved.f32ColsGPU)
+                        if (buf) buf->retain();
+                    for (auto& [n, dc] : saved.dictCols)
+                        if (dc.idsGPU) dc.idsGPU->retain();
+                    for (auto& [n, fc] : saved.flatStringCols) {
+                        if (fc.offsets) fc.offsets->retain();
+                        if (fc.chars) fc.chars->retain();
+                        if (fc.lengths) fc.lengths->retain();
+                    }
+                    if (saved.activeRowsGPU) saved.activeRowsGPU->retain();
+                }
                 break;
             }
 
@@ -1437,6 +1495,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 tableResult.f32_cols.push_back(std::move(col));
             }
             for (const auto& [name, vec] : currentCtx.stringCols) {
+                // Skip if dict or flat alternative available — let those loops handle it
+                if (currentCtx.dictCols.count(name) || currentCtx.flatStringCols.count(name)) continue;
                 if (hasAR) {
                     const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
                     std::vector<std::string> col(arCount);
@@ -1449,6 +1509,57 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     tableResult.string_names.push_back(name);
                     tableResult.string_cols.push_back(
                         std::vector<std::string>(vec.begin(), vec.begin() + std::min((size_t)arCount, vec.size())));
+                }
+            }
+            // Materialize dict-only string columns not yet in stringCols
+            for (const auto& [name, dict] : currentCtx.dictCols) {
+                if (!dict.valid()) continue;
+                if (hasAR) {
+                    MTL::Buffer* gatheredIds = GpuOps::gatherU32(dict.idsGPU, currentCtx.activeRowsGPU, arCount);
+                    std::vector<std::string> col(arCount);
+                    const uint32_t* ids = static_cast<const uint32_t*>(gatheredIds->contents());
+                    for (uint32_t i = 0; i < arCount; ++i) {
+                        col[i] = dict.lookupString(ids[i]);
+                    }
+                    gatheredIds->release();
+                    tableResult.string_names.push_back(name);
+                    tableResult.string_cols.push_back(std::move(col));
+                } else {
+                    tableResult.string_names.push_back(name);
+                    tableResult.string_cols.push_back(dict.materialize());
+                }
+            }
+            // Materialize flat-only string columns not yet handled above
+            for (const auto& [name, fc] : currentCtx.flatStringCols) {
+                if (!fc.chars) continue;
+                if (currentCtx.dictCols.count(name)) continue; // Already handled by dict loop
+                // Already handled by stringCols loop if it wasn't skipped
+                bool alreadyHandled = false;
+                for (const auto& sn : tableResult.string_names) {
+                    if (sn == name) { alreadyHandled = true; break; }
+                }
+                if (alreadyHandled) continue;
+                if (hasAR) {
+                    auto r = GpuOps::gatherFlatString(fc.chars, fc.offsets, fc.lengths,
+                                                       currentCtx.activeRowsGPU, arCount, true);
+                    if (r.chars) {
+                        const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                        const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                        const char* ch = static_cast<const char*>(r.chars->contents());
+                        std::vector<std::string> col(arCount);
+                        for (uint32_t i = 0; i < arCount; ++i) col[i].assign(ch + offs[i], lens[i]);
+                        tableResult.string_names.push_back(name);
+                        tableResult.string_cols.push_back(std::move(col));
+                    }
+                } else {
+                    const uint32_t* offs = static_cast<const uint32_t*>(fc.offsets->contents());
+                    const uint32_t* lens = static_cast<const uint32_t*>(fc.lengths->contents());
+                    const char* ch = static_cast<const char*>(fc.chars->contents());
+                    uint32_t cnt = std::min((uint32_t)arCount, fc.rowCount);
+                    std::vector<std::string> col(cnt);
+                    for (uint32_t i = 0; i < cnt; ++i) col[i].assign(ch + offs[i], lens[i]);
+                    tableResult.string_names.push_back(name);
+                    tableResult.string_cols.push_back(std::move(col));
                 }
             }
             tableResult.rowCount = arCount;
@@ -1619,23 +1730,39 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
             if (tSchema) {
                 auto cSchema = tSchema->getColumn(colName);
                 if (cSchema && cSchema->type == ColumnType::StringHash) {
-                    // Try dictionary reverse-mapping first (O(1) per row, no disk I/O)
+                    // GPU-native dict: try direct dict-ID→string lookup first (O(1), no hashing)
                     auto dictIt = currentCtx.dictCols.find(colName);
-                    if (dictIt != currentCtx.dictCols.end() && !dictIt->second.dictionary.empty()) {
-                        // Use dictionary: each u32 value is an FNV1a hash; build hash→string from dict
+                    if (dictIt != currentCtx.dictCols.end() && dictIt->second.valid()) {
                         const auto& dict = dictIt->second;
-                        std::unordered_map<uint32_t, std::string> hashMap;
-                        hashMap.reserve(dict.dictionary.size());
-                        for (const auto& s : dict.dictionary) {
-                            hashMap[GpuOps::fnv1a32(s)] = s;
-                        }
+                        const auto& u32col = tableResult.u32_cols[i];
+                        
+                        // Check if the u32 values are dictionary IDs (max val < dict size)
+                        // vs FNV1a hashes (values are hash codes)
+                        bool isDictIds = true;
+                        uint32_t maxVal = 0;
+                        for (uint32_t val : u32col) { if (val > maxVal) maxVal = val; }
+                        if (maxVal >= dict.dictionary.size()) isDictIds = false;
 
                         std::vector<std::string> strCol;
-                        strCol.reserve(tableResult.u32_cols[i].size());
-                        for (uint32_t val : tableResult.u32_cols[i]) {
-                            auto hit = hashMap.find(val);
-                            if (hit != hashMap.end()) strCol.push_back(hit->second);
-                            else strCol.push_back(std::to_string(val));
+                        strCol.reserve(u32col.size());
+
+                        if (isDictIds) {
+                            // Direct dictionary ID lookup — fastest path
+                            for (uint32_t val : u32col) {
+                                strCol.push_back(dict.lookupString(val));
+                            }
+                        } else {
+                            // FNV1a hash reverse-mapping (legacy path)
+                            std::unordered_map<uint32_t, std::string> hashMap;
+                            hashMap.reserve(dict.dictionary.size());
+                            for (const auto& s : dict.dictionary) {
+                                hashMap[GpuOps::fnv1a32(s)] = s;
+                            }
+                            for (uint32_t val : u32col) {
+                                auto hit = hashMap.find(val);
+                                if (hit != hashMap.end()) strCol.push_back(hit->second);
+                                else strCol.push_back(std::to_string(val));
+                            }
                         }
 
                         tableResult.string_names.push_back(colName);

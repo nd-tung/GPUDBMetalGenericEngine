@@ -1,4 +1,5 @@
 #include "DuckDBAdapter.hpp"
+#include "EnvUtil.hpp"
 #include <cstdio>
 #include <array>
 #include <memory>
@@ -13,11 +14,7 @@ namespace engine {
 static std::string run_cmd_capture(const std::string& cmd) {
     std::array<char, 4096> buf{};
     std::string out;
-#if defined(__APPLE__)
     FILE* pipe = popen(cmd.c_str(), "r");
-#else
-    FILE* pipe = popen(cmd.c_str(), "r");
-#endif
     if (!pipe) return out;
     while (fgets(buf.data(), buf.size(), pipe)) { out.append(buf.data()); }
     pclose(pipe);
@@ -33,6 +30,7 @@ static std::string escape_for_double_quoted_shell_arg(std::string s) {
         if (c == '\\') out += "\\\\";
         else if (c == '"') out += "\\\"";
         else if (c == '$') out += "\\$"; // avoid accidental env expansion
+        else if (c == '`') out += "\\`"; // avoid command substitution
         else if (c == '\n' || c == '\r' || c == '\t') out += ' ';
         else out += c;
     }
@@ -59,13 +57,7 @@ static std::string strip_sql_comments(std::string s) {
     return out;
 }
 
-static std::string strip_trailing_semicolon(std::string s) {
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\n' || s.back() == '\r' || s.back() == '\t')) {
-        s.pop_back();
-    }
-    if (!s.empty() && s.back() == ';') s.pop_back();
-    return s;
-}
+
 
 std::string DuckDBAdapter::explainJSON(const std::string& sql) {
     // Use persistent DuckDB database to preserve correct predicate semantics
@@ -90,7 +82,7 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
         oss << "duckdb \"" << dbPath << "\" -json "
             << "-c \"PRAGMA disabled_optimizers='deliminator'; EXPLAIN (FORMAT JSON) " << q << ";\" 2>&1";
         
-        if (std::getenv("GPUDB_DEBUG_DUCKDB_CMD")) {
+        if (env_truthy("GPUDB_DEBUG_DUCKDB_CMD")) {
             std::cerr << "[DuckDBAdapter] cmd: " << oss.str() << "\n";
         }
         
@@ -231,7 +223,7 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
         << "-c \"" << view_partsupp << "\" "
         << "-c \"EXPLAIN (FORMAT JSON) " << q << ";\" 2>&1";
 
-    if (std::getenv("GPUDB_DEBUG_DUCKDB_CMD")) {
+    if (env_truthy("GPUDB_DEBUG_DUCKDB_CMD")) {
         std::cerr << "[DuckDBAdapter] cmd: " << oss.str() << "\n";
     }
 

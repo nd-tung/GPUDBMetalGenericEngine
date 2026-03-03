@@ -17,6 +17,7 @@ namespace engine {
 
 struct EvalContext;
 struct DictEncoded;
+struct FlatStringCol;
 
 // ============================================================================
 // GpuExecutor: Generic GPU executor using V2 IR (no regex fallbacks)
@@ -51,7 +52,8 @@ private:
     static bool executeAggregate(const IRAggregate& agg, EvalContext& ctx, 
                                   double& outValue, std::string& outName);
     static bool executeOrderBy(const IROrderBy& order, TableResult& table,
-                                const std::unordered_map<std::string, DictEncoded>& dictCols = {});
+                                const std::unordered_map<std::string, DictEncoded>& dictCols = {},
+                                const std::unordered_map<std::string, FlatStringCol>& flatStringCols = {});
     static bool executeLimit(const IRLimit& limit, TableResult& table);
     static bool executeProject(const IRProject& project, EvalContext& ctx, TableResult& out, std::unordered_map<std::string, EvalContext>* tableContexts = nullptr);
 

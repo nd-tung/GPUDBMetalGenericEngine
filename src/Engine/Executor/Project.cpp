@@ -24,19 +24,16 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
 
     // NOTE: activeRows sync from GPU is deferred until needed (e.g., for string columns)
     // Lambda delegates to EvalContext method
-    auto ensureActiveRowsCPU = [&]() {
-        ctx.ensureActiveRowsCPU();
-    };
+    auto ensureActiveRowsCPU = [&]() { ctx.ensureActiveRowsCPU(); };
 
     const size_t originalRowCount = ctx.rowCount;
     size_t projectedRowCount = ctx.rowCount;
     bool rowCountInitialized = false;
     auto updateRowCount = [&](size_t size) {
-        if (size == 0) return;
         if (!rowCountInitialized) {
             projectedRowCount = size;
             rowCountInitialized = true;
-        } else if (projectedRowCount != size) {
+        } else if (size > 0 && projectedRowCount != size) {
             // Prefer the new size when encountering differing column lengths (e.g., scalar aggregates)
             if (size > projectedRowCount) projectedRowCount = size;
         }
@@ -161,12 +158,15 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     bool tempFlat = false;
                     FlatStringCol flatBuf;
                     if (!ctx.flatStringCols.count(flatKey)) {
-                        // Find CPU strings
+                        // Find CPU strings (materialize from dict if needed)
                         std::string strKey = colName;
+                        ctx.ensureStringCol(strKey);
                         auto sIt = ctx.stringCols.find(strKey);
                         if (sIt == ctx.stringCols.end()) {
                             for (int suffix = 1; suffix <= 9; ++suffix) {
-                                sIt = ctx.stringCols.find(colName + "_" + std::to_string(suffix));
+                                std::string sfx = colName + "_" + std::to_string(suffix);
+                                ctx.ensureStringCol(sfx);
+                                sIt = ctx.stringCols.find(sfx);
                                 if (sIt != ctx.stringCols.end()) { strKey = sIt->first; break; }
                             }
                         }
@@ -272,11 +272,14 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     }
                     
                     // --- CPU fallback: find raw strings ---
+                    ctx.ensureStringCol(colName);
                     auto strIt = ctx.stringCols.find(colName);
                     if (strIt == ctx.stringCols.end()) {
                         // Try suffixed versions
                         for (int suffix = 1; suffix <= 9; ++suffix) {
-                            strIt = ctx.stringCols.find(colName + "_" + std::to_string(suffix));
+                            std::string sfx = colName + "_" + std::to_string(suffix);
+                            ctx.ensureStringCol(sfx);
+                            strIt = ctx.stringCols.find(sfx);
                             if (strIt != ctx.stringCols.end()) break;
                         }
                     }
@@ -611,23 +614,66 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                           }
                       }
                  }
+                 // Also try dictCols (stringCols may have been invalidated by dict migration)
+                 if (ctx.stringCols.find(strLookupCol) == ctx.stringCols.end()) {
+                     // Direct match in dictCols
+                     if (ctx.hasDictCol(strLookupCol)) {
+                         ctx.ensureStringCol(strLookupCol);
+                     } else {
+                         // Try prefix match in dictCols
+                         for (const auto& [n, _] : ctx.dictCols) {
+                             if (n.size() > strLookupCol.size() && n.rfind(strLookupCol, 0) == 0) {
+                                 char sep = n[strLookupCol.size()];
+                                 if (sep == '_' || sep == '.') {
+                                     ctx.ensureStringCol(n);
+                                     strLookupCol = n;
+                                     break;
+                                 }
+                             }
+                         }
+                     }
+                 }
             }
 
             // Check string columns first (Pass-through)
+            // Materialize from dict if stringCols is empty but dictCol exists
+            ctx.ensureStringCol(strLookupCol);
             if (ctx.stringCols.count(strLookupCol)) {
                 if (debug) std::cerr << "[Exec] Project: pass-through string col " << col << " (as " << strLookupCol << ") -> " << (outName.empty() ? col : outName) << "\n";
-                // Need CPU activeRows for string column projection
-                ensureActiveRowsCPU();
                 std::vector<std::string> sub;
                 if (ctx.rowCount == 0) {
                      sub = {};
                 } else if (ctx.activeRows.empty() || ctx.stringCols[strLookupCol].size() == ctx.activeRows.size()) {
+                     // Try zero-cost move when possible (no alias needed later)
                      sub = ctx.stringCols[strLookupCol];
                 } else {
-                     sub.reserve(ctx.activeRows.size());
-                     for(auto idx : ctx.activeRows) {
-                         if (idx < ctx.stringCols[strLookupCol].size()) sub.push_back(ctx.stringCols[strLookupCol][idx]);
-                         else sub.push_back("");
+                     // Try GPU gather via flatStringCols
+                     bool gpuDone = false;
+                     if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0) {
+                         ctx.ensureFlatStringCol(strLookupCol);
+                         auto fit = ctx.flatStringCols.find(strLookupCol);
+                         if (fit != ctx.flatStringCols.end() && fit->second.chars) {
+                             auto r = GpuOps::gatherFlatString(
+                                 fit->second.chars, fit->second.offsets, fit->second.lengths,
+                                 ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
+                             if (r.chars) {
+                                 const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                                 const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                                 const char* ch = static_cast<const char*>(r.chars->contents());
+                                 sub.resize(r.rowCount);
+                                 for (uint32_t i = 0; i < r.rowCount; ++i) sub[i].assign(ch + offs[i], lens[i]);
+                                 gpuDone = true;
+                             }
+                         }
+                     }
+                     if (!gpuDone) {
+                         // CPU fallback
+                         ensureActiveRowsCPU();
+                         sub.reserve(ctx.activeRows.size());
+                         for(auto idx : ctx.activeRows) {
+                             if (idx < ctx.stringCols[strLookupCol].size()) sub.push_back(ctx.stringCols[strLookupCol][idx]);
+                             else sub.push_back("");
+                         }
                      }
                 }
                 
@@ -637,6 +683,10 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 if (!outName.empty()) {
                     ctx.stringCols[outName] = sub;
                     if (outName != col) ctx.columnAliases[col] = outName;
+                    // Propagate dict encoding if available
+                    if (ctx.hasDictCol(strLookupCol) && !outName.empty() && outName != strLookupCol) {
+                        ctx.dictCols[outName] = ctx.dictCols[strLookupCol];
+                    }
                 }
                 ctx.stringCols[posName] = sub;
                 out.string_cols.push_back(std::move(sub));
@@ -677,13 +727,15 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
             std::string lookupCol = col;
             bool baseMissing = (ctx.u32Cols.find(col) == ctx.u32Cols.end() && 
                                 ctx.f32Cols.find(col) == ctx.f32Cols.end() && 
-                                ctx.stringCols.find(col) == ctx.stringCols.end());
+                                ctx.stringCols.find(col) == ctx.stringCols.end() &&
+                                ctx.dictCols.find(col) == ctx.dictCols.end());
 
             if (baseMissing || usedColumns.count(col) > 0) {
                 // Try col_1, col_2, col_3, etc.
                 for (int suffix = 1; suffix <= 9; ++suffix) {
                     std::string suffixedCol = col + "_" + std::to_string(suffix);
-                    if (ctx.u32Cols.count(suffixedCol) > 0 || ctx.f32Cols.count(suffixedCol) > 0 || ctx.stringCols.count(suffixedCol) > 0) {
+                    if (ctx.u32Cols.count(suffixedCol) > 0 || ctx.f32Cols.count(suffixedCol) > 0 || 
+                        ctx.stringCols.count(suffixedCol) > 0 || ctx.dictCols.count(suffixedCol) > 0) {
                         if (usedColumns.count(suffixedCol) == 0) {
                             lookupCol = suffixedCol;
                             if (debug) std::cerr << "[Exec] Project: multi-instance column " << col << " -> " << lookupCol << "\n";
@@ -924,7 +976,12 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 }
                 
                 updateRowCount(colData.size());
-                if (!outName.empty() && outName != lookupCol) {
+                // Only create an alias when there's a real rename (outName != col).
+                // Do NOT create un-suffixed aliases for multi-instance resolution
+                // (e.g., l_suppkey resolved to l_suppkey_3 but outName is l_suppkey).
+                // Those aliases shadow DELIM key columns in join outputs,
+                // causing DELIM dedup to use the wrong column data (Q21 bug).
+                if (!outName.empty() && outName != lookupCol && outName != col) {
                     ctx.u32Cols[outName] = colData;
                     // Track alias: if input col differs from outName, register both directions
                     if (col != outName && col != lookupCol) {
@@ -1038,7 +1095,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
             }
 
             // Cross-table lookup for missing columns from saved contexts
-            if (true) {
+            {
                 std::string neededCol = lookupCol;
                 std::string targetKey;
                 std::string currentKey;
@@ -1188,21 +1245,36 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
             }
             
             // Column not found in context - might be an alias for aggregate output
-            // Try to find aggregate column by position (COUNT_#1, SUM_#1, etc.)
-            // This handles cases like "c_count" which is an alias for count(o_orderkey) → COUNT_#1
+            // Try to find aggregate column by positional key (#N) first, then by name pattern
             bool foundAggregate = false;
-            for (const auto& [aggName, aggData] : ctx.f32Cols) {
-                // Check if this is an aggregate column (COUNT_#N, SUM_#N, AVG_#N, etc.)
-                if (aggName.find("COUNT_#") == 0 || aggName.find("SUM_#") == 0 || 
-                    aggName.find("AVG_#") == 0 || aggName.find("MIN_#") == 0 || aggName.find("MAX_#") == 0) {
-                    if (debug) std::cerr << "[Exec] Project: mapping unknown alias '" << col << "' to aggregate " << aggName << "\n";
-                    ctx.f32Cols[col] = aggData;
-                    ctx.f32Cols[posName] = aggData;
-                    if (!outName.empty()) ctx.f32Cols[outName] = aggData;
-                    out.f32_cols.push_back(aggData);
-                    out.f32_names.push_back(outName.empty() ? col : outName);
-                    foundAggregate = true;
-                    break;
+            
+            // First: try positional match using the projection index (#0, #1, etc.)
+            if (ctx.f32Cols.count(posName)) {
+                if (debug) std::cerr << "[Exec] Project: mapping unknown alias '" << col << "' to positional aggregate " << posName << "\n";
+                auto& aggData = ctx.f32Cols[posName];
+                ctx.f32Cols[col] = aggData;
+                if (!outName.empty()) ctx.f32Cols[outName] = aggData;
+                out.f32_cols.push_back(aggData);
+                out.f32_names.push_back(outName.empty() ? col : outName);
+                foundAggregate = true;
+            }
+            
+            // Fallback: try aggregate-prefixed keys matching the projection index
+            if (!foundAggregate) {
+                std::string idxSuffix = posName; // "#N"
+                for (const auto& [aggName, aggData] : ctx.f32Cols) {
+                    if ((aggName.find("COUNT_") == 0 || aggName.find("SUM_") == 0 || 
+                         aggName.find("AVG_") == 0 || aggName.find("MIN_") == 0 || aggName.find("MAX_") == 0) &&
+                        aggName.find(idxSuffix) != std::string::npos) {
+                        if (debug) std::cerr << "[Exec] Project: mapping unknown alias '" << col << "' to aggregate " << aggName << "\n";
+                        ctx.f32Cols[col] = aggData;
+                        ctx.f32Cols[posName] = aggData;
+                        if (!outName.empty()) ctx.f32Cols[outName] = aggData;
+                        out.f32_cols.push_back(aggData);
+                        out.f32_names.push_back(outName.empty() ? col : outName);
+                        foundAggregate = true;
+                        break;
+                    }
                 }
             }
             if (foundAggregate) continue;
@@ -1230,7 +1302,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
 
             // Computed expression - evaluate and add to context
             // Reset aggregate counter before each top-level expression evaluation
-            g_aggregateCounter = 0;
+            ctx.aggregateCounter = 0;
             
             // Try GPU evaluation first
             MTL::Buffer* gpuBuf = evalExprFloatGPU(expr, ctx);
@@ -1300,24 +1372,28 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
 
                         // Fuzzy/Suffix Search for truncated aliases (e.g. containing parentheses)
                         if (!found) {
-                            // Check f32Cols for partial match
-                            // Prefer matches where key ends with outName (suffix) or outName matches key suffix
+                            // Check f32Cols for suffix match (key ends with outName or vice versa)
                             for (const auto& [key, val] : ctx.f32Cols) {
-                                if (key.find(outName) != std::string::npos || outName.find(key) != std::string::npos) {
-                                    if (debug) std::cerr << "[Exec] Project: fuzzy match f32 '" << outName << "' -> '" << key << "'\n";
+                                // Require minimum 3 chars to avoid overly broad matches
+                                if (outName.size() >= 3 && key.size() >= 3 &&
+                                    (key.size() >= outName.size() ? key.rfind(outName) == key.size() - outName.size() 
+                                                                  : outName.rfind(key) == outName.size() - key.size())) {
+                                    if (debug) std::cerr << "[Exec] Project: suffix match f32 '" << outName << "' -> '" << key << "'\n";
                                     ctx.f32Cols[posName] = val;
                                     out.f32_cols.push_back(val);
-                                    out.f32_names.push_back(outName); // Keep the requested name
+                                    out.f32_names.push_back(outName);
                                     found = true;
                                     break;
                                 }
                             }
                             
-                            // Check u32Cols for partial match
+                            // Check u32Cols for suffix match
                             if (!found) {
                                 for (const auto& [key, val] : ctx.u32Cols) {
-                                    if (key.find(outName) != std::string::npos || outName.find(key) != std::string::npos) {
-                                        if (debug) std::cerr << "[Exec] Project: fuzzy match u32 '" << outName << "' -> '" << key << "'\n";
+                                    if (outName.size() >= 3 && key.size() >= 3 &&
+                                        (key.size() >= outName.size() ? key.rfind(outName) == key.size() - outName.size() 
+                                                                      : outName.rfind(key) == outName.size() - key.size())) {
+                                        if (debug) std::cerr << "[Exec] Project: suffix match u32 '" << outName << "' -> '" << key << "'\n";
                                         ctx.u32Cols[posName] = val;
                                         out.u32_cols.push_back(val);
                                         out.u32_names.push_back(outName);

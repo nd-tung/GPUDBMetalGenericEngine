@@ -1053,26 +1053,26 @@ ps_partkey|value|
 72073|7877736.00|
 5182|7874521.50|
 ---------------------------------------------------
-Planning time: 21.54 ms
-Data Load Time (Disk+Upload): 1181.42 ms
-GPU kernels time: 16.53 ms
-CPU postprocess time: 31.17 ms
-Total Internal Pipeline time: 1229.12 ms
-Total Host Execution time: 1229.18 ms
-Total Wall time (Plan+Exec): 1250.72 ms
+Planning time: 24.82 ms
+Data Load Time (Disk+Upload): 1191.67 ms
+GPU kernels time: 10.84 ms
+CPU postprocess time: 29.21 ms
+Total Internal Pipeline time: 1231.72 ms
+Total Host Execution time: 1231.77 ms
+Total Wall time (Plan+Exec): 1256.58 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.700 ms (4.233%) [3 calls]
-  compact        :    0.690 ms (4.175%) [3 calls]
-  filter         :    9.103 ms (55.085%) [3 calls]
-  gather         :    1.690 ms (10.226%) [8 calls]
-  groupby        :    0.897 ms (5.426%) [3 calls]
-  hash_join_probe_u32:    3.240 ms (19.605%) [4 calls]
-  sort           :    0.207 ms (1.251%) [2 calls]
+  cast           :    0.632 ms (5.828%) [3 calls]
+  compact        :    0.629 ms (5.801%) [3 calls]
+  filter         :    1.227 ms (11.323%) [3 calls]
+  gather         :    4.084 ms (37.678%) [18 calls]
+  groupby        :    0.853 ms (7.872%) [3 calls]
+  hash_join_probe_u32:    3.171 ms (29.255%) [4 calls]
+  sort           :    0.243 ms (2.243%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 16.526 ms
-  Kernel invocations: 26
+  TOTAL GPU TIME: 10.838 ms
+  Kernel invocations: 36
 [Planner] Parsed aliases:
 [Planner]   'value' -> 'sum(ps_supplycost * ps_availqty)'
 [Planner]   'sum(ps_supplycost*ps_availqty)' -> 'value'
@@ -1125,7 +1125,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: n_nationkey
 DEBUG: Scan table determined as: 'nation'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6091454624
+[Planner] Generating Scan: nation at index 0 Plan: 6162528384
 [Planner] Node SEQ_SCAN  output projections: n_nationkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -1135,7 +1135,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
 [Planner] Proj: s_nationkey
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 0 Plan: 6091483176
+[Planner] Generating Scan: supplier at index 0 Plan: 6162556968
 [Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
 [Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
@@ -1160,7 +1160,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='natio
 [Planner] Proj: ps_availqty
 DEBUG: Scan table determined as: 'partsupp'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 3 Plan: 6091483176
+[Planner] Generating Scan: partsupp at index 3 Plan: 6162556968
 [Planner] Node SEQ_SCAN  output projections: ps_suppkey, ps_supplycost, ps_availqty, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
 [Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
@@ -1231,7 +1231,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_
 [Planner] Proj: n_nationkey
 DEBUG: Scan table determined as: 'nation'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6091462352
+[Planner] Generating Scan: nation at index 0 Plan: 6162536112
 [Planner] Node SEQ_SCAN  output projections: n_nationkey, 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -1241,7 +1241,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
 [Planner] Proj: s_nationkey
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 13 Plan: 6091483176
+[Planner] Generating Scan: supplier at index 13 Plan: 6162556968
 [Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
 [Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
@@ -1267,7 +1267,7 @@ DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='natio
 [Planner] Proj: ps_availqty
 DEBUG: Scan table determined as: 'partsupp'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 16 Plan: 6091483176
+[Planner] Generating Scan: partsupp at index 16 Plan: 6162556968
 [Planner] Node SEQ_SCAN  output projections: ps_suppkey, ps_partkey, ps_supplycost, ps_availqty, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
 [Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
@@ -1335,4 +1335,4 @@ DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable
 [Planner]   'value'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

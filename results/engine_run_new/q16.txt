@@ -18319,25 +18319,26 @@ p_size|supplier_cnt|p_brand|p_type|
 19|3.00|Brand#55|PROMO PLATED BRASS|
 49|3.00|Brand#55|STANDARD PLATED TIN|
 ---------------------------------------------------
-Planning time: 20.77 ms
-Data Load Time (Disk+Upload): 978.22 ms
-GPU kernels time: 19.11 ms
-CPU postprocess time: 112.29 ms
-Total Internal Pipeline time: 1109.62 ms
-Total Host Execution time: 1110.43 ms
-Total Wall time (Plan+Exec): 1131.20 ms
+Planning time: 21.03 ms
+Data Load Time (Disk+Upload): 883.49 ms
+GPU kernels time: 21.09 ms
+CPU postprocess time: 124.36 ms
+Total Internal Pipeline time: 1028.93 ms
+Total Host Execution time: 1029.85 ms
+Total Wall time (Plan+Exec): 1050.88 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    2.426 ms (12.697%) [10 calls]
-  filter         :   10.929 ms (57.196%) [10 calls]
-  gather         :    2.414 ms (12.634%) [11 calls]
-  groupby        :    2.478 ms (12.969%) [6 calls]
-  hash_join_probe_u32:    0.606 ms (3.174%) [2 calls]
-  sort           :    0.254 ms (1.330%) [5 calls]
+  cast           :    0.750 ms (3.557%) [1 calls]
+  compact        :    3.296 ms (15.628%) [10 calls]
+  filter         :    4.369 ms (20.717%) [10 calls]
+  gather         :    9.689 ms (45.941%) [32 calls]
+  groupby        :    2.149 ms (10.189%) [6 calls]
+  hash_join_probe_u32:    0.557 ms (2.642%) [2 calls]
+  sort           :    0.280 ms (1.325%) [5 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 19.107 ms
-  Kernel invocations: 44
+  TOTAL GPU TIME: 21.090 ms
+  Kernel invocations: 66
 [Planner] Parsed aliases:
 [Planner]   'supplier_cnt' -> 'count(distinct ps_suppkey)'
 [Planner]   'count(distinctps_suppkey)' -> 'supplier_cnt'
@@ -18381,7 +18382,7 @@ GPU Kernel Timing Summary:
 [Planner] Proj: s_suppkey
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 0 Plan: 6130123440
+[Planner] Generating Scan: supplier at index 0 Plan: 6162612880
 [Planner] Node SEQ_SCAN  output projections: s_suppkey, 
 [Planner] Traversing node: HASH_JOIN
 [Planner] Traversing: HASH_JOIN
@@ -18408,7 +18409,7 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
 DEBUG: COLUMN_DATA_SCAN extra_info keys: 
 DEBUG: Scan table determined as: ''
 DEBUG: Pushing SCAN node for COLUMN_DATA_SCAN. Table=
-[Planner] Generating Scan:  at index 0 Plan: 6130149416
+[Planner] Generating Scan:  at index 0 Plan: 6162638888
 [Planner] Node COLUMN_DATA_SCAN output projections: 
 [Planner] Traversing node: SEQ_SCAN 
 [Planner] Traversing: SEQ_SCAN 
@@ -18420,7 +18421,7 @@ DEBUG: Pushing SCAN node for COLUMN_DATA_SCAN. Table=
 [Planner] Proj: p_size
 DEBUG: Scan table determined as: 'part'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 2 Plan: 6130149416
+[Planner] Generating Scan: part at index 2 Plan: 6162638888
 [Planner] Node SEQ_SCAN  output projections: p_partkey, p_brand, p_type, p_size, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
 [Planner] Pre-resolved Condition: 'p_size = #0'
@@ -18454,7 +18455,7 @@ Expression: IN (...)
 [Planner] Proj: ps_suppkey
 DEBUG: Scan table determined as: 'partsupp'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 7 Plan: 6130149416
+[Planner] Generating Scan: partsupp at index 7 Plan: 6162638888
 [Planner] Node SEQ_SCAN  output projections: ps_partkey, ps_suppkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_6'
 [Planner] Pre-resolved Condition: 'ps_partkey = p_partkey'
@@ -18562,4 +18563,4 @@ Expression: (NOT SUBQUERY)
 [Planner]   'supplier_cnt'
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (129 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).

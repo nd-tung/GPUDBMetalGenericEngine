@@ -1,5 +1,6 @@
 #include "Planner.hpp"
 #include "DuckDBAdapter.hpp"
+#include "EnvUtil.hpp"
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <algorithm>
@@ -15,6 +16,8 @@ namespace engine {
 // --- Debug utilities ---
 
 static void debug_log(const std::string& msg) {
+    static const bool enabled = env_truthy("GPUDB_DEBUG_PLANNER");
+    if (!enabled) return;
     std::cerr << "[Planner] " << msg << std::endl;
 }
 
@@ -196,7 +199,7 @@ TypedExprPtr Planner::parseExpression(const std::string& exprStr) {
     std::string s = strip_parens(exprStr);
     if (s.empty()) return nullptr;
     
-    bool debug = std::getenv("GPUDB_DEBUG_PARSE") != nullptr;
+    bool debug = env_truthy("GPUDB_DEBUG_PARSE");
     if (debug) {
         std::cerr << "[parseExpression] input: '" << s.substr(0, 80) << (s.size() > 80 ? "..." : "") << "'\n";
     }
@@ -1101,7 +1104,6 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
     
     debug_log("Traversing node: " + name);
     
-    debug_log("Traversing: " + name);
     std::string nameLower = tolower_str(name);
 
     // Handle CTE (Common Table Expressions)
@@ -1333,7 +1335,8 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                             fhCtx.pastGroupBy,
                             fhCtx.delimStack,
                             fhCtx.cteMap,
-                            fhCtx.forceKeepColumns
+                            fhCtx.forceKeepColumns,
+                            {}
                         };
                         traverseNode(kids[1], dummyCtx);
                         rhsProjections = dummyCtx.projections;
@@ -2491,8 +2494,12 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                     }
                     
                     debug_log("Pushing spec with outputName='" + spec.outputName + "'");
+                    // Save fields before move to avoid use-after-move UB
+                    auto savedFunc = spec.func;
+                    auto savedInput = spec.input;
+                    auto savedOutput = spec.outputName;
                     gb.aggSpecs.push_back(std::move(spec));
-                    gb.aggregates.push_back(TypedExpr::aggregate(spec.func, spec.input, spec.outputName));
+                    gb.aggregates.push_back(TypedExpr::aggregate(savedFunc, savedInput, savedOutput));
                 };
                 
                 if (aggsNode.is_array()) {
@@ -3172,7 +3179,7 @@ Plan Planner::fromSQL(const std::string& sql) {
             debug_log("  '" + k + "' -> '" + v + "'");
         }
         
-        TraverseContext ctx{plan, aliases, {}, {}, {}, false, {}, {}, {}};
+        TraverseContext ctx{plan, aliases, {}, {}, {}, false, {}, {}, {}, {}};
         collectGlobalColumns(j[0], ctx.forceKeepColumns);
         traverseNode(j[0], ctx);
         
