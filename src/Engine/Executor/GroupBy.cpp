@@ -1,14 +1,16 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 #include "KernelTimer.hpp"
 #include "Schema.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <map>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace engine {
@@ -38,6 +40,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
     std::vector<std::vector<std::string>> outputStringMaps;
     std::vector<std::unordered_map<uint32_t, std::string>> hashToStringMaps;  // For hash-based lookup
     std::vector<bool> keyFromF32;  // Track which keys were converted from f32
+    std::vector<MTL::Buffer*> keyBufsGPU;  // Pre-existing GPU buffers for keys (avoid re-upload)
     
     // Expected row count for this GroupBy - prefer GPU activeRows count
     size_t expectedKeyRows = ctx.rowCount;
@@ -209,6 +212,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 }
                 
                 keyVecs.push_back(std::move(ids));
+                keyBufsGPU.push_back(nullptr);
                 keyNames.push_back(keyName.empty() ? col : keyName);
                 keyFromF32.push_back(false);
                 outputStringMaps.push_back({});
@@ -289,6 +293,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                              // Collision-free: use GPU hashes directly as groupby keys
                              gpuHashOk = true;
                              keyVecs.push_back(std::move(hashes));
+                             keyBufsGPU.push_back(nullptr);
                              keyNames.push_back(keyName.empty() ? col : keyName);
                              keyFromF32.push_back(false);
                              outputStringMaps.push_back({});  // Empty — using hashToStringMaps
@@ -331,6 +336,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                              std::cerr << "[Exec] GroupBy: CPU encoded string key " << col << " to u32 IDs (" << reverseMap.size() << " unique)\n";
                          }
                          keyVecs.push_back(std::move(ids));
+                         keyBufsGPU.push_back(nullptr);
                          keyNames.push_back(keyName.empty() ? col : keyName);
                          keyFromF32.push_back(false);
                          outputStringMaps.push_back(std::move(reverseMap));
@@ -349,8 +355,8 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             MTL::Buffer* gathered = GpuOps::gatherU32(ctx.u32ColsGPU[col], ctx.activeRowsGPU, (uint32_t)expectedKeyRows);
                             std::vector<uint32_t> filtered(expectedKeyRows);
                             std::memcpy(filtered.data(), gathered->contents(), expectedKeyRows * sizeof(uint32_t));
-                            gathered->release();
                             keyVecs.push_back(std::move(filtered));
+                            keyBufsGPU.push_back(gathered);  // keep GPU buffer, avoid re-upload
                         } else {
                             // CPU fallback
                             std::vector<uint32_t> filtered;
@@ -360,9 +366,26 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                 else filtered.push_back(0);
                             }
                             keyVecs.push_back(std::move(filtered));
+                            keyBufsGPU.push_back(nullptr);
                         }
                     } else {
                         keyVecs.push_back(it->second);
+                        // Pass through existing GPU buffer to avoid re-upload,
+                        // but only if it matches the expected size (reject stale
+                        // pre-filter buffers that weren't compacted).
+                        if (ctx.u32ColsGPU.count(col) && ctx.u32ColsGPU[col]) {
+                            size_t gpuElems = ctx.u32ColsGPU[col]->length() / sizeof(uint32_t);
+                            if (gpuElems == it->second.size()) {
+                                ctx.u32ColsGPU[col]->retain();
+                                keyBufsGPU.push_back(ctx.u32ColsGPU[col]);
+                            } else {
+                                if (debug) std::cerr << "[Exec] GroupBy: SKIP stale GPU buf for " << col
+                                                     << " (gpu=" << gpuElems << " vs cpu=" << it->second.size() << ")\n";
+                                keyBufsGPU.push_back(nullptr);
+                            }
+                        } else {
+                            keyBufsGPU.push_back(nullptr);
+                        }
                     }
                     keyNames.push_back(keyName.empty() ? col : keyName);
                     keyFromF32.push_back(false);
@@ -414,9 +437,9 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             }
                             std::vector<uint32_t> converted(gpuCount);
                             std::memcpy(converted.data(), gpuU32->contents(), gpuCount * sizeof(uint32_t));
-                            gpuU32->release();
                             if (debug) std::cerr << "[Exec] GroupBy: GPU bitcast f32 key " << col << " to u32 (" << gpuCount << " rows)\n";
                             keyVecs.push_back(std::move(converted));
+                            keyBufsGPU.push_back(gpuU32);  // keep GPU buffer, avoid re-upload
                             keyNames.push_back(keyName.empty() ? col : keyName);
                             keyFromF32.push_back(true);
                             outputStringMaps.push_back({});
@@ -464,6 +487,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             }
                             if (debug) std::cerr << "[Exec] GroupBy: converted f32 key " << col << " to u32\n";
                             keyVecs.push_back(std::move(converted));
+                            keyBufsGPU.push_back(nullptr);
                             keyNames.push_back(keyName.empty() ? col : keyName);
                             keyFromF32.push_back(true);
                             outputStringMaps.push_back({});
@@ -492,11 +516,11 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             std::cerr << "[Exec] GroupBy: empty key vectors, returning 0 groups\n";
         }
         out.rowCount = 0;
-        out.u32_cols.clear();
-        out.u32_cols.resize(keyVecs.size());
-        out.u32_names = keyNames;
-        out.f32_cols.clear();
-        out.f32_names.clear();
+        out.u32Cols.clear();
+        out.u32Cols.resize(keyVecs.size());
+        out.u32Names = keyNames;
+        out.f32Cols.clear();
+        out.f32Names.clear();
         out.order.clear();
         // Still need to populate aggNames
         for (const auto& spec : groupBy.aggSpecs) {
@@ -504,20 +528,21 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             if (name.empty()) {
                 name = aggFuncName(spec.func);
             }
-            out.f32_names.push_back(name);
-            out.f32_cols.push_back({});
+            out.f32Names.push_back(name);
+            out.f32Cols.push_back({});
         }
-        for (size_t i = 0; i < out.u32_names.size(); ++i) {
-            out.order.push_back({TableResult::ColRef::Kind::U32, i, out.u32_names[i]});
+        for (size_t i = 0; i < out.u32Names.size(); ++i) {
+            out.order.push_back({TableResult::ColRef::Kind::U32, i, out.u32Names[i]});
         }
-        for (size_t i = 0; i < out.f32_names.size(); ++i) {
-            out.order.push_back({TableResult::ColRef::Kind::F32, i, out.f32_names[i]});
+        for (size_t i = 0; i < out.f32Names.size(); ++i) {
+            out.order.push_back({TableResult::ColRef::Kind::F32, i, out.f32Names[i]});
         }
         return true;
     }
     
     // Build aggregate input vectors
     std::vector<std::vector<float>> aggInputs;
+    std::vector<MTL::Buffer*> aggBufsGPU;  // Pre-existing GPU buffers for agg inputs (avoid re-upload)
     std::vector<AggFunc> aggFuncs;
     std::vector<std::string> aggNames;
     
@@ -541,6 +566,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
         if (spec.func == AggFunc::CountStar) {
             // COUNT(*) doesn't need input - counts all rows
             aggInputs.push_back({});
+            aggBufsGPU.push_back(nullptr);
         } else if (spec.func == AggFunc::Count || spec.func == AggFunc::CountDistinct) {
             // COUNT(column) / COUNT(DISTINCT column) - need to track which rows have non-NULL values
             // We'll store the column values so we can check for NULLs (0 = NULL sentinel)
@@ -552,6 +578,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             
             // Get the u32 column values (most columns are u32) - prefer u32Cols for correct row count
             std::vector<float> input;
+            MTL::Buffer* inputGPU = nullptr;  // Track GPU buffer to avoid re-upload
             
              // LAZY FETCH U32: If vector is empty but on GPU, bring it back
             if ((ctx.u32Cols.find(col) == ctx.u32Cols.end() || ctx.u32Cols[col].empty()) && ctx.u32ColsGPU.count(col)) {
@@ -567,7 +594,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             auto itU = ctx.u32Cols.find(col);
             if (itU != ctx.u32Cols.end()) {
                 // GPU u32→f32 cast (with optional activeRows gather)
-                auto& s = ColumnStoreGPU::instance();
+                auto& s = GpuColumnStore::instance();
                 MTL::Buffer* u32Buf = ctx.u32ColsGPU.count(col) ? ctx.u32ColsGPU[col]
                     : s.device()->newBuffer(itU->second.data(), itU->second.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                 bool ownU32 = !ctx.u32ColsGPU.count(col);
@@ -581,7 +608,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 MTL::Buffer* f32Buf = GpuOps::castU32ToF32(src, castCount);
                 input.resize(castCount);
                 std::memcpy(input.data(), f32Buf->contents(), castCount * sizeof(float));
-                f32Buf->release();
+                inputGPU = f32Buf;  // keep GPU buffer
                 if (ownSrc) src->release();
                 if (ownU32) u32Buf->release();
                 if (debug) {
@@ -602,7 +629,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 auto itF = ctx.f32Cols.find(col);
                 if (itF != ctx.f32Cols.end()) {
                     if (!ctx.activeRows.empty() && itF->second.size() > expectedKeyRows && ctx.activeRowsGPU) {
-                         auto& s = ColumnStoreGPU::instance();
+                         auto& s = GpuColumnStore::instance();
                          MTL::Buffer* src = ctx.f32ColsGPU.count(col) ? ctx.f32ColsGPU[col]
                              : s.device()->newBuffer(itF->second.data(), itF->second.size() * sizeof(float), MTL::ResourceStorageModeShared);
                          bool ownSrc = !ctx.f32ColsGPU.count(col);
@@ -622,9 +649,12 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 }
             }
             aggInputs.push_back(std::move(input));
+            aggBufsGPU.push_back(inputGPU);
         } else {
             // Evaluate input expression
             std::vector<float> input;
+            MTL::Buffer* inputGPU = nullptr;  // Track GPU buffer to avoid re-upload
+            bool inputGPUOwned = false;
 
             // Use pre-computed column if available (avoids double-gather)
             bool foundPrecomputed = false;
@@ -643,6 +673,8 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     if (bufElems == expectedKeyRows) {
                         input.resize(expectedKeyRows);
                         std::memcpy(input.data(), preBuf->contents(), expectedKeyRows * sizeof(float));
+                        inputGPU = preBuf;  // ctx-owned, don't release
+                        inputGPUOwned = false;
                         foundPrecomputed = true;
                         if (debug) std::cerr << "[Exec] GroupBy: using pre-computed f32ColGPU '" << spec.inputExpr << "' (" << input.size() << " values)\n";
                     }
@@ -650,18 +682,19 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             }
 
             if (!foundPrecomputed) {
-                MTL::Buffer* buf = evalExprFloatGPU(spec.input, ctx);
+                MTL::Buffer* buf = evaluateExpression(spec.input, ctx);
                 if (buf) {
                      uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
                      if (ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0) count = 0;
                      input.resize(count);
                      if (count > 0) std::memcpy(input.data(), buf->contents(), count * sizeof(float));
-                     buf->release();
+                     inputGPU = buf;  // keep GPU buffer
+                     inputGPUOwned = true;
                 }
             }
 
             if (debug) {
-                std::cerr << "[Exec] GroupBy: evalExprFloatGPU returned " << input.size() << " values\n";
+                std::cerr << "[Exec] GroupBy: evaluateExpression returned " << input.size() << " values\n";
                 if (!input.empty()) {
                     float sum = 0, minV = input[0], maxV = input[0];
                     size_t zeroCount = 0;
@@ -719,17 +752,24 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 auto itF = ctx.f32Cols.find(col);
                 if (itF != ctx.f32Cols.end()) {
                     if (!ctx.activeRows.empty() && itF->second.size() > expectedKeyRows && ctx.activeRowsGPU) {
-                         auto& s = ColumnStoreGPU::instance();
+                         auto& s = GpuColumnStore::instance();
                          MTL::Buffer* src = ctx.f32ColsGPU.count(col) ? ctx.f32ColsGPU[col]
                              : s.device()->newBuffer(itF->second.data(), itF->second.size() * sizeof(float), MTL::ResourceStorageModeShared);
                          bool ownSrc = !ctx.f32ColsGPU.count(col);
                          MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, (uint32_t)expectedKeyRows);
                          input.resize(expectedKeyRows);
                          std::memcpy(input.data(), dst->contents(), expectedKeyRows * sizeof(float));
-                         dst->release();
+                         inputGPU = dst;  // keep GPU buffer
+                         inputGPUOwned = true;
                          if (ownSrc) src->release();
                     } else {
                         input = itF->second;
+                        // Check if GPU buffer available in ctx
+                        if (ctx.f32ColsGPU.count(col) && ctx.f32ColsGPU[col] &&
+                            ctx.f32ColsGPU[col]->length() >= itF->second.size() * sizeof(float)) {
+                            inputGPU = ctx.f32ColsGPU[col];
+                            inputGPUOwned = false;
+                        }
                     }
                     if (debug) {
                         std::cerr << "[Exec] GroupBy: found f32 col, size=" << input.size() << "\n";
@@ -743,7 +783,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     auto itU = ctx.u32Cols.find(col);
                     if (itU != ctx.u32Cols.end()) {
                         // GPU u32→f32 cast (with optional activeRows gather)
-                        auto& s = ColumnStoreGPU::instance();
+                        auto& s = GpuColumnStore::instance();
                         MTL::Buffer* u32Buf = ctx.u32ColsGPU.count(col) ? ctx.u32ColsGPU[col]
                             : s.device()->newBuffer(itU->second.data(), itU->second.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                         bool ownU32 = !ctx.u32ColsGPU.count(col);
@@ -757,13 +797,17 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                         MTL::Buffer* f32Buf = GpuOps::castU32ToF32(src, castCount);
                         input.resize(castCount);
                         std::memcpy(input.data(), f32Buf->contents(), castCount * sizeof(float));
-                        f32Buf->release();
+                        inputGPU = f32Buf;  // keep GPU buffer
+                        inputGPUOwned = true;
                         if (ownSrc) src->release();
                         if (ownU32) u32Buf->release();
                     }
                 }
             }
             aggInputs.push_back(std::move(input));
+            // Retain ctx-owned GPU buffers so they can be safely released later
+            if (inputGPU && !inputGPUOwned) inputGPU->retain();
+            aggBufsGPU.push_back(inputGPU);
         }
     }
     
@@ -831,20 +875,20 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
         // preserving string maps in the final result.
         
         std::set<std::string> strColNames;
-        for(size_t i=0; i<stage1Res.string_names.size(); ++i) {
-            stage2Ctx.stringCols[stage1Res.string_names[i]] = stage1Res.string_cols[i];
-            strColNames.insert(stage1Res.string_names[i]);
+        for(size_t i=0; i<stage1Res.stringNames.size(); ++i) {
+            stage2Ctx.stringCols[stage1Res.stringNames[i]] = stage1Res.stringCols[i];
+            strColNames.insert(stage1Res.stringNames[i]);
         }
         
-        for(size_t i=0; i<stage1Res.u32_names.size(); ++i) {
+        for(size_t i=0; i<stage1Res.u32Names.size(); ++i) {
              // Only copy as u32 if it's NOT a string column
-             if (strColNames.find(stage1Res.u32_names[i]) == strColNames.end()) {
-                stage2Ctx.u32Cols[stage1Res.u32_names[i]] = stage1Res.u32_cols[i];
+             if (strColNames.find(stage1Res.u32Names[i]) == strColNames.end()) {
+                stage2Ctx.u32Cols[stage1Res.u32Names[i]] = stage1Res.u32Cols[i];
              }
         }
 
-        for(size_t i=0; i<stage1Res.f32_names.size(); ++i) {
-            stage2Ctx.f32Cols[stage1Res.f32_names[i]] = stage1Res.f32_cols[i];
+        for(size_t i=0; i<stage1Res.f32Names.size(); ++i) {
+            stage2Ctx.f32Cols[stage1Res.f32Names[i]] = stage1Res.f32Cols[i];
         }
         
         IRGroupBy stage2Spec;
@@ -927,7 +971,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
     
     // GPU GroupBy path
     if (useGpu && !keyVecs.empty()) {
-        auto& store = ColumnStoreGPU::instance();
+        auto& store = GpuColumnStore::instance();
         if (store.device() && store.library() && store.queue()) {
             
 
@@ -952,13 +996,42 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             bool gpuOk = true;
             
             for (size_t k = 0; k < keyVecs.size() && gpuOk; ++k) {
-                // Upload key vector to GPU, pad with zeros if needed
-                auto srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                if (!srcBuf) { gpuOk = false; break; }
-                uint32_t* ptr = static_cast<uint32_t*>(srcBuf->contents());
-                size_t copyLen = std::min(keyVecs[k].size(), gpuRowCount);
-                if (copyLen > 0) memcpy(ptr, keyVecs[k].data(), copyLen * sizeof(uint32_t));
-                if (copyLen < gpuRowCount) memset(ptr + copyLen, 0, (gpuRowCount - copyLen) * sizeof(uint32_t));
+                MTL::Buffer* srcBuf = nullptr;
+                bool usedGpuBuf = false;
+                // Use pre-existing GPU buffer if available and exactly sized
+                if (k < keyBufsGPU.size() && keyBufsGPU[k] &&
+                    keyBufsGPU[k]->length() == gpuRowCount * sizeof(uint32_t)) {
+                    srcBuf = keyBufsGPU[k];
+                    keyBufsGPU[k] = nullptr;  // take ownership
+                    usedGpuBuf = true;
+                } else {
+                    // Upload key vector to GPU, pad with zeros if needed
+                    srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    if (!srcBuf) { gpuOk = false; break; }
+                    uint32_t* ptr = static_cast<uint32_t*>(srcBuf->contents());
+                    size_t copyLen = std::min(keyVecs[k].size(), gpuRowCount);
+                    if (copyLen > 0) memcpy(ptr, keyVecs[k].data(), copyLen * sizeof(uint32_t));
+                    if (copyLen < gpuRowCount) memset(ptr + copyLen, 0, (gpuRowCount - copyLen) * sizeof(uint32_t));
+                }
+
+                // ── Diagnostic: verify srcBuf matches keyVecs[k] BEFORE biasing ──
+                if (debug && k == 0) {
+                    const uint32_t* sp = static_cast<const uint32_t*>(srcBuf->contents());
+                    size_t srcMismatches = 0;
+                    for (size_t i = 0; i < std::min(gpuRowCount, keyVecs[k].size()); ++i) {
+                        if (sp[i] != keyVecs[k][i]) {
+                            if (srcMismatches < 5) {
+                                std::cerr << "[Exec] GroupBy: SRC MISMATCH[" << i << "] GPU=" << sp[i] << " CPU=" << keyVecs[k][i] << "\n";
+                            }
+                            srcMismatches++;
+                        }
+                    }
+                    std::cerr << "[Exec] GroupBy: srcBuf vs keyVecs[0]: " << srcMismatches << " mismatches"
+                              << " (usedGpuBuf=" << usedGpuBuf
+                              << " srcLen=" << srcBuf->length()/4 
+                              << " keyVecLen=" << keyVecs[k].size()
+                              << " gpuRowCount=" << gpuRowCount << ")\n";
+                }
 
                 // GPU: add +1 bias to avoid 0 as empty marker in hash table
                 auto biased = GpuOps::arithAddConstU32(srcBuf, 1, static_cast<uint32_t>(gpuRowCount));
@@ -1003,12 +1076,21 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 MTL::Buffer* aggBuf = nullptr;
                 if (aggFuncs[a] == AggFunc::Count) {
                     // COUNT(column): GPU non-null indicator (1.0 if non-null, 0.0 if null/zero)
-                    auto srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* srcBuf = nullptr;
+                    if (a < aggBufsGPU.size() && aggBufsGPU[a] &&
+                        aggBufsGPU[a]->length() >= gpuRowCount * sizeof(float)) {
+                        srcBuf = aggBufsGPU[a];
+                        aggBufsGPU[a] = nullptr;
+                    } else {
+                        srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
+                        if (srcBuf) {
+                            float* ptr = static_cast<float*>(srcBuf->contents());
+                            size_t copyLen = std::min(aggInputs[a].size(), gpuRowCount);
+                            if (copyLen > 0) memcpy(ptr, aggInputs[a].data(), copyLen * sizeof(float));
+                            if (copyLen < gpuRowCount) memset(ptr + copyLen, 0, (gpuRowCount - copyLen) * sizeof(float));
+                        }
+                    }
                     if (srcBuf) {
-                        float* ptr = static_cast<float*>(srcBuf->contents());
-                        size_t copyLen = std::min(aggInputs[a].size(), gpuRowCount);
-                        if (copyLen > 0) memcpy(ptr, aggInputs[a].data(), copyLen * sizeof(float));
-                        if (copyLen < gpuRowCount) memset(ptr + copyLen, 0, (gpuRowCount - copyLen) * sizeof(float));
                         aggBuf = GpuOps::nonNullIndicatorF32(srcBuf, static_cast<uint32_t>(gpuRowCount));
                         srcBuf->release();
                         if (aggBuf) toRelease.push_back(aggBuf);
@@ -1021,13 +1103,21 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                         toRelease.push_back(aggBuf);
                     }
                 } else if (!aggInputs[a].empty()) {
-                    aggBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
-                    if (aggBuf) {
-                        float* ptr = static_cast<float*>(aggBuf->contents());
-                        for (size_t i = 0; i < gpuRowCount; ++i) {
-                            ptr[i] = (i < aggInputs[a].size()) ? aggInputs[a][i] : 0.0f;
-                        }
+                    // Use pre-existing GPU buffer if available
+                    if (a < aggBufsGPU.size() && aggBufsGPU[a] &&
+                        aggBufsGPU[a]->length() >= gpuRowCount * sizeof(float)) {
+                        aggBuf = aggBufsGPU[a];
+                        aggBufsGPU[a] = nullptr;
                         toRelease.push_back(aggBuf);
+                    } else {
+                        aggBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
+                        if (aggBuf) {
+                            float* ptr = static_cast<float*>(aggBuf->contents());
+                            for (size_t i = 0; i < gpuRowCount; ++i) {
+                                ptr[i] = (i < aggInputs[a].size()) ? aggInputs[a][i] : 0.0f;
+                            }
+                            toRelease.push_back(aggBuf);
+                        }
                     }
                 } else {
                     // No input data - create dummy buffer
@@ -1063,8 +1153,8 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                 
                 if (htOpt.has_value()) {
                     const uint32_t cap = htOpt->capacity;
-                    const auto* keyWords = reinterpret_cast<const uint32_t*>(htOpt->ht_keys->contents());
-                    const auto* aggWords = reinterpret_cast<const uint32_t*>(htOpt->ht_aggs->contents());
+                    const auto* keyWords = reinterpret_cast<const uint32_t*>(htOpt->htKeys->contents());
+                    const auto* aggWords = reinterpret_cast<const uint32_t*>(htOpt->htAggs->contents());
                     
                     if (debug) {
                         std::cerr << "[Exec] GroupBy: GPU hash table capacity=" << cap << " gpuRowCount=" << gpuRowCount << "\n";
@@ -1074,37 +1164,139 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             if (keyWords[s * 8 + 0] != 0) nonEmpty++;
                         }
                         std::cerr << "[Exec] GroupBy: GPU hash table non-empty slots=" << nonEmpty << "\n";
-                        // Dump all non-empty slots
+                    }
+                    
+                    // ── CPU verification: recompute GROUP BY from input data, compare with GPU ──
+                    {
+                        // Check GPU key buffer vs CPU keyVecs row-by-row
+                        if (!keyBufs.empty() && !keyVecs.empty()) {
+                            const uint32_t* gpuKeys = static_cast<const uint32_t*>(keyBufs[0]->contents());
+                            size_t mismatches = 0;
+                            for (size_t i = 0; i < std::min(gpuRowCount, keyVecs[0].size()); ++i) {
+                                uint32_t gpuKey = gpuKeys[i];          // biased
+                                uint32_t cpuKey = keyVecs[0][i] + 1;   // bias CPU for comparison
+                                if (gpuKey != cpuKey) {
+                                    if (mismatches < 10) {
+                                        std::cerr << "[Exec] GroupBy VERIFY: KEY MISMATCH at row " << i 
+                                                  << " GPU=" << gpuKey << " CPU=" << cpuKey << "\n";
+                                    }
+                                    mismatches++;
+                                }
+                            }
+                            std::cerr << "[Exec] GroupBy VERIFY: key mismatches = " << mismatches << " / " << std::min(gpuRowCount, keyVecs[0].size()) << "\n";
+                        }
+                        
+                        // Check GPU agg buffer vs CPU aggInputs row-by-row
+                        if (!aggBufs.empty() && !aggInputs.empty() && !aggInputs[0].empty()) {
+                            const float* gpuAggs = static_cast<const float*>(aggBufs[0]->contents());
+                            size_t mismatches = 0;
+                            for (size_t i = 0; i < std::min(gpuRowCount, aggInputs[0].size()); ++i) {
+                                if (gpuAggs[i] != aggInputs[0][i]) {
+                                    if (mismatches < 10) {
+                                        std::cerr << "[Exec] GroupBy VERIFY: AGG MISMATCH at row " << i 
+                                                  << " GPU=" << gpuAggs[i] << " CPU=" << aggInputs[0][i] << "\n";
+                                    }
+                                    mismatches++;
+                                }
+                            }
+                            std::cerr << "[Exec] GroupBy VERIFY: agg mismatches = " << mismatches << " / " << std::min(gpuRowCount, aggInputs[0].size()) << "\n";
+                        }
+                        // Compute CPU GROUP BY using double precision for accuracy
+                        std::unordered_map<uint64_t, double> cpuGroupSums;
+                        size_t numK = keyVecs.size();
+                        for (size_t i = 0; i < gpuRowCount; ++i) {
+                            uint64_t compositeKey = 0;
+                            for (size_t k = 0; k < numK; ++k) {
+                                compositeKey ^= (uint64_t(keyVecs[k][i]) + 1) * (2654435761ULL + k * 31); // simple hash combine
+                            }
+                            double val = (aggFuncs.size() > 0 && !aggInputs[0].empty() && i < aggInputs[0].size())
+                                ? static_cast<double>(aggInputs[0][i]) : 0.0;
+                            cpuGroupSums[compositeKey] += val;
+                        }
+                        
+                        // Also compute CPU GROUP BY keyed on actual first key value (for finding max supplier)
+                        std::unordered_map<uint32_t, double> cpuByKey0;
+                        for (size_t i = 0; i < gpuRowCount; ++i) {
+                            uint32_t k0 = keyVecs[0][i];
+                            double val = (aggFuncs.size() > 0 && !aggInputs[0].empty() && i < aggInputs[0].size())
+                                ? static_cast<double>(aggInputs[0][i]) : 0.0;
+                            cpuByKey0[k0] += val;
+                        }
+                        
+                        // Find top CPU group
+                        uint32_t cpuMaxKey = 0; double cpuMaxVal = -1e30;
+                        for (auto& [k, v] : cpuByKey0) {
+                            if (v > cpuMaxVal) { cpuMaxVal = v; cpuMaxKey = k; }
+                        }
+                        
+                        // Compute GPU grand total and find top GPU group
+                        double gpuGrandTotal = 0.0;
+                        uint32_t gpuMaxKey = 0; float gpuMaxVal = -1e30f;
                         for (uint32_t s = 0; s < cap; ++s) {
                             uint32_t k0 = keyWords[s * 8 + 0];
                             if (k0 == 0) continue;
-                            std::cerr << "[Exec] GroupBy: HT slot " << s << ": keys=[";
-                            for (size_t ki = 0; ki < keyVecs.size(); ++ki) {
-                                if (ki) std::cerr << ",";
-                                std::cerr << keyWords[s * 8 + ki];
+                            uint32_t raw = aggWords[s * 16 + 0];
+                            float fval = *reinterpret_cast<const float*>(&raw);
+                            gpuGrandTotal += static_cast<double>(fval);
+                            if (fval > gpuMaxVal) {
+                                gpuMaxVal = fval;
+                                gpuMaxKey = k0 - 1; // de-bias
                             }
-                            std::cerr << "] aggs=[";
-                            for (size_t ai = 0; ai < aggFuncs.size(); ++ai) {
-                                if (ai) std::cerr << ",";
-                                uint32_t raw = aggWords[s * 16 + ai];
-                                if (aggFuncs[ai] == AggFunc::Count || aggFuncs[ai] == AggFunc::CountStar)
-                                    std::cerr << raw;
-                                else
-                                    std::cerr << *reinterpret_cast<const float*>(&raw);
-                            }
-                            std::cerr << "]\n";
                         }
+                        
+                        // Compute CPU grand total
+                        double cpuGrandTotal = 0.0;
+                        if (!aggInputs.empty() && !aggInputs[0].empty()) {
+                            for (size_t i = 0; i < std::min(aggInputs[0].size(), gpuRowCount); ++i) {
+                                cpuGrandTotal += static_cast<double>(aggInputs[0][i]);
+                            }
+                        }
+                        
+                        std::cerr << "[Exec] GroupBy VERIFY: CPU grand total = " << std::fixed << std::setprecision(2) << cpuGrandTotal << "\n";
+                        std::cerr << "[Exec] GroupBy VERIFY: GPU grand total = " << std::fixed << std::setprecision(2) << gpuGrandTotal << "\n";
+                        std::cerr << "[Exec] GroupBy VERIFY: difference = " << std::fixed << std::setprecision(2) << (gpuGrandTotal - cpuGrandTotal) << "\n";
+                        std::cerr << "[Exec] GroupBy VERIFY: CPU max key=" << cpuMaxKey << " val=" << std::fixed << std::setprecision(2) << cpuMaxVal << "\n";
+                        std::cerr << "[Exec] GroupBy VERIFY: GPU max key=" << gpuMaxKey << " val=" << std::fixed << std::setprecision(2) << static_cast<double>(gpuMaxVal) << "\n";
+                        
+                        // Check GPU group for the CPU max key
+                        for (uint32_t s = 0; s < cap; ++s) {
+                            uint32_t k0 = keyWords[s * 8 + 0];
+                            if (k0 == cpuMaxKey + 1) { // +1 for bias
+                                uint32_t raw = aggWords[s * 16 + 0];
+                                float fval = *reinterpret_cast<const float*>(&raw);
+                                std::cerr << "[Exec] GroupBy VERIFY: GPU value for CPU max key " << cpuMaxKey << " = " << std::fixed << std::setprecision(2) << static_cast<double>(fval) << "\n";
+                                break;
+                            }
+                        }
+                        
+                        // Count how many GPU groups have HIGHER revenue than the correct max
+                        size_t higherCount = 0;
+                        for (uint32_t s = 0; s < cap; ++s) {
+                            uint32_t k0 = keyWords[s * 8 + 0];
+                            if (k0 == 0) continue;
+                            uint32_t raw = aggWords[s * 16 + 0];
+                            float fval = *reinterpret_cast<const float*>(&raw);
+                            if (static_cast<double>(fval) > cpuMaxVal * 1.001) { // >0.1% higher than CPU max
+                                higherCount++;
+                                std::cerr << "[Exec] GroupBy VERIFY: GPU group key=" << (k0-1) << " val=" << std::fixed << std::setprecision(2) << static_cast<double>(fval) << " EXCEEDS CPU max!\n";
+                            }
+                        }
+                        std::cerr << "[Exec] GroupBy VERIFY: " << higherCount << " GPU groups exceed CPU max revenue\n";
                     }
                     
                     // Clear and resize for fresh extraction
-                    out.u32_cols.clear();
-                    out.u32_cols.resize(keyVecs.size());
-                    out.u32_names = keyNames;
-                    out.f32_cols.clear();
-                    out.f32_cols.resize(aggFuncs.size());
-                    out.f32_names = aggNames;
-                    out.string_cols.clear();
-                    out.string_names.clear();
+                    out.u32Cols.clear();
+                    out.u32Cols.resize(keyVecs.size());
+                    out.u32ColsGPU.clear();
+                    out.u32ColsGPU.resize(keyVecs.size(), nullptr);
+                    out.u32Names = keyNames;
+                    out.f32Cols.clear();
+                    out.f32Cols.resize(aggFuncs.size());
+                    out.f32ColsGPU.clear();
+                    out.f32ColsGPU.resize(aggFuncs.size(), nullptr);
+                    out.f32Names = aggNames;
+                    out.stringCols.clear();
+                    out.stringNames.clear();
                     out.rowCount = 0;
                     
                     // GPU Stream Compaction: Mark → Prefix Sum → Compact
@@ -1117,36 +1309,109 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     if (extractResult && extractResult->rowCount > 0) {
                         out.rowCount = extractResult->rowCount;
 
-                        // Move extracted keys directly into output columns
+                        // Move extracted keys directly into output columns + GPU buffers
                         for (size_t k = 0; k < keyVecs.size(); ++k) {
-                            out.u32_cols[k] = std::move(extractResult->keyCols[k]);
+                            out.u32Cols[k] = std::move(extractResult->keyCols[k]);
+                            out.u32ColsGPU[k] = extractResult->keyColsGPU[k];  // transfer ownership
+                            extractResult->keyColsGPU[k] = nullptr;
                         }
 
                         // Process raw aggregate words with correct type conversion
                         for (size_t a = 0; a < aggFuncs.size(); ++a) {
-                            out.f32_cols[a].resize(extractResult->rowCount);
+                            out.f32Cols[a].resize(extractResult->rowCount);
                         }
                         size_t avgCount = 0;
                         for (size_t a = 0; a < aggFuncs.size(); ++a) {
-                            const auto& rawWords = extractResult->aggWords[a];
-                            for (uint32_t r = 0; r < extractResult->rowCount; ++r) {
-                                float val = 0.0f;
-                                uint32_t w = rawWords[r];
-                                if (aggFuncs[a] == AggFunc::CountStar) {
-                                    val = static_cast<float>(w);
-                                } else if (aggFuncs[a] == AggFunc::Count) {
-                                    val = *reinterpret_cast<const float*>(&w);
-                                } else if (aggFuncs[a] == AggFunc::Avg) {
-                                    float sum = *reinterpret_cast<const float*>(&w);
-                                    uint32_t cw = extractResult->aggWords[aggFuncs.size() + avgCount][r];
-                                    float count = static_cast<float>(cw);
-                                    val = count > 0 ? sum / count : 0.0f;
+                            uint32_t rc = extractResult->rowCount;
+                            MTL::Buffer* aggGPU = (a < extractResult->aggColsGPU.size()) ? extractResult->aggColsGPU[a] : nullptr;
+                            
+                            if (aggFuncs[a] == AggFunc::CountStar) {
+                                // Integer count → f32 cast on GPU
+                                if (aggGPU) {
+                                    MTL::Buffer* f32Buf = GpuOps::castU32ToF32(aggGPU, rc);
+                                    if (f32Buf) {
+                                        std::memcpy(out.f32Cols[a].data(), f32Buf->contents(), rc * sizeof(float));
+                                        out.f32ColsGPU[a] = f32Buf; // keep GPU buffer
+                                        extractResult->aggColsGPU[a] = nullptr; // ownership transferred via f32Buf using raw data
+                                    }
                                 } else {
-                                    val = *reinterpret_cast<const float*>(&w);
+                                    const auto& rawWords = extractResult->aggWords[a];
+                                    for (uint32_t r = 0; r < rc; ++r)
+                                        out.f32Cols[a][r] = static_cast<float>(rawWords[r]);
                                 }
-                                out.f32_cols[a][r] = val;
+                            } else if (aggFuncs[a] == AggFunc::Avg) {
+                                // AVG = sum / count; sum is f32 bits in u32, count is u32
+                                size_t countIdx = aggFuncs.size() + avgCount;
+                                MTL::Buffer* countGPU = (countIdx < extractResult->aggColsGPU.size()) ? extractResult->aggColsGPU[countIdx] : nullptr;
+                                if (aggGPU && countGPU) {
+                                    // GPU path: cast count u32→f32, then divide sum/count
+                                    MTL::Buffer* countF32 = GpuOps::castU32ToF32(countGPU, rc);
+                                    if (countF32) {
+                                        // aggGPU contains f32 bits (sum) stored as u32 — same bits, use as f32 directly
+                                        MTL::Buffer* avgBuf = GpuOps::arithDivF32ColCol(aggGPU, countF32, rc);
+                                        countF32->release();
+                                        if (avgBuf) {
+                                            std::memcpy(out.f32Cols[a].data(), avgBuf->contents(), rc * sizeof(float));
+                                            out.f32ColsGPU[a] = avgBuf;
+                                        }
+                                    }
+                                } else {
+                                    // CPU fallback
+                                    const auto& rawWords = extractResult->aggWords[a];
+                                    for (uint32_t r = 0; r < rc; ++r) {
+                                        uint32_t w = rawWords[r];
+                                        float sum = *reinterpret_cast<const float*>(&w);
+                                        uint32_t cw = extractResult->aggWords[countIdx][r];
+                                        float count = static_cast<float>(cw);
+                                        out.f32Cols[a][r] = count > 0 ? sum / count : 0.0f;
+                                    }
+                                }
+                                avgCount++;
+                            } else if (aggFuncs[a] == AggFunc::Count) {
+                                // Count(column): f32 non-null indicator sum — bits already f32
+                                if (aggGPU) {
+                                    // Raw bits are f32 — use GPU buffer directly
+                                    std::memcpy(out.f32Cols[a].data(), aggGPU->contents(), rc * sizeof(float));
+                                    out.f32ColsGPU[a] = aggGPU;
+                                    aggGPU->retain();
+                                    extractResult->aggColsGPU[a] = nullptr;
+                                } else {
+                                    const auto& rawWords = extractResult->aggWords[a];
+                                    for (uint32_t r = 0; r < rc; ++r) {
+                                        uint32_t w = rawWords[r];
+                                        out.f32Cols[a][r] = *reinterpret_cast<const float*>(&w);
+                                    }
+                                }
+                            } else {
+                                // SUM/MIN/MAX: raw bits are f32 — use GPU buffer directly
+                                if (aggGPU) {
+                                    std::memcpy(out.f32Cols[a].data(), aggGPU->contents(), rc * sizeof(float));
+                                    out.f32ColsGPU[a] = aggGPU;
+                                    aggGPU->retain();
+                                    extractResult->aggColsGPU[a] = nullptr;
+                                } else {
+                                    const auto& rawWords = extractResult->aggWords[a];
+                                    for (uint32_t r = 0; r < rc; ++r) {
+                                        uint32_t w = rawWords[r];
+                                        out.f32Cols[a][r] = *reinterpret_cast<const float*>(&w);
+                                    }
+                                }
                             }
-                            if (aggFuncs[a] == AggFunc::Avg) avgCount++;
+                        }
+                        // Create GPU buffers for aggregates that don't already have one
+                        for (size_t a = 0; a < aggFuncs.size(); ++a) {
+                            if (!out.f32ColsGPU[a] && !out.f32Cols[a].empty()) {
+                                out.f32ColsGPU[a] = GpuOps::createBuffer(
+                                    out.f32Cols[a].data(),
+                                    out.f32Cols[a].size() * sizeof(float));
+                            }
+                        }
+                        // Release unused raw agg GPU buffers from extract
+                        for (size_t a = 0; a < extractResult->aggColsGPU.size(); ++a) {
+                            if (extractResult->aggColsGPU[a]) {
+                                extractResult->aggColsGPU[a]->release();
+                                extractResult->aggColsGPU[a] = nullptr;
+                            }
                         }
                     }
                     
@@ -1162,7 +1427,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             if (debug) std::cerr << "[Exec] GroupBy: Post-proc string col " << k 
                                                  << " via hash lookup, hashMap.size=" << hashMap.size() << "\n";
                             
-                            for (uint32_t hashVal : out.u32_cols[k]) {
+                            for (uint32_t hashVal : out.u32Cols[k]) {
                                 auto it = hashMap.find(hashVal);
                                 if (it != hashMap.end()) {
                                     strCol.push_back(it->second);
@@ -1171,8 +1436,8 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                 }
                             }
                             if (debug) std::cerr << "[Exec] GroupBy: Built strCol with " << strCol.size() << " strings via hash lookup\n";
-                            out.string_cols.push_back(std::move(strCol));
-                            out.string_names.push_back(out.u32_names[k]);
+                            out.stringCols.push_back(std::move(strCol));
+                            out.stringNames.push_back(out.u32Names[k]);
                         } else if (!outputStringMaps[k].empty()) {
                             // Convert IDs back to strings (1-based index)
                             std::vector<std::string> strCol;
@@ -1180,10 +1445,10 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             const auto& map = outputStringMaps[k];
                             
                             if (debug) std::cerr << "[Exec] GroupBy: Post-proc string col " << k 
-                                                 << " u32_cols[k].size=" << out.u32_cols[k].size() 
+                                                 << " u32_cols[k].size=" << out.u32Cols[k].size() 
                                                  << " map.size=" << map.size() << "\n";
                             
-                            for (uint32_t val : out.u32_cols[k]) {
+                            for (uint32_t val : out.u32Cols[k]) {
                                 if (val > 0 && (val - 1) < map.size()) {
                                     strCol.push_back(map[val - 1]);
                                 } else {
@@ -1191,8 +1456,8 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                 }
                             }
                             if (debug) std::cerr << "[Exec] GroupBy: Built strCol with " << strCol.size() << " strings\n";
-                            out.string_cols.push_back(std::move(strCol));
-                            out.string_names.push_back(out.u32_names[k]);
+                            out.stringCols.push_back(std::move(strCol));
+                            out.stringNames.push_back(out.u32Names[k]);
                         }
                     }
 
@@ -1200,15 +1465,19 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     for (size_t k = 0; k < keyVecs.size(); ++k) {
                         if (k < keyFromF32.size() && keyFromF32[k]) {
                             // Convert u32 bits back to float and move to f32_cols
-                            std::vector<float> restored(out.u32_cols[k].size());
+                            std::vector<float> restored(out.u32Cols[k].size());
                             for (size_t j = 0; j < restored.size(); ++j) {
-                                std::memcpy(&restored[j], &out.u32_cols[k][j], sizeof(float));
+                                std::memcpy(&restored[j], &out.u32Cols[k][j], sizeof(float));
                             }
-                            if (debug) std::cerr << "[Exec] GroupBy: restoring f32 key " << out.u32_names[k] 
+                            if (debug) std::cerr << "[Exec] GroupBy: restoring f32 key " << out.u32Names[k] 
                                                  << " (" << restored.size() << " values)\n";
+                            // Create GPU buffer for the restored f32 key (same bits as u32)
+                            MTL::Buffer* restoredGPU = out.u32ColsGPU[k];  // reuse — same bit pattern
+                            if (restoredGPU) restoredGPU->retain();  // shared ownership
                             // Add to f32 output (prepend before aggregates)
-                            out.f32_names.insert(out.f32_names.begin(), out.u32_names[k]);
-                            out.f32_cols.insert(out.f32_cols.begin(), std::move(restored));
+                            out.f32Names.insert(out.f32Names.begin(), out.u32Names[k]);
+                            out.f32Cols.insert(out.f32Cols.begin(), std::move(restored));
+                            out.f32ColsGPU.insert(out.f32ColsGPU.begin(), restoredGPU);
                             // Mark u32 slot as converted (will be handled in order building)
                         }
                     }
@@ -1221,30 +1490,30 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     for (size_t k = 0; k < keyVecs.size(); ++k) {
                         if (k < keyFromF32.size() && keyFromF32[k]) f32KeyCount++;
                     }
-                    for (size_t i = 0; i < out.u32_names.size(); ++i) {
+                    for (size_t i = 0; i < out.u32Names.size(); ++i) {
                         bool hasStrings = (!outputStringMaps[i].empty()) || 
                                           (i < hashToStringMaps.size() && !hashToStringMaps[i].empty());
                         bool wasF32 = (i < keyFromF32.size() && keyFromF32[i]);
                         if (hasStrings) {
-                            out.order.push_back({TableResult::ColRef::Kind::String, strIdx++, out.u32_names[i]});
+                            out.order.push_back({TableResult::ColRef::Kind::String, strIdx++, out.u32Names[i]});
                         } else if (wasF32) {
                             // Find the f32 index for this key (prepended before aggregates)
                             size_t f32Idx = 0;
-                            for (size_t fi = 0; fi < out.f32_names.size(); ++fi) {
-                                if (out.f32_names[fi] == out.u32_names[i]) { f32Idx = fi; break; }
+                            for (size_t fi = 0; fi < out.f32Names.size(); ++fi) {
+                                if (out.f32Names[fi] == out.u32Names[i]) { f32Idx = fi; break; }
                             }
-                            out.order.push_back({TableResult::ColRef::Kind::F32, f32Idx, out.u32_names[i]});
+                            out.order.push_back({TableResult::ColRef::Kind::F32, f32Idx, out.u32Names[i]});
                         } else {
-                            out.order.push_back({TableResult::ColRef::Kind::U32, i, out.u32_names[i]});
+                            out.order.push_back({TableResult::ColRef::Kind::U32, i, out.u32Names[i]});
                         }
                     }
-                    for (size_t i = f32KeyCount; i < out.f32_names.size(); ++i) {
-                        out.order.push_back({TableResult::ColRef::Kind::F32, i, out.f32_names[i]});
+                    for (size_t i = f32KeyCount; i < out.f32Names.size(); ++i) {
+                        out.order.push_back({TableResult::ColRef::Kind::F32, i, out.f32Names[i]});
                     }
                     
                     // Mark single-char columns
                     const auto& schema = SchemaRegistry::instance();
-                    for (const auto& name : out.u32_names) {
+                    for (const auto& name : out.u32Names) {
                         std::string table = tableForColumn(name);
                         if (schema.isSingleCharColumn(table, name)) {
                             out.singleCharCols.insert(name);
@@ -1254,19 +1523,21 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     // Release GPU resources
                     GpuOps::release(*htOpt);
                     for (auto* buf : toRelease) buf->release();
+                    for (auto* buf : keyBufsGPU) { if (buf) buf->release(); }
+                    for (size_t i = 0; i < aggBufsGPU.size(); ++i) { if (aggBufsGPU[i]) aggBufsGPU[i]->release(); }
                     
                     if (debug) {
                         std::cerr << "[Exec] GroupBy: GPU completed with " << out.rowCount << " groups\n";
-                        std::cerr << "[Exec] GroupBy: GPU output u32_cols.size=" << out.u32_cols.size();
-                        for (size_t i = 0; i < out.u32_cols.size(); ++i) {
-                            std::cerr << " " << out.u32_names[i] << "(" << out.u32_cols[i].size() << ")";
+                        std::cerr << "[Exec] GroupBy: GPU output u32_cols.size=" << out.u32Cols.size();
+                        for (size_t i = 0; i < out.u32Cols.size(); ++i) {
+                            std::cerr << " " << out.u32Names[i] << "(" << out.u32Cols[i].size() << ")";
                         }
-                        std::cerr << "\n[Exec] GroupBy: GPU output f32_cols.size=" << out.f32_cols.size();
-                        for (size_t i = 0; i < out.f32_cols.size(); ++i) {
-                            std::cerr << " " << out.f32_names[i] << "(" << out.f32_cols[i].size() << ")";
-                            if (!out.f32_cols[i].empty()) {
-                                std::cerr << "[" << out.f32_cols[i][0];
-                                if (out.f32_cols[i].size() > 1) std::cerr << "," << out.f32_cols[i][1];
+                        std::cerr << "\n[Exec] GroupBy: GPU output f32_cols.size=" << out.f32Cols.size();
+                        for (size_t i = 0; i < out.f32Cols.size(); ++i) {
+                            std::cerr << " " << out.f32Names[i] << "(" << out.f32Cols[i].size() << ")";
+                            if (!out.f32Cols[i].empty()) {
+                                std::cerr << "[" << out.f32Cols[i][0];
+                                if (out.f32Cols[i].size() > 1) std::cerr << "," << out.f32Cols[i][1];
                                 std::cerr << "]";
                             }
                         }
@@ -1279,12 +1550,16 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             
             // GPU failed, release buffers and fall through to CPU
             for (auto* buf : toRelease) buf->release();
+            for (auto* buf : keyBufsGPU) { if (buf) buf->release(); }
+            for (size_t i = 0; i < aggBufsGPU.size(); ++i) { if (aggBufsGPU[i]) aggBufsGPU[i]->release(); }
             if (debug) {
                 std::cerr << "[Exec] GroupBy: GPU path failed, falling back to CPU\n";
             }
         }
     }
     
+    for (auto* buf : keyBufsGPU) { if (buf) buf->release(); }
+    for (size_t i = 0; i < aggBufsGPU.size(); ++i) { if (aggBufsGPU[i]) aggBufsGPU[i]->release(); }
     throw std::runtime_error("GPU GroupBy failed: conditions not met for any kernel (and CPU fallback is disabled).");
 }
 

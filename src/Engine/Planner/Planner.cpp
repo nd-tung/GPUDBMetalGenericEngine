@@ -1535,124 +1535,13 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                         ctx.delimStack.pop_back();
                     }
                     
-                    std::string rhsSaveID = "tmpl_join_" + std::to_string(ctx.plan.nodes.size());
-                    ctx.plan.nodes.push_back(IRNode::save(rhsSaveID));
-                    capturedRightTable = rhsSaveID;
-                    capturedRHS = true;
-                    
-                    IRNode restoreScan = IRNode::scan(lhsSaveID);
-                     for (const auto& proj : lhsProjs) {
-                        std::string col = stripTableQualifier(proj);
-                        restoreScan.asScan().columns.push_back(col);
-                    }
-                    
-                    std::string delimCondRaw;
-                    if (node.contains("extra_info")) {
-                         auto& ei = node["extra_info"];
-                         if (ei.contains("Condition") && ei["Condition"].is_string()) {
-                             delimCondRaw = ei["Condition"].get_string();
-                         }
-                         if (ei.contains("Conditions")) {
-                             const auto& c = ei["Conditions"];
-                             if (c.is_string()) {
-                                 delimCondRaw = c.get_string();
-                             } else if (c.is_array()) {
-                                 for (const auto& item : c.get_array()) {
-                                     if (item.is_string()) {
-                                         if (!delimCondRaw.empty()) delimCondRaw += " AND ";
-                                         delimCondRaw += item.get_string();
-                                     }
-                                 }
-                             }
-                         }
-                    }
-                    
-                    debug_log("DELIM_JOIN condition: " + delimCondRaw);
-
-                    // Rewrite IS NOT DISTINCT FROM to = (Executor currently only supports = for join keys)
-                    size_t indfPos = 0;
-                    while((indfPos = delimCondRaw.find("IS NOT DISTINCT FROM", indfPos)) != std::string::npos) {
-                        delimCondRaw.replace(indfPos, 20, "=");
-                        indfPos += 1;
-                    }
-
-                    // Restore LHS and join with captured RHS
-                    ctx.plan.nodes.push_back(restoreScan);
-
-                    // Refine Join Condition to match available aliased columns in LHS
-                    std::string lhsJoinKey = ""; 
-                    std::string rhsJoinKey = "";
-                    bool isEquality = false;
-                    std::string cond = delimCondRaw;
-                    
-                    if (!cond.empty()) {
-                        size_t eqPos = cond.find('=');
-                        if (eqPos != std::string::npos) {
-                            lhsJoinKey = trim_str(cond.substr(0, eqPos));
-                            rhsJoinKey = trim_str(cond.substr(eqPos + 1));
-                            isEquality = true;
-                        }
-                    }
-
-                    if (isEquality) {
-                         // Determine which key is from LHS by checking lhsProjs
-                         std::string realLhsKey = "";
-                         std::string realRhsKey = "";
-                         bool foundLhs = false;
-
-                         auto findInLhs = [&](const std::string& key) -> std::string {
-                             std::string cleanKey = stripTableQualifier(key);
-                             
-                             // 1. Exact Match
-                             for(const auto& c : lhsProjs) {
-                                 if (c == key || stripTableQualifier(c) == cleanKey) return c;
-                             }
-                             
-                             // 2. Suffix Match (key_rhs_N or key_N)
-                             for(const auto& c : lhsProjs) {
-                                 // Check for common aliasing patterns
-                                 std::string cBase = stripTableQualifier(c);
-                                 if (cBase.find(cleanKey + "_") == 0) return c; // Prefix match
-                             }
-                             
-                             return "";
-                         };
-
-                         std::string matchedCol = findInLhs(lhsJoinKey);
-                         if (!matchedCol.empty()) {
-                             realLhsKey = matchedCol;
-                             realRhsKey = rhsJoinKey;
-                             foundLhs = true;
-                         } else {
-                             matchedCol = findInLhs(rhsJoinKey);
-                             if (!matchedCol.empty()) {
-                                 realLhsKey = matchedCol;
-                                 realRhsKey = lhsJoinKey;
-                                 foundLhs = true;
-                             }
-                         }
-
-                         if (foundLhs) {
-                             delimCondRaw = realLhsKey + " = " + realRhsKey;
-                             debug_log("Refined DELIM_JOIN condition: " + cond + " -> " + delimCondRaw);
-                         } else {
-                             debug_log("Warning: DELIM_JOIN condition keys not found in LHS projections. Keeping original: " + cond);
-                             std::string av; 
-                             for(const auto& c : lhsProjs) av += c + " ";
-                             debug_log("Available LHS: " + av);
-                         }
-                    }
-                    
-                    if (delimCondRaw.empty()) delimCondRaw = "1=1";
-                    
-                    // Determine correct join type for DELIM_JOIN patterns
-                    // Read the actual join type from the plan's extra_info if available
+                    // Determine correct join type for DELIM_JOIN patterns FIRST
+                    // to decide whether we need the outer correlation join at all.
                     JoinType delimJoinType = JoinType::Semi; // Default to Semi for EXISTS
                     if (node.contains("extra_info") && node["extra_info"].is_object()) {
                         auto& ei = node["extra_info"];
                         if (ei.contains("Join Type") && ei["Join Type"].is_string()) {
                             std::string jtStr = ei["Join Type"].get_string();
-                            // Convert to lowercase for matching
                             std::string jtLower = jtStr;
                             std::transform(jtLower.begin(), jtLower.end(), jtLower.begin(), ::tolower);
                             if (jtLower.find("anti") != std::string::npos) {
@@ -1663,6 +1552,8 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                                 delimJoinType = JoinType::Semi; // Mark join acts like Semi for EXISTS
                             } else if (jtLower.find("left") != std::string::npos) {
                                 delimJoinType = JoinType::Left;
+                            } else if (jtLower.find("right") != std::string::npos) {
+                                delimJoinType = JoinType::Right;
                             } else if (jtLower.find("inner") != std::string::npos || 
                                        jtLower == "single") {
                                 delimJoinType = JoinType::Inner;
@@ -1678,16 +1569,138 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
                         }
                     }
                     debug_log("DELIM_JOIN emitting join type: " + std::to_string(static_cast<int>(delimJoinType)) + 
-                              " (0=Inner, 1=Left, 4=Semi, 5=Anti)");
+                              " (0=Inner, 1=Left, 2=Right, 4=Semi, 5=Anti)");
                     
-                    // The DELIM_JOIN's own join is a CORRELATION join that filters
-                    // the LHS based on the consumer's result. For Anti/Semi types,
-                    // the consumer (HASH_JOIN) already performed the check, so use Semi
-                    // to just filter. For Inner/Left/Single types, use Inner to keep
-                    // all matched rows (not just unique keys).
-                    JoinType correlationJoinType = (delimJoinType == JoinType::Anti || delimJoinType == JoinType::Semi)
-                                                  ? JoinType::Semi : JoinType::Inner;
-                    ctx.plan.nodes.push_back(IRNode::join(correlationJoinType, Planner::parseExpression(delimCondRaw), delimCondRaw, rhsSaveID, nullptr));
+                    // For LEFT/INNER/RIGHT DELIM_JOINs (decorrelated scalar subqueries),
+                    // the consumer's internal processing (via COLUMN_DATA_SCAN or DUMMY_SCAN
+                    // resolving to the saved provider data) already produces provider rows
+                    // augmented with per-group aggregate values. Emitting an outer correlation
+                    // INNER JOIN would re-join provider (N rows) with consumer (N rows) on the
+                    // same key, creating N×D duplicates per key. Instead, skip the outer join
+                    // and use the consumer's output directly.
+                    //
+                    // This ONLY applies to explicit DELIM_JOIN nodes (left_delim_join, right_delim_join)
+                    // with non-Semi/Anti types. Internal HASH_JOINs that happen to contain
+                    // COLUMN_DATA_SCAN/DELIM_SCAN (detected via checkDelim) still need their
+                    // correlation join to properly attach per-group values to provider rows.
+                    //
+                    // For SEMI/ANTI DELIM_JOINs (EXISTS/NOT EXISTS subqueries), we always need
+                    // the outer correlation join to filter provider rows based on consumer matches.
+                    bool isExplicitDelimJoin = (nameLower.find("delim_join") != std::string::npos);
+                    bool needsCorrelationJoin = (delimJoinType == JoinType::Semi || delimJoinType == JoinType::Anti) || !isExplicitDelimJoin;
+                    
+                    if (needsCorrelationJoin) {
+                        std::string rhsSaveID = "tmpl_join_" + std::to_string(ctx.plan.nodes.size());
+                        ctx.plan.nodes.push_back(IRNode::save(rhsSaveID));
+                        capturedRightTable = rhsSaveID;
+                        capturedRHS = true;
+                        
+                        IRNode restoreScan = IRNode::scan(lhsSaveID);
+                        for (const auto& proj : lhsProjs) {
+                            std::string col = stripTableQualifier(proj);
+                            restoreScan.asScan().columns.push_back(col);
+                        }
+                        
+                        std::string delimCondRaw;
+                        if (node.contains("extra_info")) {
+                             auto& ei = node["extra_info"];
+                             if (ei.contains("Condition") && ei["Condition"].is_string()) {
+                                 delimCondRaw = ei["Condition"].get_string();
+                             }
+                             if (ei.contains("Conditions")) {
+                                 const auto& c = ei["Conditions"];
+                                 if (c.is_string()) {
+                                     delimCondRaw = c.get_string();
+                                 } else if (c.is_array()) {
+                                     for (const auto& item : c.get_array()) {
+                                         if (item.is_string()) {
+                                             if (!delimCondRaw.empty()) delimCondRaw += " AND ";
+                                             delimCondRaw += item.get_string();
+                                         }
+                                     }
+                                 }
+                             }
+                        }
+                        
+                        debug_log("DELIM_JOIN condition: " + delimCondRaw);
+
+                        // Rewrite IS NOT DISTINCT FROM to =
+                        size_t indfPos = 0;
+                        while((indfPos = delimCondRaw.find("IS NOT DISTINCT FROM", indfPos)) != std::string::npos) {
+                            delimCondRaw.replace(indfPos, 20, "=");
+                            indfPos += 1;
+                        }
+
+                        // Restore LHS and join with captured RHS
+                        ctx.plan.nodes.push_back(restoreScan);
+
+                        // Refine Join Condition to match available aliased columns in LHS
+                        std::string lhsJoinKey = ""; 
+                        std::string rhsJoinKey = "";
+                        bool isEquality = false;
+                        std::string cond = delimCondRaw;
+                        
+                        if (!cond.empty()) {
+                            size_t eqPos = cond.find('=');
+                            if (eqPos != std::string::npos) {
+                                lhsJoinKey = trim_str(cond.substr(0, eqPos));
+                                rhsJoinKey = trim_str(cond.substr(eqPos + 1));
+                                isEquality = true;
+                            }
+                        }
+
+                        if (isEquality) {
+                             std::string realLhsKey = "";
+                             std::string realRhsKey = "";
+                             bool foundLhs = false;
+
+                             auto findInLhs = [&](const std::string& key) -> std::string {
+                                 std::string cleanKey = stripTableQualifier(key);
+                                 for(const auto& c : lhsProjs) {
+                                     if (c == key || stripTableQualifier(c) == cleanKey) return c;
+                                 }
+                                 for(const auto& c : lhsProjs) {
+                                     std::string cBase = stripTableQualifier(c);
+                                     if (cBase.find(cleanKey + "_") == 0) return c;
+                                 }
+                                 return "";
+                             };
+
+                             std::string matchedCol = findInLhs(lhsJoinKey);
+                             if (!matchedCol.empty()) {
+                                 realLhsKey = matchedCol;
+                                 realRhsKey = rhsJoinKey;
+                                 foundLhs = true;
+                             } else {
+                                 matchedCol = findInLhs(rhsJoinKey);
+                                 if (!matchedCol.empty()) {
+                                     realLhsKey = matchedCol;
+                                     realRhsKey = lhsJoinKey;
+                                     foundLhs = true;
+                                 }
+                             }
+
+                             if (foundLhs) {
+                                 delimCondRaw = realLhsKey + " = " + realRhsKey;
+                                 debug_log("Refined DELIM_JOIN condition: " + cond + " -> " + delimCondRaw);
+                             } else {
+                                 debug_log("Warning: DELIM_JOIN condition keys not found in LHS projections. Keeping original: " + cond);
+                             }
+                        }
+                        
+                        if (delimCondRaw.empty()) delimCondRaw = "1=1";
+                        
+                        JoinType correlationJoinType = (delimJoinType == JoinType::Anti || delimJoinType == JoinType::Semi)
+                                                          ? JoinType::Semi : JoinType::Inner;
+                        ctx.plan.nodes.push_back(IRNode::join(correlationJoinType, Planner::parseExpression(delimCondRaw), delimCondRaw, rhsSaveID, nullptr));
+                    } else {
+                        // LEFT/INNER/RIGHT DELIM_JOIN: consumer output already contains
+                        // provider columns + per-group aggregate values (via COLUMN_DATA_SCAN
+                        // or DUMMY_SCAN internal join). No outer correlation join needed.
+                        debug_log("DELIM_JOIN: Skipping outer correlation join (type=" + 
+                                  std::to_string(static_cast<int>(delimJoinType)) + 
+                                  "). Consumer output used directly.");
+                    }
                     
                     handled = true;
                 } else {
@@ -2841,6 +2854,15 @@ static void traverseNode(const json& node, TraverseContext& ctx) {
         IRNode limNode = IRNode::limit(count);
         limNode.duckdbName = name;
         ctx.plan.nodes.push_back(std::move(limNode));
+    }
+    // ========== DISTINCT ==========
+    else if (nameLower.find("distinct") != std::string::npos &&
+             nameLower.find("scan") == std::string::npos &&
+             nameLower.find("join") == std::string::npos) {
+        // DuckDB may output HASH_DISTINCT or STREAMING_DISTINCT nodes
+        IRNode distNode = IRNode::distinct();
+        distNode.duckdbName = name;
+        ctx.plan.nodes.push_back(std::move(distNode));
     }
     // ========== JOIN ==========
     else if (name.find("JOIN") != std::string::npos) {

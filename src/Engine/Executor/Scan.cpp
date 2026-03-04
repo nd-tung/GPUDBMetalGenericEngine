@@ -1,6 +1,6 @@
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 #include <iostream>
 #include <map>
 #include <set>
@@ -16,7 +16,7 @@ void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     auto it = ctx.stringCols.find(colName);
     if (it == ctx.stringCols.end() || it->second.empty()) return;
 
-    auto& store = ColumnStoreGPU::instance();
+    auto& store = GpuColumnStore::instance();
     if (!store.device()) return;
 
     const auto& data = it->second;
@@ -86,7 +86,7 @@ void buildDictCol(EvalContext& ctx, const std::string& colName) {
     auto it = ctx.stringCols.find(colName);
     if (it == ctx.stringCols.end() || it->second.empty()) return;
 
-    auto& store = ColumnStoreGPU::instance();
+    auto& store = GpuColumnStore::instance();
     if (!store.device()) return;
 
     const auto& data = it->second;
@@ -264,11 +264,7 @@ void IRGpuLoader::loadTables(
         if (multiInstanceTables.count(tableName)) {
             for (const auto& [nodeIdx, inst] : scanInstanceMap) {
                 if (inst.baseTable == tableName) {
-                    RelationGPU rel = GpuOps::scanTable(datasetPath, tableName, colVec);
-                    if (!rel.rowCount) {
-                        result.error = "Failed to load table: " + tableName;
-                        return;
-                    }
+                    GpuRelation rel = GpuOps::scanTable(datasetPath, tableName, colVec);
 
                     EvalContext ctx;
                     ctx.currentTable = inst.instanceKey;
@@ -310,6 +306,8 @@ void IRGpuLoader::loadTables(
                                 if (tblSchema->getColumnType(colName) == ColumnType::StringHash) {
                                     auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, colName);
                                     if (!rawStrings.empty()) {
+                                        // Determine rowCount from string data when no numeric cols loaded
+                                        if (!ctx.rowCount) ctx.rowCount = rawStrings.size();
                                         if (inst.instanceNum == 1) {
                                             ctx.stringCols[colName] = rawStrings;
                                             flattenStringCol(ctx, colName);
@@ -327,20 +325,21 @@ void IRGpuLoader::loadTables(
                         }
                     }
 
+                    if (!ctx.rowCount) {
+                        result.error = "Failed to load table: " + tableName;
+                        return;
+                    }
+
                     tableContexts[inst.instanceKey] = std::move(ctx);
                     
                     if (debug) {
                         std::cerr << "[Exec] Loaded instance " << inst.instanceKey 
-                                  << " (" << rel.rowCount << " rows)\n";
+                                  << " (" << ctx.rowCount << " rows)\n";
                     }
                 }
             }
         } else {
-            RelationGPU rel = GpuOps::scanTable(datasetPath, tableName, colVec);
-            if (!rel.rowCount) {
-                result.error = "Failed to load table: " + tableName;
-                return;
-            }
+            GpuRelation rel = GpuOps::scanTable(datasetPath, tableName, colVec);
 
             EvalContext ctx;
             ctx.currentTable = tableName;
@@ -372,6 +371,8 @@ void IRGpuLoader::loadTables(
                         if (tblSchema->getColumnType(colName) == ColumnType::StringHash) {
                             auto rawStrings = GpuOps::loadStringColumnRaw(datasetPath, tableName, colName);
                             if (!rawStrings.empty()) {
+                                // Determine rowCount from string data when no numeric cols loaded
+                                if (!ctx.rowCount) ctx.rowCount = rawStrings.size();
                                 ctx.stringCols[colName] = std::move(rawStrings);
                                 flattenStringCol(ctx, colName);
                                 computeGpuHash(ctx, colName);
@@ -387,12 +388,17 @@ void IRGpuLoader::loadTables(
                 }
             }
 
+            if (!ctx.rowCount) {
+                result.error = "Failed to load table: " + tableName;
+                return;
+            }
+
             tableContexts[tableName] = std::move(ctx);
         }
     }
     
     auto end_load = std::chrono::high_resolution_clock::now();
-    result.table.upload_ms = std::chrono::duration<double, std::milli>(end_load - start_load).count();
+    result.table.uploadMs = std::chrono::duration<double, std::milli>(end_load - start_load).count();
 }
 
 } // namespace engine

@@ -12,11 +12,11 @@
 #include "Schema.hpp"
 #include "DuckDBAdapter.hpp"
 #include "KernelTimer.hpp"
-#include "GpuExecutorPriv.hpp"  // for env_truthy
+#include "GpuExecutorDetail.hpp"  // for env_truthy
 
-static std::string g_dataset_path = "data/SF-1/";
+static std::string s_datasetPath = "data/SF-1/";
 
-static int runEngineSQL(const std::string& sql) {
+static int executeQuery(const std::string& sql) {
     using namespace engine;
     std::cout << "--- Running (Engine Host) ---" << std::endl;
 
@@ -61,7 +61,7 @@ static int runEngineSQL(const std::string& sql) {
     // Execute with V2 executor (uses GPU Native Executor)
     std::cout << "[Main] Using GpuExecutor generic executor.\n";
     auto t_exec_start = std::chrono::high_resolution_clock::now();
-    auto result = GpuExecutor::execute(plan, g_dataset_path);
+    auto result = GpuExecutor::execute(plan, s_datasetPath);
     auto t_exec_end = std::chrono::high_resolution_clock::now();
     double exec_ms = std::chrono::duration<double, std::milli>(t_exec_end - t_exec_start).count();
     
@@ -85,9 +85,9 @@ static int runEngineSQL(const std::string& sql) {
         if (!t.order.empty()) {
             for (const auto& c : t.order) std::cout << c.name << "|";
         } else {
-            for (const auto& n : t.u32_names) std::cout << n << "|";
-            for (const auto& n : t.f32_names) std::cout << n << "|";
-            for (const auto& n : t.string_names) std::cout << n << "|";
+            for (const auto& n : t.u32Names) std::cout << n << "|";
+            for (const auto& n : t.f32Names) std::cout << n << "|";
+            for (const auto& n : t.stringNames) std::cout << n << "|";
         }
         std::cout << std::endl;
         
@@ -96,7 +96,7 @@ static int runEngineSQL(const std::string& sql) {
             if (!t.order.empty()) {
                 for (const auto& ref : t.order) {
                     if (ref.kind == TableResult::ColRef::Kind::U32) {
-                        const auto& col = t.u32_cols[ref.index];
+                        const auto& col = t.u32Cols[ref.index];
                         const uint32_t v = (i < col.size()) ? col[i] : 0;
                         if (t.singleCharCols.count(ref.name)) {
                             std::cout << static_cast<char>(v) << "|";
@@ -111,19 +111,19 @@ static int runEngineSQL(const std::string& sql) {
                             std::cout << v << "|";
                         }
                     } else if (ref.kind == TableResult::ColRef::Kind::F32) {
-                        const auto& col = t.f32_cols[ref.index];
+                        const auto& col = t.f32Cols[ref.index];
                         const float v = (i < col.size()) ? col[i] : 0.0f;
                         std::cout << std::fixed << std::setprecision(2) << v << "|";
                     } else if (ref.kind == TableResult::ColRef::Kind::String) {
-                        const auto& col = t.string_cols[ref.index];
+                        const auto& col = t.stringCols[ref.index];
                         const std::string& v = (i < col.size()) ? col[i] : "";
                         std::cout << v << "|";
                     }
                 }
             } else {
-                for (size_t c = 0; c < t.u32_names.size(); ++c) {
-                    const auto& name = t.u32_names[c];
-                    const auto& col = t.u32_cols[c];
+                for (size_t c = 0; c < t.u32Names.size(); ++c) {
+                    const auto& name = t.u32Names[c];
+                    const auto& col = t.u32Cols[c];
                     const uint32_t v = (i < col.size()) ? col[i] : 0;
                     if (t.singleCharCols.count(name)) {
                         std::cout << static_cast<char>(v) << "|";
@@ -138,13 +138,13 @@ static int runEngineSQL(const std::string& sql) {
                         std::cout << v << "|";
                     }
                 }
-                for (size_t c = 0; c < t.f32_names.size(); ++c) {
-                    const auto& col = t.f32_cols[c];
+                for (size_t c = 0; c < t.f32Names.size(); ++c) {
+                    const auto& col = t.f32Cols[c];
                     const float v = (i < col.size()) ? col[i] : 0.0f;
                     std::cout << std::fixed << std::setprecision(2) << v << "|";
                 }
-                for (size_t c = 0; c < t.string_names.size(); ++c) {
-                    const auto& col = t.string_cols[c];
+                for (size_t c = 0; c < t.stringNames.size(); ++c) {
+                    const auto& col = t.stringCols[c];
                     const std::string& v = (i < col.size()) ? col[i] : "";
                     std::cout << v << "|";
                 }
@@ -155,10 +155,10 @@ static int runEngineSQL(const std::string& sql) {
     
     std::cout << "---------------------------------------------------" << std::endl;
     printf("Planning time: %.2f ms\n", plan_ms);
-    printf("Data Load Time (Disk+Upload): %.2f ms\n", result.table.upload_ms);
-    printf("GPU kernels time: %.2f ms\n", result.table.gpu_ms);
-    printf("CPU postprocess time: %.2f ms\n", result.table.cpu_post_ms);
-    printf("Total Internal Pipeline time: %.2f ms\n", result.table.upload_ms + result.table.gpu_ms + result.table.cpu_post_ms);
+    printf("Data Load Time (Disk+Upload): %.2f ms\n", result.table.uploadMs);
+    printf("GPU kernels time: %.2f ms\n", result.table.gpuMs);
+    printf("CPU postprocess time: %.2f ms\n", result.table.cpuPostMs);
+    printf("Total Internal Pipeline time: %.2f ms\n", result.table.uploadMs + result.table.gpuMs + result.table.cpuPostMs);
     printf("Total Host Execution time: %.2f ms\n", exec_ms);
     printf("Total Wall time (Plan+Exec): %.2f ms\n", plan_ms + exec_ms);
     std::cout << "---------------------------------------------------" << std::endl;
@@ -195,8 +195,8 @@ int main(int argc, const char* argv[]) {
     // Args: sf1|sf10|v1 and optional --sql "..." or .sql file or inline SQL
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "sf1") g_dataset_path = "data/SF-1/";
-        else if (arg == "sf10") g_dataset_path = "data/SF-10/";
+        if (arg == "sf1") s_datasetPath = "data/SF-1/";
+        else if (arg == "sf10") s_datasetPath = "data/SF-10/";
         else if (arg == "v1") setenv("GPUDB_V1", "1", 1);
         else if (arg == "--sql" && i+1 < argc) { sql = argv[++i]; }
         else if (arg == "help" || arg == "--help" || arg == "-h") {
@@ -217,6 +217,6 @@ int main(int argc, const char* argv[]) {
     }
 
     // Make sure DuckDB EXPLAIN reads the same dataset directory as execution.
-    setenv("GPUDB_DATASET_PATH", g_dataset_path.c_str(), 1);
-    return runEngineSQL(sql);
+    setenv("GPUDB_DATASET_PATH", s_datasetPath.c_str(), 1);
+    return executeQuery(sql);
 }

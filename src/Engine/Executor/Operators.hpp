@@ -6,11 +6,15 @@
 #include <string_view>
 #include <vector>
 
-#include "Predicate.hpp"
 #include "Relation.hpp"
 #include "JoinMap.hpp"
 
 namespace engine {
+
+// GPU-side filter comparison operator. Values map directly to GPU kernel parameters.
+// This enum is separate from CompareOp (planner-level) because it only covers
+// operations that the GPU filter kernels support, plus LIKE_PATTERN for string matching.
+enum class GpuFilterOp { LT, LE, GT, GE, EQ, NE, LIKE_PATTERN = 999 };
 
 struct FilterResult {
     MTL::Buffer* indices = nullptr; // u32 indices, length == count
@@ -18,8 +22,8 @@ struct FilterResult {
 };
 
 struct GroupByHashTable {
-    MTL::Buffer* ht_keys = nullptr;  // capacity * 4 u32
-    MTL::Buffer* ht_aggs = nullptr;  // capacity * 8 u32 (float bits)
+    MTL::Buffer* htKeys = nullptr;  // capacity * 4 u32
+    MTL::Buffer* htAggs = nullptr;  // capacity * 8 u32 (float bits)
     uint32_t capacity = 0;
 };
 
@@ -27,6 +31,10 @@ struct GroupByHashTable {
 struct GroupByExtractResult {
     std::vector<std::vector<uint32_t>> keyCols;  // [keyIdx][row], bias removed
     std::vector<std::vector<uint32_t>> aggWords; // [aggSlot][row], raw u32
+    // GPU buffers for each key/agg column (per-column slices of the SoA output).
+    // These stay alive so downstream can avoid re-uploading CPU vectors to GPU.
+    std::vector<MTL::Buffer*> keyColsGPU;        // [keyIdx] -> MTL::Buffer*
+    std::vector<MTL::Buffer*> aggColsGPU;        // [aggSlot] -> MTL::Buffer*
     uint32_t rowCount = 0;
 };
 
@@ -64,12 +72,12 @@ public:
     static uint32_t fnv1a32(std::string_view s);
 
     // Load raw strings from a table column (for pattern matching: LIKE, CONTAINS)
-    static std::vector<std::string> loadStringColumnRaw(const std::string& dataset_path,
+    static std::vector<std::string> loadStringColumnRaw(const std::string& datasetPath,
                                                         const std::string& table,
                                                         const std::string& column);
 
-    // Load a table into a RelationGPU with only the requested columns.
-    static RelationGPU scanTable(const std::string& dataset_path,
+    // Load a table into a GpuRelation with only the requested columns.
+    static GpuRelation scanTable(const std::string& datasetPath,
                                  const std::string& table,
                                  const std::vector<std::string>& neededCols);
 
@@ -77,7 +85,7 @@ public:
     static std::optional<FilterResult> filterU32(const std::string& colName,
                                                     MTL::Buffer* col,
                                                     uint32_t rowCount,
-                                                    engine::expr::CompOp op,
+                                                    engine::GpuFilterOp op,
                                                     uint32_t literal);
 
     // Filter a raw string column. 
@@ -85,7 +93,7 @@ public:
     // When preChars/preOffsets/preLengths are non-null, skip CPU→GPU flatten.
     static std::optional<FilterResult> filterString(const std::string& colName,
                                                        const std::vector<std::string>& data,
-                                                       engine::expr::CompOp op,
+                                                       engine::GpuFilterOp op,
                                                        const std::string& pattern,
                                                        MTL::Buffer* preChars = nullptr,
                                                        MTL::Buffer* preOffsets = nullptr,
@@ -102,14 +110,14 @@ public:
                                                            MTL::Buffer* col,
                                                            MTL::Buffer* indices,
                                                            uint32_t count,
-                                                           engine::expr::CompOp op,
+                                                           engine::GpuFilterOp op,
                                                            uint32_t literal);
 
     // Filter a f32 column with (op, literal) and return compacted indices.
     static std::optional<FilterResult> filterF32(const std::string& colName,
                                                     MTL::Buffer* col,
                                                     uint32_t rowCount,
-                                                    engine::expr::CompOp op,
+                                                    engine::GpuFilterOp op,
                                                     float literal);
 
     // Scatter constant value to output buffer at specified indices
@@ -125,7 +133,7 @@ public:
                                                            MTL::Buffer* col,
                                                            MTL::Buffer* indices,
                                                            uint32_t count,
-                                                           engine::expr::CompOp op,
+                                                           engine::GpuFilterOp op,
                                                            float literal);
 
     static std::optional<FilterResult> hashJoinSemiU32(MTL::Buffer* leftKey,
@@ -163,7 +171,7 @@ public:
 
     // GroupBy multi-key with typed aggregates (up to 8).
     // aggTypes[a]: 0 = SUM(f32) using aggInputsF32[a], 1 = COUNT(*) (u32).
-    // Results are written into ht_aggs[slot*8 + a].
+    // Results are written into htAggs[slot*8 + a].
     static std::optional<GroupByHashTable> groupByAggMultiKeyTyped(const std::vector<MTL::Buffer*>& keyColsU32,
                                                                       const std::vector<MTL::Buffer*>& aggInputsF32,
                                                                       const std::vector<uint32_t>& aggTypes,

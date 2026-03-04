@@ -1,7 +1,7 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 
 #include <iostream>
 #include <vector>
@@ -39,11 +39,11 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
         }
     };
     
-    bool hasExistingOutput = !out.u32_cols.empty() || !out.f32_cols.empty();
+    bool hasExistingOutput = !out.u32Cols.empty() || !out.f32Cols.empty();
     
     if (debug && hasExistingOutput) {
-        std::cerr << "[Exec] Project: hasExistingOutput=true, out.u32_names=";
-        for (const auto& n : out.u32_names) std::cerr << n << " ";
+        std::cerr << "[Exec] Project: hasExistingOutput=true, out.u32Names=";
+        for (const auto& n : out.u32Names) std::cerr << n << " ";
         std::cerr << "\n";
     }
     
@@ -54,14 +54,14 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
         std::map<std::string, std::vector<float>> savedF32;
         std::map<std::string, std::vector<std::string>> savedString;
         
-        for (size_t i = 0; i < out.u32_names.size() && i < out.u32_cols.size(); ++i) {
-            savedU32[out.u32_names[i]] = out.u32_cols[i];
+        for (size_t i = 0; i < out.u32Names.size() && i < out.u32Cols.size(); ++i) {
+            savedU32[out.u32Names[i]] = out.u32Cols[i];
         }
-        for (size_t i = 0; i < out.f32_names.size() && i < out.f32_cols.size(); ++i) {
-            savedF32[out.f32_names[i]] = out.f32_cols[i];
+        for (size_t i = 0; i < out.f32Names.size() && i < out.f32Cols.size(); ++i) {
+            savedF32[out.f32Names[i]] = out.f32Cols[i];
         }
-        for (size_t i = 0; i < out.string_names.size() && i < out.string_cols.size(); ++i) {
-            savedString[out.string_names[i]] = out.string_cols[i];
+        for (size_t i = 0; i < out.stringNames.size() && i < out.stringCols.size(); ++i) {
+            savedString[out.stringNames[i]] = out.stringCols[i];
         }
 
         for (const auto& [n, v] : savedU32) {
@@ -76,12 +76,12 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
     }
     
     if (hasExistingOutput) {
-        out.u32_cols.clear();
-        out.u32_names.clear();
-        out.f32_cols.clear();
-        out.f32_names.clear();
-        out.string_cols.clear();
-        out.string_names.clear();
+        out.u32Cols.clear();
+        out.u32Names.clear();
+        out.f32Cols.clear();
+        out.f32Names.clear();
+        out.stringCols.clear();
+        out.stringNames.clear();
         out.order.clear();
     }
     
@@ -228,7 +228,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             std::vector<uint32_t> encoded(rc);
                             if (encodedGPU) {
                                 std::memcpy(encoded.data(), encodedGPU->contents(), rc * sizeof(uint32_t));
-                                encodedGPU->release();
+                                // Keep GPU buffer for downstream operators
+                                ctx.u32ColsGPU[outName] = encodedGPU;
+                                ctx.u32ColsGPU[posName] = encodedGPU;
                             }
                             
                             // Reconstruct CPU strings from flat buffers for downstream use
@@ -254,8 +256,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             ctx.stringCols[posName] = ctx.stringCols[outName];
                             ctx.u32Cols[outName] = encoded;
                             ctx.u32Cols[posName] = encoded;
-                            out.u32_cols.push_back(encoded);
-                            out.u32_names.push_back(outName);
+                            out.u32Cols.push_back(encoded);
+                            out.u32Names.push_back(outName);
                             
                             if (debug) {
                                 std::cerr << "[Exec] Project: GPU SUBSTRING computed " << rc 
@@ -313,12 +315,12 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             if (hashBuf) {
                                 std::vector<uint32_t> encoded(flat.rowCount);
                                 std::memcpy(encoded.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
-                                hashBuf->release();
                                 ctx.u32Cols[outName] = encoded;
                                 ctx.u32Cols[posName] = encoded;
-                                ctx.u32ColsGPU[outName] = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
-                                out.u32_cols.push_back(std::move(encoded));
-                                out.u32_names.push_back(outName);
+                                ctx.u32ColsGPU[outName] = hashBuf;  // reuse instead of re-computing
+                                ctx.u32ColsGPU[posName] = hashBuf;
+                                out.u32Cols.push_back(std::move(encoded));
+                                out.u32Names.push_back(outName);
                             }
                         } else {
                             // Fallback: CPU hash
@@ -329,8 +331,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             }
                             ctx.u32Cols[outName] = encoded;
                             ctx.u32Cols[posName] = encoded;
-                            out.u32_cols.push_back(std::move(encoded));
-                            out.u32_names.push_back(outName);
+                            out.u32Cols.push_back(std::move(encoded));
+                            out.u32Names.push_back(outName);
                         }
                         
                         if (debug) {
@@ -407,7 +409,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         // Download to CPU
                         results.resize(gpuCount);
                         std::memcpy(results.data(), yearBuf->contents(), gpuCount * sizeof(uint32_t));
-                        yearBuf->release();
+                        // Keep GPU buffer for downstream operators
+                        ctx.u32ColsGPU[outName] = yearBuf;
+                        ctx.u32ColsGPU[posName] = yearBuf;
 
                         if (debug) std::cerr << "[Exec] Project: YEAR GPU-computed " << gpuCount << " results for " << outName << "\n";
                         return true;
@@ -530,8 +534,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         if(debug) std::cerr << "[Exec] Project: YEAR computed " << results.size() << " results for " << outName << " (Input table: " << ctx.currentTable << ")\n";
                         ctx.u32Cols[outName] = results;
                         ctx.u32Cols[posName] = results;
-                        out.u32_cols.push_back(results);
-                        out.u32_names.push_back(outName);
+                        out.u32Cols.push_back(results);
+                        out.u32Names.push_back(outName);
                         continue;
                     }
                 }
@@ -551,8 +555,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 if (itU != ctx.u32Cols.end()) {
                     if (debug) std::cerr << "[Exec] Project: function passthrough " << col << "\n";
                     ctx.u32Cols[posName] = itU->second;
-                    out.u32_cols.push_back(itU->second);
-                    out.u32_names.push_back(outName.empty() ? col : outName);
+                    out.u32Cols.push_back(itU->second);
+                    out.u32Names.push_back(outName.empty() ? col : outName);
                     continue;
                 }
                 // For #N positional references, look up directly (they should exist in context)
@@ -561,8 +565,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (itU != ctx.u32Cols.end()) {
                         if (debug) std::cerr << "[Exec] Project: function passthrough positional " << col << "\n";
                         ctx.u32Cols[posName] = itU->second;
-                        out.u32_cols.push_back(itU->second);
-                        out.u32_names.push_back(outName.empty() ? col : outName);
+                        out.u32Cols.push_back(itU->second);
+                        out.u32Names.push_back(outName.empty() ? col : outName);
                         continue;
                     }
                     // Also try f32
@@ -570,8 +574,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (itF != ctx.f32Cols.end()) {
                         if (debug) std::cerr << "[Exec] Project: function passthrough positional " << col << " (f32)\n";
                         ctx.f32Cols[posName] = itF->second;
-                        out.f32_cols.push_back(itF->second);
-                        out.f32_names.push_back(outName.empty() ? col : outName);
+                        out.f32Cols.push_back(itF->second);
+                        out.f32Names.push_back(outName.empty() ? col : outName);
                         continue;
                     }
                 }
@@ -689,8 +693,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     }
                 }
                 ctx.stringCols[posName] = sub;
-                out.string_cols.push_back(std::move(sub));
-                out.string_names.push_back(outName.empty() ? col : outName);
+                out.stringCols.push_back(std::move(sub));
+                out.stringNames.push_back(outName.empty() ? col : outName);
                 
                 // String type takes precedence over u32 hashes
                 continue;
@@ -706,8 +710,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (debug) std::cerr << "[Exec] Project: mapping " << col << " -> " << sumName << "\n";
                     ctx.f32Cols[posName] = itSum->second;
                     if (!outName.empty()) ctx.f32Cols[outName] = itSum->second;
-                    out.f32_cols.push_back(itSum->second);
-                    out.f32_names.push_back(outName.empty() ? col : outName);
+                    out.f32Cols.push_back(itSum->second);
+                    out.f32Names.push_back(outName.empty() ? col : outName);
                     continue;
                 }
                 // Try COUNT_#N
@@ -717,8 +721,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (debug) std::cerr << "[Exec] Project: mapping " << col << " -> " << countName << "\n";
                     ctx.f32Cols[posName] = itCount->second;
                     if (!outName.empty()) ctx.f32Cols[outName] = itCount->second;
-                    out.f32_cols.push_back(itCount->second);
-                    out.f32_names.push_back(outName.empty() ? col : outName);
+                    out.f32Cols.push_back(itCount->second);
+                    out.f32Names.push_back(outName.empty() ? col : outName);
                     continue;
                 }
             }
@@ -949,13 +953,21 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 } else if (ctx.activeRows.empty() || itU->second.size() == ctx.activeRows.size()) {
                     colData = itU->second;
                 } else if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0) {
-                    // GPU gather path: upload CPU vector, gather by GPU activeRows, download
-                    auto& s = ColumnStoreGPU::instance();
-                    MTL::Buffer* src = s.device()->newBuffer(itU->second.data(), itU->second.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
-                    colData.resize(ctx.activeRowsCountGPU);
-                    std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(uint32_t));
-                    src->release(); dst->release();
+                    // GPU gather path: prefer existing GPU buffer over uploading CPU vector
+                    auto itGpu = ctx.u32ColsGPU.find(lookupCol);
+                    if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
+                        MTL::Buffer* dst = GpuOps::gatherU32(itGpu->second, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                        colData.resize(ctx.activeRowsCountGPU);
+                        std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(uint32_t));
+                        dst->release();
+                    } else {
+                        auto& s = GpuColumnStore::instance();
+                        MTL::Buffer* src = s.device()->newBuffer(itU->second.data(), itU->second.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                        MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                        colData.resize(ctx.activeRowsCountGPU);
+                        std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(uint32_t));
+                        src->release(); dst->release();
+                    }
                 } else {
                     // Need CPU activeRows for compaction
                     ensureActiveRowsCPU();
@@ -996,8 +1008,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (debug) std::cerr << "[Exec] Project: also storing as CTE alias " << col << "\n";
                 }
                 ctx.u32Cols[posName] = colData;
-                out.u32_cols.push_back(std::move(colData));
-                out.u32_names.push_back(outName.empty() ? lookupCol : outName);
+                out.u32Cols.push_back(std::move(colData));
+                out.u32Names.push_back(outName.empty() ? lookupCol : outName);
                 if (debug) std::cerr << "[Exec] Project: Pushing U32 col " << (outName.empty()?lookupCol:outName) << "\n";
                 continue;
             }
@@ -1052,12 +1064,21 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 } else if (!ctx.activeRows.empty()) {
                     // Prefer GPU gather for f32 activeRows compaction
                     if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && itF->second.size() > ctx.activeRows.size()) {
-                        auto& s = ColumnStoreGPU::instance();
-                        MTL::Buffer* src = s.device()->newBuffer(itF->second.data(), itF->second.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
-                        colData.resize(ctx.activeRowsCountGPU);
-                        std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(float));
-                        src->release(); dst->release();
+                        // Prefer existing GPU buffer over uploading CPU vector
+                        auto itGpu = ctx.f32ColsGPU.find(lookupCol);
+                        if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
+                            MTL::Buffer* dst = GpuOps::gatherF32(itGpu->second, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                            colData.resize(ctx.activeRowsCountGPU);
+                            std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(float));
+                            dst->release();
+                        } else {
+                            auto& s = GpuColumnStore::instance();
+                            MTL::Buffer* src = s.device()->newBuffer(itF->second.data(), itF->second.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                            MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+                            colData.resize(ctx.activeRowsCountGPU);
+                            std::memcpy(colData.data(), dst->contents(), ctx.activeRowsCountGPU * sizeof(float));
+                            src->release(); dst->release();
+                        }
                     } else {
                         // CPU fallback
                         ensureActiveRowsCPU();
@@ -1089,8 +1110,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     if (debug) std::cerr << "[Exec] Project: f32 also storing as CTE alias " << col << "\n";
                 }
                 ctx.f32Cols[posName] = colData;
-                out.f32_cols.push_back(std::move(colData));
-                out.f32_names.push_back(outName.empty() ? col : outName);
+                out.f32Cols.push_back(std::move(colData));
+                out.f32Names.push_back(outName.empty() ? col : outName);
                 continue;
             }
 
@@ -1124,9 +1145,16 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         if (debug) std::cerr << "[Exec] Project: performing GPU ad-hoc join for " << neededCol << " on " << currentKey << " -> " << targetKey << "\n";
                         
                         // --- GPU hash join: build keys from dimension table, probe from current context ---
-                        const auto& sKeys = sourceCtx->u32Cols.at(targetKey);
-                        uint32_t buildCount = static_cast<uint32_t>(sKeys.size());
-                        MTL::Buffer* buildKeysGPU = GpuOps::createBuffer(sKeys.data(), sKeys.size() * sizeof(uint32_t));
+                        MTL::Buffer* buildKeysGPU = nullptr;
+                        bool buildKeysOwned = false;
+                        if (sourceCtx->u32ColsGPU.count(targetKey) && sourceCtx->u32ColsGPU.at(targetKey)) {
+                            buildKeysGPU = sourceCtx->u32ColsGPU.at(targetKey);
+                        } else {
+                            const auto& sKeys = sourceCtx->u32Cols.at(targetKey);
+                            buildKeysGPU = GpuOps::createBuffer(sKeys.data(), sKeys.size() * sizeof(uint32_t));
+                            buildKeysOwned = true;
+                        }
+                        uint32_t buildCount = static_cast<uint32_t>(buildKeysGPU->length() / sizeof(uint32_t));
                         
                         // Get probe keys on GPU (prefer existing GPU buffer, fallback to CPU upload)
                         MTL::Buffer* probeKeysGPU = nullptr;
@@ -1165,7 +1193,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         
                         // GPU hash join
                         auto jRes = GpuOps::joinHash(buildKeysGPU, nullptr, buildCount, probeKeysGPU, nullptr, probeCount);
-                        buildKeysGPU->release();
+                        if (buildKeysOwned) buildKeysGPU->release();
                         if (probeOwned) probeKeysGPU->release();
                         
                         if (debug) std::cerr << "[Exec] Project: GPU ad-hoc join matched " << jRes.count << "/" << probeCount << " rows\n";
@@ -1173,20 +1201,33 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         // joinHash output is in probe order (probe row i → buildIndices[i])
                         // For FK joins, jRes.count should equal probeCount
                         
-                        if (sourceCtx->f32Cols.count(neededCol)) {
-                            const auto& sVals = sourceCtx->f32Cols.at(neededCol);
-                            MTL::Buffer* srcValsGPU = GpuOps::createBuffer(sVals.data(), sVals.size() * sizeof(float));
+                        if (sourceCtx->f32Cols.count(neededCol) || sourceCtx->f32ColsGPU.count(neededCol)) {
+                            MTL::Buffer* srcValsGPU = nullptr;
+                            bool srcOwned = false;
+                            if (sourceCtx->f32ColsGPU.count(neededCol) && sourceCtx->f32ColsGPU.at(neededCol)) {
+                                srcValsGPU = sourceCtx->f32ColsGPU.at(neededCol);
+                            } else {
+                                const auto& sVals = sourceCtx->f32Cols.at(neededCol);
+                                srcValsGPU = GpuOps::createBuffer(sVals.data(), sVals.size() * sizeof(float));
+                                srcOwned = true;
+                            }
                             MTL::Buffer* gathered = GpuOps::gatherF32(srcValsGPU, jRes.buildIndices, jRes.count);
-                            srcValsGPU->release();
+                            if (srcOwned) srcValsGPU->release();
                             
                             std::vector<float> res(jRes.count);
                             std::memcpy(res.data(), gathered->contents(), jRes.count * sizeof(float));
-                            gathered->release();
                             
                             ctx.f32Cols[posName] = res;
-                            if (!outName.empty()) ctx.f32Cols[outName] = res;
-                            out.f32_cols.push_back(res);
-                            out.f32_names.push_back(outName.empty() ? neededCol : outName);
+                            ctx.f32ColsGPU[posName] = gathered;
+                            gathered->retain();
+                            if (!outName.empty()) {
+                                ctx.f32Cols[outName] = res;
+                                ctx.f32ColsGPU[outName] = gathered;
+                                gathered->retain();
+                            }
+                            out.f32Cols.push_back(res);
+                            out.f32ColsGPU.push_back(gathered);
+                            out.f32Names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
                             if (jRes.buildIndices) jRes.buildIndices->release();
                             if (jRes.probeIndices) jRes.probeIndices->release();
@@ -1204,33 +1245,46 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             }
                             ctx.stringCols[posName] = res;
                             if (!outName.empty()) ctx.stringCols[outName] = res;
-                            out.string_cols.push_back(res);
-                            out.string_names.push_back(outName.empty() ? neededCol : outName);
+                            out.stringCols.push_back(res);
+                            out.stringNames.push_back(outName.empty() ? neededCol : outName);
                             // Dummy u32 encoding
                             std::vector<uint32_t> encoded;
                             for (const auto& s : res) encoded.push_back(s.empty() ? 0 : (uint32_t)s[0]);
                             ctx.u32Cols[posName] = encoded;
                             if (!outName.empty()) ctx.u32Cols[outName] = encoded;
-                            out.u32_cols.push_back(encoded);
-                            out.u32_names.push_back(outName.empty() ? neededCol : outName);
+                            out.u32Cols.push_back(encoded);
+                            out.u32Names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
                             if (jRes.buildIndices) jRes.buildIndices->release();
                             if (jRes.probeIndices) jRes.probeIndices->release();
                             continue;
-                        } else if (sourceCtx->u32Cols.count(neededCol)) {
-                            const auto& sVals = sourceCtx->u32Cols.at(neededCol);
-                            MTL::Buffer* srcValsGPU = GpuOps::createBuffer(sVals.data(), sVals.size() * sizeof(uint32_t));
+                        } else if (sourceCtx->u32Cols.count(neededCol) || sourceCtx->u32ColsGPU.count(neededCol)) {
+                            MTL::Buffer* srcValsGPU = nullptr;
+                            bool srcOwned = false;
+                            if (sourceCtx->u32ColsGPU.count(neededCol) && sourceCtx->u32ColsGPU.at(neededCol)) {
+                                srcValsGPU = sourceCtx->u32ColsGPU.at(neededCol);
+                            } else {
+                                const auto& sVals = sourceCtx->u32Cols.at(neededCol);
+                                srcValsGPU = GpuOps::createBuffer(sVals.data(), sVals.size() * sizeof(uint32_t));
+                                srcOwned = true;
+                            }
                             MTL::Buffer* gathered = GpuOps::gatherU32(srcValsGPU, jRes.buildIndices, jRes.count);
-                            srcValsGPU->release();
+                            if (srcOwned) srcValsGPU->release();
                             
                             std::vector<uint32_t> res(jRes.count);
                             std::memcpy(res.data(), gathered->contents(), jRes.count * sizeof(uint32_t));
-                            gathered->release();
                             
                             ctx.u32Cols[posName] = res;
-                            if (!outName.empty()) ctx.u32Cols[outName] = res;
-                            out.u32_cols.push_back(res);
-                            out.u32_names.push_back(outName.empty() ? neededCol : outName);
+                            ctx.u32ColsGPU[posName] = gathered;
+                            gathered->retain();
+                            if (!outName.empty()) {
+                                ctx.u32Cols[outName] = res;
+                                ctx.u32ColsGPU[outName] = gathered;
+                                gathered->retain();
+                            }
+                            out.u32Cols.push_back(res);
+                            out.u32ColsGPU.push_back(gathered);
+                            out.u32Names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
                             if (jRes.buildIndices) jRes.buildIndices->release();
                             if (jRes.probeIndices) jRes.probeIndices->release();
@@ -1254,8 +1308,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 auto& aggData = ctx.f32Cols[posName];
                 ctx.f32Cols[col] = aggData;
                 if (!outName.empty()) ctx.f32Cols[outName] = aggData;
-                out.f32_cols.push_back(aggData);
-                out.f32_names.push_back(outName.empty() ? col : outName);
+                out.f32Cols.push_back(aggData);
+                out.f32Names.push_back(outName.empty() ? col : outName);
                 foundAggregate = true;
             }
             
@@ -1270,8 +1324,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         ctx.f32Cols[col] = aggData;
                         ctx.f32Cols[posName] = aggData;
                         if (!outName.empty()) ctx.f32Cols[outName] = aggData;
-                        out.f32_cols.push_back(aggData);
-                        out.f32_names.push_back(outName.empty() ? col : outName);
+                        out.f32Cols.push_back(aggData);
+                        out.f32Names.push_back(outName.empty() ? col : outName);
                         foundAggregate = true;
                         break;
                     }
@@ -1286,8 +1340,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 updateRowCount(colData.size());
                 // Also map to posName for subsequent access
                 ctx.f32Cols[posName] = colData;
-                out.f32_cols.push_back(colData); // Copy
-                out.f32_names.push_back(outName);
+                out.f32Cols.push_back(colData); // Copy
+                out.f32Names.push_back(outName);
                 continue;
             }
             if (!outName.empty() && ctx.u32Cols.count(outName)) {
@@ -1295,8 +1349,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                 auto& colData = ctx.u32Cols[outName];
                 updateRowCount(colData.size());
                 ctx.u32Cols[posName] = colData;
-                out.u32_cols.push_back(colData); // Copy
-                out.u32_names.push_back(outName);
+                out.u32Cols.push_back(colData); // Copy
+                out.u32Names.push_back(outName);
                 continue;
             }
 
@@ -1305,7 +1359,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
             ctx.aggregateCounter = 0;
             
             // Try GPU evaluation first
-            MTL::Buffer* gpuBuf = evalExprFloatGPU(expr, ctx);
+            MTL::Buffer* gpuBuf = evaluateExpression(expr, ctx);
             std::vector<float> values;
             
             if (gpuBuf) {
@@ -1340,9 +1394,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                     ctx.f32Cols[outName] = values;
                 }
                 ctx.f32Cols[posName] = values;
-                out.f32_cols.push_back(std::move(values));
-                updateRowCount(out.f32_cols.back().size());
-                out.f32_names.push_back(outName.empty() ? posName : outName);
+                out.f32Cols.push_back(std::move(values));
+                updateRowCount(out.f32Cols.back().size());
+                out.f32Names.push_back(outName.empty() ? posName : outName);
             } else {
                     // Expression evaluation failed - try to find column by positional reference
                     // This handles post-GroupBy projections where #N refers to aggregated output
@@ -1354,8 +1408,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         if (itF != ctx.f32Cols.end()) {
                             if (debug) std::cerr << "[Exec] Project: found outName " << outName << " in f32Cols\n";
                             ctx.f32Cols[posName] = itF->second;
-                            out.f32_cols.push_back(itF->second);
-                            out.f32_names.push_back(outName);
+                            out.f32Cols.push_back(itF->second);
+                            out.f32Names.push_back(outName);
                             found = true;
                         }
                         // Also check u32Cols for outName (e.g. mixed types or string results)
@@ -1364,8 +1418,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             if (itU != ctx.u32Cols.end()) {
                                 if (debug) std::cerr << "[Exec] Project: found outName " << outName << " in u32Cols\n";
                                 ctx.u32Cols[posName] = itU->second;
-                                out.u32_cols.push_back(itU->second);
-                                out.u32_names.push_back(outName);
+                                out.u32Cols.push_back(itU->second);
+                                out.u32Names.push_back(outName);
                                 found = true;
                             }
                         }
@@ -1380,8 +1434,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                                                                   : outName.rfind(key) == outName.size() - key.size())) {
                                     if (debug) std::cerr << "[Exec] Project: suffix match f32 '" << outName << "' -> '" << key << "'\n";
                                     ctx.f32Cols[posName] = val;
-                                    out.f32_cols.push_back(val);
-                                    out.f32_names.push_back(outName);
+                                    out.f32Cols.push_back(val);
+                                    out.f32Names.push_back(outName);
                                     found = true;
                                     break;
                                 }
@@ -1395,8 +1449,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                                                                       : outName.rfind(key) == outName.size() - key.size())) {
                                         if (debug) std::cerr << "[Exec] Project: suffix match u32 '" << outName << "' -> '" << key << "'\n";
                                         ctx.u32Cols[posName] = val;
-                                        out.u32_cols.push_back(val);
-                                        out.u32_names.push_back(outName);
+                                        out.u32Cols.push_back(val);
+                                        out.u32Names.push_back(outName);
                                         found = true;
                                         break;
                                     }
@@ -1410,9 +1464,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         auto itF = ctx.f32Cols.find(posName);
                         if (itF != ctx.f32Cols.end()) {
                             if (debug) std::cerr << "[Exec] Project: found " << posName << " in f32Cols\n";
-                            out.f32_cols.push_back(itF->second);
+                            out.f32Cols.push_back(itF->second);
                             updateRowCount(itF->second.size());
-                            out.f32_names.push_back(outName.empty() ? posName : outName);
+                            out.f32Names.push_back(outName.empty() ? posName : outName);
                             found = true;
                         }
                     }
@@ -1423,9 +1477,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         auto itF = ctx.f32Cols.find(sumName);
                         if (itF != ctx.f32Cols.end()) {
                             if (debug) std::cerr << "[Exec] Project: found " << sumName << " in f32Cols\n";
-                            out.f32_cols.push_back(itF->second);
+                            out.f32Cols.push_back(itF->second);
                             updateRowCount(itF->second.size());
-                            out.f32_names.push_back(outName.empty() ? sumName : outName);
+                            out.f32Names.push_back(outName.empty() ? sumName : outName);
                             found = true;
                         }
                     }
@@ -1436,9 +1490,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         auto itU = ctx.u32Cols.find(posName);
                         if (itU != ctx.u32Cols.end()) {
                             if (debug) std::cerr << "[Exec] Project: found " << posName << " in u32Cols\n";
-                            out.u32_cols.push_back(itU->second);
+                            out.u32Cols.push_back(itU->second);
                             updateRowCount(itU->second.size());
-                            out.u32_names.push_back(outName.empty() ? posName : outName);
+                            out.u32Names.push_back(outName.empty() ? posName : outName);
                             found = true;
                         }
                     }
@@ -1464,6 +1518,21 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
         out.rowCount = fallbackCount;
         ctx.rowCount = fallbackCount;
     }
+
+    // Populate GPU buffer mirrors in TableResult for downstream operators
+    out.u32ColsGPU.resize(out.u32Names.size(), nullptr);
+    for (size_t i = 0; i < out.u32Names.size(); ++i) {
+        if (ctx.u32ColsGPU.count(out.u32Names[i])) {
+            out.u32ColsGPU[i] = ctx.u32ColsGPU[out.u32Names[i]];
+        }
+    }
+    out.f32ColsGPU.resize(out.f32Names.size(), nullptr);
+    for (size_t i = 0; i < out.f32Names.size(); ++i) {
+        if (ctx.f32ColsGPU.count(out.f32Names[i])) {
+            out.f32ColsGPU[i] = ctx.f32ColsGPU[out.f32Names[i]];
+        }
+    }
+
     return true;
 }
 

@@ -1,5 +1,146 @@
 --- Running (Engine Host) ---
+DEBUG: Scan table determined as: 'region'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
+[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
+[Planner] ChildProjs size: 4
+  #0: n_nationkey
+  #1: n_regionkey
+  #2: n_name
+  #3: r_regionkey
+[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 11
+  #0: s_suppkey
+  #1: s_nationkey
+  #2: s_acctbal
+  #3: s_name
+  #4: s_address
+  #5: s_phone
+  #6: s_comment
+  #7: n_nationkey
+  #8: n_regionkey
+  #9: n_name
+  #10: r_regionkey
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
+DEBUG: Scan table determined as: 'part'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
+DEBUG: Scan table determined as: 'partsupp'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_7'
+[Planner] Pre-resolved Condition: 'ps_partkey = p_partkey'
+[Planner] ChildProjs size: 5
+  #0: ps_partkey
+  #1: ps_suppkey
+  #2: ps_supplycost
+  #3: p_partkey
+  #4: p_mfgr
+[Planner] Resolved Condition: 'ps_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
+[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
+[Planner] ChildProjs size: 16
+  #0: ps_partkey
+  #1: ps_suppkey
+  #2: ps_supplycost
+  #3: p_partkey
+  #4: p_mfgr
+  #5: s_suppkey
+  #6: s_nationkey
+  #7: s_acctbal
+  #8: s_name
+  #9: s_address
+  #10: s_phone
+  #11: s_comment
+  #12: n_nationkey
+  #13: n_regionkey
+  #14: n_name
+  #15: r_regionkey
+[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
+DEBUG: Scan table determined as: 'region'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
+[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
+[Planner] ChildProjs size: 3
+  #0: n_nationkey
+  #1: n_regionkey
+  #2: r_regionkey
+[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 5
+  #0: s_suppkey
+  #1: s_nationkey
+  #2: n_nationkey
+  #3: n_regionkey
+  #4: r_regionkey
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_14'
+DEBUG: Scan table determined as: 'partsupp'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_19'
+[Planner] Pre-resolved Condition: 'ps_partkey = p_partkey'
+[Planner] ChildProjs size: 3
+  #0: ps_partkey
+  #1: ps_suppkey
+  #2: ps_supplycost
+[Planner] Resolved Condition: 'ps_partkey = p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_19'
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_17'
+[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
+[Planner] ChildProjs size: 8
+  #0: ps_partkey
+  #1: ps_suppkey
+  #2: ps_supplycost
+  #3: s_suppkey
+  #4: s_nationkey
+  #5: n_nationkey
+  #6: n_regionkey
+  #7: r_regionkey
+[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_17'
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_26'
+[Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM #0'
+[Planner] ChildProjs size: 2
+  #0: p_partkey
+  #1: min(ps_supplycost)
+[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_26'
+DEBUG: COLUMN_DATA_SCAN extra_info keys: 
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_30'
+[Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+[Planner] ChildProjs size: 2
+  #0: min(ps_supplycost)
+  #1: p_partkey
+[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_30'
+Expression: (ps_supplycost = SUBQUERY)
 [Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 642
+[Exec] GroupBy VERIFY: agg mismatches = 0 / 642
+[Exec] GroupBy VERIFY: CPU grand total = 336194.94
+[Exec] GroupBy VERIFY: GPU grand total = 216112.84
+[Exec] GroupBy VERIFY: difference = -120082.10
+[Exec] GroupBy VERIFY: CPU max key=49011 val=2754.76
+[Exec] GroupBy VERIFY: GPU max key=130557 val=997.93
+[Exec] GroupBy VERIFY: GPU value for CPU max key 49011 = 851.25
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -105,503 +246,22 @@ p_partkey|s_acctbal|s_name|n_name|p_mfgr|s_address|s_phone|s_comment|
 86501|7850.66|Supplier#000001518|UNITED KINGDOM|Manufacturer#1|ONda3YJiHKJOC|33-730-383-3892|ifts haggle fluffily pending pai|
 11680|7843.52|Supplier#000006683|FRANCE|Manufacturer#4|2Z0JGkiv01Y00oCFwUGfviIbhzCdy|16-464-517-8943|express, final pinto beans x-ray slyly asymptotes. unusual, unusual|
 ---------------------------------------------------
-Planning time: 22.02 ms
-Data Load Time (Disk+Upload): 1241.78 ms
-GPU kernels time: 71.43 ms
-CPU postprocess time: 78.13 ms
-Total Internal Pipeline time: 1391.34 ms
-Total Host Execution time: 1406.51 ms
-Total Wall time (Plan+Exec): 1428.53 ms
+Planning time: 22.03 ms
+Data Load Time (Disk+Upload): 1237.46 ms
+GPU kernels time: 57.85 ms
+CPU postprocess time: 67.44 ms
+Total Internal Pipeline time: 1362.75 ms
+Total Host Execution time: 1373.76 ms
+Total Wall time (Plan+Exec): 1395.79 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.735 ms (1.029%) [4 calls]
-  filter         :    1.329 ms (1.860%) [4 calls]
-  gather         :   65.969 ms (92.356%) [360 calls]
-  groupby        :    0.577 ms (0.808%) [3 calls]
-  hash_join_probe_u32:    2.515 ms (3.520%) [12 calls]
-  sort           :    0.305 ms (0.428%) [10 calls]
+  compact        :    0.930 ms (1.608%) [4 calls]
+  filter         :    1.514 ms (2.618%) [4 calls]
+  gather         :   51.660 ms (89.306%) [282 calls]
+  groupby        :    0.584 ms (1.010%) [3 calls]
+  hash_join_probe_u32:    2.861 ms (4.946%) [11 calls]
+  sort           :    0.296 ms (0.512%) [9 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 71.429 ms
-  Kernel invocations: 393
-[Planner] Parsed aliases:
-[Planner] Traversing node: TOP_N
-[Planner] Traversing: TOP_N
-[Planner] Entering children traversal block. Name: top_n Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: FILTER
-[Planner] Traversing: FILTER
-[Planner] Entering children traversal block. Name: filter Children: 1
-[Planner] Traversing node: LEFT_DELIM_JOIN
-[Planner] Traversing: LEFT_DELIM_JOIN
-[Planner] [TraverseNode] Logic for JOIN: LEFT_DELIM_JOIN
-[Planner] Entering children traversal block. Name: left_delim_join Children: 3
-[Planner] Checking LHS (kids[0]) for delim...
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: seq_scan 
-[Planner] Result LHS: 0
-[Planner] Checking RHS (kids[1]) for delim...
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: column_data_scan
-[Planner] checkDelim FOUND: column_data_scan
-[Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6096250920
-[Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table region
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: r_regionkey
-DEBUG: Scan table determined as: 'region'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
-[Planner] Generating Scan: region at index 0 Plan: 6096230064
-[Planner] Node SEQ_SCAN  output projections: r_regionkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: n_nationkey
-[Planner] Proj: n_regionkey
-[Planner] Proj: n_name
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_regionkey, n_name, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
-[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
-[Planner] ChildProjs size: 4
-  #0: n_nationkey
-  #1: n_regionkey
-  #2: n_name
-  #3: r_regionkey
-[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
-[Planner] Join Key Analysis: l => nation, r => region
-[Planner] Captured RHS Table: region
-[Planner] RHS Tables: region, 
-[Planner] Checking matchesRHS: nation
-[Planner] Checking matchesRHS: region
-[Planner] Node HASH_JOIN output projections: n_nationkey, n_regionkey, n_name, r_regionkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-[Planner] Proj: s_acctbal
-[Planner] Proj: s_name
-[Planner] Proj: s_address
-[Planner] Proj: s_phone
-[Planner] Proj: s_comment
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 3 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, s_acctbal, s_name, s_address, s_phone, s_comment, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 11
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: s_acctbal
-  #3: s_name
-  #4: s_address
-  #5: s_phone
-  #6: s_comment
-  #7: n_nationkey
-  #8: n_regionkey
-  #9: n_name
-  #10: r_regionkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
-[Planner] Join Key Analysis: l => supplier, r => nation
-[Planner] Captured RHS Table: tmpl_join_2
-[Planner] RHS Tables: tmpl_join_2, 
-[Planner] Checking matchesRHS: supplier
-[Planner] Checking matchesRHS: nation
-[Planner] Node HASH_JOIN output projections: s_suppkey, s_nationkey, s_acctbal, s_name, s_address, s_phone, s_comment, n_nationkey, n_regionkey, n_name, r_regionkey, 
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Skipping capture for 'part' table to force full Traversal
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: p_partkey
-[Planner] Proj: p_mfgr
-DEBUG: Scan table determined as: 'part'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 6 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: p_partkey, p_mfgr, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: ps_partkey
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_supplycost
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 8 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: ps_partkey, ps_suppkey, ps_supplycost, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_7'
-[Planner] Pre-resolved Condition: 'ps_partkey = p_partkey'
-[Planner] ChildProjs size: 5
-  #0: ps_partkey
-  #1: ps_suppkey
-  #2: ps_supplycost
-  #3: p_partkey
-  #4: p_mfgr
-[Planner] Resolved Condition: 'ps_partkey = p_partkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
-[Planner] Join Key Analysis: l => partsupp, r => part
-[Planner] Captured RHS Table: tmpl_join_7
-[Planner] RHS Tables: tmpl_join_7, 
-[Planner] Checking matchesRHS: partsupp
-[Planner] Checking matchesRHS: part
-[Planner] Node HASH_JOIN output projections: ps_partkey, ps_suppkey, ps_supplycost, p_partkey, p_mfgr, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 16
-  #0: ps_partkey
-  #1: ps_suppkey
-  #2: ps_supplycost
-  #3: p_partkey
-  #4: p_mfgr
-  #5: s_suppkey
-  #6: s_nationkey
-  #7: s_acctbal
-  #8: s_name
-  #9: s_address
-  #10: s_phone
-  #11: s_comment
-  #12: n_nationkey
-  #13: n_regionkey
-  #14: n_name
-  #15: r_regionkey
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
-[Planner] Join Key Analysis: l => partsupp, r => supplier
-[Planner] Captured RHS Table: tmpl_join_5
-[Planner] RHS Tables: tmpl_join_5, 
-[Planner] Checking matchesRHS: partsupp
-[Planner] Checking matchesRHS: supplier
-[Planner] Node HASH_JOIN output projections: ps_partkey, ps_suppkey, ps_supplycost, p_partkey, p_mfgr, s_suppkey, s_nationkey, s_acctbal, s_name, s_address, s_phone, s_comment, n_nationkey, n_regionkey, n_name, r_regionkey, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_11 at index 11 Plan: 6096250920
-[Planner] Created Save Node with type: 9
-[Planner] CONFIRMED: Back node is Save.
-[Planner] Post-Emit Size: 12
-[Planner] Pushed DELIM context: tmpl_delim_lhs_11 (stack size=1)
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node PROJECTION
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_GROUP_BY
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table region
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: r_regionkey
-DEBUG: Scan table determined as: 'region'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
-[Planner] Generating Scan: region at index 0 Plan: 6096214608
-[Planner] Node SEQ_SCAN  output projections: r_regionkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: n_nationkey
-[Planner] Proj: n_regionkey
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 12 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_regionkey, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
-[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
-[Planner] ChildProjs size: 3
-  #0: n_nationkey
-  #1: n_regionkey
-  #2: r_regionkey
-[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
-[Planner] Join Key Analysis: l => nation, r => region
-[Planner] Captured RHS Table: region
-[Planner] RHS Tables: region, 
-[Planner] Checking matchesRHS: nation
-[Planner] Checking matchesRHS: region
-[Planner] Node HASH_JOIN output projections: n_nationkey, n_regionkey, r_regionkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 15 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 5
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: n_nationkey
-  #3: n_regionkey
-  #4: r_regionkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_14'
-[Planner] Join Key Analysis: l => supplier, r => nation
-[Planner] Captured RHS Table: tmpl_join_14
-[Planner] RHS Tables: tmpl_join_14, 
-[Planner] Checking matchesRHS: supplier
-[Planner] Checking matchesRHS: nation
-[Planner] Node HASH_JOIN output projections: s_suppkey, s_nationkey, n_nationkey, n_regionkey, r_regionkey, 
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node DELIM_SCAN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: DELIM_SCAN
-[Planner] Traversing: DELIM_SCAN
-[Planner] Entering children traversal block. Name: delim_scan Children: 0
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_11 at index 18 Plan: 6096250920
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: ps_partkey
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_supplycost
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 20 Plan: 6096250920
-[Planner] Node SEQ_SCAN  output projections: ps_partkey, ps_suppkey, ps_supplycost, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_19'
-[Planner] Pre-resolved Condition: 'ps_partkey = p_partkey'
-[Planner] ChildProjs size: 3
-  #0: ps_partkey
-  #1: ps_suppkey
-  #2: ps_supplycost
-[Planner] Resolved Condition: 'ps_partkey = p_partkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_19'
-[Planner] Join Key Analysis: l => partsupp, r => part
-[Planner] Captured RHS Table: tmpl_join_19
-[Planner] RHS Tables: tmpl_join_19, 
-[Planner] Checking matchesRHS: partsupp
-[Planner] Checking matchesRHS: part
-[Planner] Node HASH_JOIN output projections: ps_partkey, ps_suppkey, ps_supplycost, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_17'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 8
-  #0: ps_partkey
-  #1: ps_suppkey
-  #2: ps_supplycost
-  #3: s_suppkey
-  #4: s_nationkey
-  #5: n_nationkey
-  #6: n_regionkey
-  #7: r_regionkey
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_17'
-[Planner] Join Key Analysis: l => partsupp, r => supplier
-[Planner] Captured RHS Table: tmpl_join_17
-[Planner] RHS Tables: tmpl_join_17, 
-[Planner] Checking matchesRHS: partsupp
-[Planner] Checking matchesRHS: supplier
-[Planner] Node HASH_JOIN output projections: ps_partkey, ps_suppkey, ps_supplycost, s_suppkey, s_nationkey, n_nationkey, n_regionkey, r_regionkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: ps_partkey
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_supplycost
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-[Planner] Forcing keep of global column: n_nationkey
-[Planner] Forcing keep of global column: n_regionkey
-[Planner] Forcing keep of global column: r_regionkey
-[Planner] Node PROJECTION output projections: ps_partkey, ps_suppkey, ps_supplycost, s_suppkey, s_nationkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: p_partkey
-[Planner] Proj: ps_supplycost
-[Planner] Forcing keep of global column: ps_partkey
-[Planner] Forcing keep of global column: ps_suppkey
-[Planner] Forcing keep of global column: s_nationkey
-[Planner] Forcing keep of global column: s_suppkey
-[Planner] Node PROJECTION output projections: p_partkey, ps_supplycost, 
-[Planner] Parsing agg string: 'min(#1)'
-[Planner] Resolved agg: min(ps_supplycost)
-[Planner] inputExpr 'ps_supplycost' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'min(ps_supplycost)'
-[Planner] No alias found for agg, using generated name: min(ps_supplycost)
-[Planner] Pushing spec with outputName='min(ps_supplycost)'
-[Planner] Node HASH_GROUP_BY output projections: p_partkey, min(ps_supplycost), 
-[Planner] Traversing node: DELIM_SCAN
-[Planner] Traversing: DELIM_SCAN
-[Planner] Entering children traversal block. Name: delim_scan Children: 0
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_11 at index 27 Plan: 6096250920
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_26'
-[Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM #0'
-[Planner] ChildProjs size: 2
-  #0: p_partkey
-  #1: min(ps_supplycost)
-[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_26'
-[Planner] Join Key Analysis: l => part, r => part
-[Planner] Captured RHS Table: tmpl_join_26
-[Planner] RHS Tables: tmpl_join_26, 
-[Planner] Checking matchesRHS: part
-[Planner] Checking matchesRHS: part
-[Planner] Node HASH_JOIN output projections: p_partkey, min(ps_supplycost), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: min(ps_supplycost)
-[Planner] Proj: p_partkey
-[Planner] Node PROJECTION output projections: min(ps_supplycost), p_partkey, 
-[Planner] Traversing node: COLUMN_DATA_SCAN
-[Planner] Traversing: COLUMN_DATA_SCAN
-[Planner] Entering children traversal block. Name: column_data_scan Children: 0
-[Planner] DEBUG: COLUMN_DATA_SCAN found
-DEBUG: COLUMN_DATA_SCAN extra_info keys: 
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_11 at index 31 Plan: 6096250920
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_30'
-[Planner] Pre-resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
-[Planner] ChildProjs size: 2
-  #0: min(ps_supplycost)
-  #1: p_partkey
-[Planner] Resolved Condition: 'p_partkey IS NOT DISTINCT FROM p_partkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_30'
-[Planner] Join Key Analysis: l => part, r => part
-[Planner] Captured RHS Table: tmpl_join_30
-[Planner] RHS Tables: tmpl_join_30, 
-[Planner] Checking matchesRHS: part
-[Planner] Checking matchesRHS: part
-[Planner] Node HASH_JOIN output projections: min(ps_supplycost), p_partkey, 
-[Planner] Popping DELIM context: tmpl_delim_lhs_11
-[Planner] DELIM_JOIN condition: p_partkey IS NOT DISTINCT FROM p_partkey
-[Planner] Refined DELIM_JOIN condition: p_partkey = p_partkey -> p_partkey = p_partkey
-[Planner] DELIM_JOIN read Join Type from plan: 'SINGLE'
-[Planner] DELIM_JOIN emitting join type: 0 (0=Inner, 1=Left, 4=Semi, 5=Anti)
-Expression: (ps_supplycost = SUBQUERY)
-[Planner] DEBUG FILTER CHILD PROJS: ps_partkey, ps_suppkey, ps_supplycost, p_partkey, p_mfgr, s_suppkey, s_nationkey, s_acctbal, s_name, s_address, s_phone, s_comment, n_nationkey, n_regionkey, n_name, r_regionkey, min(ps_supplycost), p_partkey, 
-[Planner] Attempting to replace SUBQUERY in: (ps_supplycost = SUBQUERY)
-[Planner]   Checking candidate: p_partkey
-[Planner]   Checking candidate: min(ps_supplycost)
-[Planner] Replaced SUBQUERY with min(ps_supplycost)
-[Planner] Node FILTER output projections: ps_partkey, ps_suppkey, ps_supplycost, p_partkey, p_mfgr, s_suppkey, s_nationkey, s_acctbal, s_name, s_address, s_phone, s_comment, n_nationkey, n_regionkey, n_name, r_regionkey, min(ps_supplycost), p_partkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_supplycost
-[Planner] Proj: p_partkey
-[Planner] Proj: p_mfgr
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-[Planner] Proj: s_acctbal
-[Planner] Proj: s_name
-[Planner] Forcing keep of global column: r_regionkey
-[Planner] Forcing keep of global column: n_name
-[Planner] Forcing keep of global column: n_regionkey
-[Planner] Forcing keep of global column: n_nationkey
-[Planner] Forcing keep of global column: s_address
-[Planner] Forcing keep of global column: s_phone
-[Planner] Forcing keep of global column: s_comment
-[Planner] Forcing keep of global column: ps_partkey
-[Planner] Node PROJECTION output projections: ps_suppkey, ps_supplycost, p_partkey, p_mfgr, s_suppkey, s_nationkey, s_acctbal, s_name, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: s_acctbal
-[Planner] Proj: s_name
-[Planner] Proj: n_name
-[Planner] Proj: p_partkey
-[Planner] Proj: p_mfgr
-[Planner] Proj: s_address
-[Planner] Proj: s_phone
-[Planner] Proj: s_comment
-[Planner] Forcing keep of global column: ps_supplycost
-[Planner] Forcing keep of global column: s_suppkey
-[Planner] Forcing keep of global column: s_nationkey
-[Planner] Forcing keep of global column: ps_suppkey
-[Planner] Node PROJECTION output projections: s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, 
-[Planner] Node TOP_N output projections: s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   's_acctbal'
-[Planner]   's_name'
-[Planner]   'n_name'
-[Planner]   'p_partkey'
-[Planner]   'p_mfgr'
-[Planner]   's_address'
-[Planner]   's_phone'
-[Planner]   's_comment'
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+  TOTAL GPU TIME: 57.846 ms
+  Kernel invocations: 313

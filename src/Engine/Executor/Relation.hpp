@@ -11,19 +11,19 @@ namespace engine {
 
 // GPU relation abstraction: typed columns + rowCount.
 // Data is materialized (no selection vector).
-struct RelationGPU {
+struct GpuRelation {
     uint32_t rowCount = 0;
 
     // Columns stored as MTL::Buffer* in shared memory.
-    // Lifetime is owned by RelationGPU (release in destructor).
+    // Lifetime is owned by GpuRelation (release in destructor).
     std::unordered_map<std::string, MTL::Buffer*> u32cols;
     std::unordered_map<std::string, MTL::Buffer*> f32cols;
 
-    RelationGPU() = default;
-    RelationGPU(const RelationGPU&) = delete;
-    RelationGPU& operator=(const RelationGPU&) = delete;
+    GpuRelation() = default;
+    GpuRelation(const GpuRelation&) = delete;
+    GpuRelation& operator=(const GpuRelation&) = delete;
 
-    RelationGPU(RelationGPU&& other) noexcept {
+    GpuRelation(GpuRelation&& other) noexcept {
         rowCount = other.rowCount;
         u32cols = std::move(other.u32cols);
         f32cols = std::move(other.f32cols);
@@ -32,7 +32,7 @@ struct RelationGPU {
         other.f32cols.clear();
     }
 
-    RelationGPU& operator=(RelationGPU&& other) noexcept {
+    GpuRelation& operator=(GpuRelation&& other) noexcept {
         if (this == &other) return *this;
         releaseAll();
         rowCount = other.rowCount;
@@ -44,7 +44,7 @@ struct RelationGPU {
         return *this;
     }
 
-    ~RelationGPU() { releaseAll(); }
+    ~GpuRelation() { releaseAll(); }
 
     void releaseAll() {
         for (auto& [_, b] : u32cols) if (b) b->release();

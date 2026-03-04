@@ -40,8 +40,8 @@ public:
     // Main entry point: execute a V2 plan and return results
     static ExecutionResult execute(const Plan& plan, const std::string& datasetPath);
 
-    // Get list of blockers preventing GPU execution
-    static std::vector<std::string> getGPUBlockers(const Plan& plan);
+    // Get list of unsupported features preventing GPU execution
+    static std::vector<std::string> getUnsupportedFeatures(const Plan& plan);
 
 private:
     // Execute individual operators
@@ -55,16 +55,17 @@ private:
                                 const std::unordered_map<std::string, DictEncoded>& dictCols = {},
                                 const std::unordered_map<std::string, FlatStringCol>& flatStringCols = {});
     static bool executeLimit(const IRLimit& limit, TableResult& table);
+    static bool executeDistinct(const IRDistinct& distinct, EvalContext& ctx);
     static bool executeProject(const IRProject& project, EvalContext& ctx, TableResult& out, std::unordered_map<std::string, EvalContext>* tableContexts = nullptr);
 
-    // TypedExpr evaluation on GPU buffers
-    static MTL::Buffer* evalExprFloatGPU(const TypedExprPtr& expr, EvalContext& ctx);
+    // Evaluate a TypedExpr tree into a GPU float buffer
+    static MTL::Buffer* evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx);
     
-    // Recursive GPU filter helper
-    static bool executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx);
+    // Recursively evaluate filter predicates on GPU
+    static bool executeFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx);
     
-    // Orchestrate the complex logic of setting up a join (finding tables, handling scalar subqueries, etc.)
-    static bool orchestrateJoin(
+    // Execute full join pipeline: resolve tables, handle scalar subqueries, and dispatch join
+    static bool executeJoinPipeline(
         const IRJoin& join,
         const std::string& datasetPath,
         EvalContext& currentCtx,

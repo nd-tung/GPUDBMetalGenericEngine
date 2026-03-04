@@ -1,5 +1,71 @@
 --- Running (Engine Host) ---
+DEBUG: Scan table determined as: 'customer'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+Expression: (sum(l_quantity) > 300.00)
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
+[Planner] Pre-resolved Condition: 'o_orderkey = #0'
+[Planner] ChildProjs size: 5
+  #0: o_orderkey
+  #1: o_custkey
+  #2: o_orderdate
+  #3: o_totalprice
+  #4: l_orderkey
+[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
+[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
+[Planner] ChildProjs size: 7
+  #0: o_orderkey
+  #1: o_custkey
+  #2: o_orderdate
+  #3: o_totalprice
+  #4: l_orderkey
+  #5: c_custkey
+  #6: c_name
+[Planner] Resolved Condition: 'o_custkey = c_custkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
+DEBUG: Scan table determined as: 'lineitem'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_9'
+[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
+[Planner] ChildProjs size: 9
+  #0: l_orderkey
+  #1: l_quantity
+  #2: o_orderkey
+  #3: o_custkey
+  #4: o_orderdate
+  #5: o_totalprice
+  #6: l_orderkey_1
+  #7: c_custkey
+  #8: c_name
+[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_9'
 [Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 6001215
+[Exec] GroupBy VERIFY: agg mismatches = 0 / 6001215
+[Exec] GroupBy VERIFY: CPU grand total = 153078795.00
+[Exec] GroupBy VERIFY: GPU grand total = 153078795.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=4806726 val=328.00
+[Exec] GroupBy VERIFY: GPU max key=4806726 val=328.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 4806726 = 328.00
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
+[Exec] GroupBy VERIFY: key mismatches = 0 / 399
+[Exec] GroupBy VERIFY: agg mismatches = 0 / 399
+[Exec] GroupBy VERIFY: CPU grand total = 17524.00
+[Exec] GroupBy VERIFY: GPU grand total = 17524.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=36618 val=328.00
+[Exec] GroupBy VERIFY: GPU max key=36618 val=328.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 36618 = 328.00
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -62,204 +128,22 @@ o_orderdate|o_orderkey|c_custkey|sum(l_quantity)|o_totalprice|c_name|
 1994-02-07|857959|82441|305.00|382579.75|Customer#000082441|
 1994-01-30|2995076|88703|302.00|363812.12|Customer#000088703|
 ---------------------------------------------------
-Planning time: 20.43 ms
-Data Load Time (Disk+Upload): 5792.84 ms
-GPU kernels time: 44.67 ms
-CPU postprocess time: 175.94 ms
-Total Internal Pipeline time: 6013.46 ms
-Total Host Execution time: 6013.68 ms
-Total Wall time (Plan+Exec): 6034.11 ms
+Planning time: 20.03 ms
+Data Load Time (Disk+Upload): 5788.21 ms
+GPU kernels time: 40.04 ms
+CPU postprocess time: 397.55 ms
+Total Internal Pipeline time: 6225.80 ms
+Total Host Execution time: 6226.03 ms
+Total Wall time (Plan+Exec): 6246.07 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.548 ms (1.226%) [2 calls]
-  filter         :    5.838 ms (13.069%) [2 calls]
-  gather         :    4.028 ms (9.017%) [16 calls]
-  groupby        :   33.140 ms (74.182%) [6 calls]
-  hash_join_probe_u32:    0.830 ms (1.858%) [2 calls]
-  sort           :    0.289 ms (0.648%) [2 calls]
+  compact        :    0.513 ms (1.282%) [2 calls]
+  filter         :    6.733 ms (16.817%) [2 calls]
+  gather         :    3.399 ms (8.489%) [16 calls]
+  groupby        :   28.300 ms (70.680%) [6 calls]
+  hash_join_probe_u32:    0.822 ms (2.053%) [2 calls]
+  sort           :    0.272 ms (0.680%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 44.674 ms
+  TOTAL GPU TIME: 40.039 ms
   Kernel invocations: 30
-[Planner] Parsed aliases:
-[Planner] Traversing node: TOP_N
-[Planner] Traversing: TOP_N
-[Planner] Entering children traversal block. Name: top_n Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table customer
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_custkey
-[Planner] Proj: c_name
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6103561440
-[Planner] Node SEQ_SCAN  output projections: c_custkey, c_name, 
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node PROJECTION
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: FILTER
-[Planner] Traversing: FILTER
-[Planner] Entering children traversal block. Name: filter Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_quantity
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6103574568
-[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_quantity, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_quantity
-[Planner] Node PROJECTION output projections: l_orderkey, l_quantity, 
-[Planner] Parsing agg string: 'sum_no_overflow(#1)'
-[Planner] Resolved agg: sum_no_overflow(l_quantity)
-[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(l_quantity)'
-[Planner] No alias found for agg, using generated name: sum(l_quantity)
-[Planner] Pushing spec with outputName='sum(l_quantity)'
-[Planner] Node HASH_GROUP_BY output projections: l_orderkey, sum(l_quantity), 
-Expression: (sum(l_quantity) > 300.00)
-[Planner] DEBUG FILTER CHILD PROJS: l_orderkey, sum(l_quantity), 
-[Planner] Node FILTER output projections: l_orderkey, sum(l_quantity), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_orderkey
-[Planner] Node PROJECTION output projections: l_orderkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_orderkey
-[Planner] Proj: o_custkey
-[Planner] Proj: o_orderdate
-[Planner] Proj: o_totalprice
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 6 Plan: 6103574568
-[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
-[Planner] Pre-resolved Condition: 'o_orderkey = #0'
-[Planner] ChildProjs size: 5
-  #0: o_orderkey
-  #1: o_custkey
-  #2: o_orderdate
-  #3: o_totalprice
-  #4: l_orderkey
-[Planner] Fixing Join Indexing: Shifted 'o_orderkey = #0' to 'o_orderkey = #4'
-[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
-[Planner] Join Key Analysis: l => orders, r => lineitem
-[Planner] Captured RHS Table: tmpl_join_5
-[Planner] RHS Tables: tmpl_join_5, 
-[Planner] Checking matchesRHS: orders
-[Planner] Checking matchesRHS: lineitem
-[Planner] Node HASH_JOIN output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, l_orderkey, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
-[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
-[Planner] ChildProjs size: 7
-  #0: o_orderkey
-  #1: o_custkey
-  #2: o_orderdate
-  #3: o_totalprice
-  #4: l_orderkey
-  #5: c_custkey
-  #6: c_name
-[Planner] Resolved Condition: 'o_custkey = c_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
-[Planner] Join Key Analysis: l => orders, r => customer
-[Planner] Captured RHS Table: customer
-[Planner] RHS Tables: customer, 
-[Planner] Checking matchesRHS: orders
-[Planner] Checking matchesRHS: customer
-[Planner] Node HASH_JOIN output projections: o_orderkey, o_custkey, o_orderdate, o_totalprice, l_orderkey, c_custkey, c_name, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_quantity
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 10 Plan: 6103574568
-[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_quantity, 
-[Planner] Renamed duplicate column: l_orderkey -> l_orderkey_1
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_9'
-[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
-[Planner] ChildProjs size: 9
-  #0: l_orderkey
-  #1: l_quantity
-  #2: o_orderkey
-  #3: o_custkey
-  #4: o_orderdate
-  #5: o_totalprice
-  #6: l_orderkey_1
-  #7: c_custkey
-  #8: c_name
-[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_9'
-[Planner] Join Key Analysis: l => lineitem, r => orders
-[Planner] Captured RHS Table: tmpl_join_9
-[Planner] RHS Tables: tmpl_join_9, 
-[Planner] Checking matchesRHS: lineitem
-[Planner] Checking matchesRHS: orders
-[Planner] Node HASH_JOIN output projections: l_orderkey, l_quantity, o_orderkey, o_custkey, o_orderdate, o_totalprice, l_orderkey_1, c_custkey, c_name, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_name
-[Planner] Proj: c_custkey
-[Planner] Proj: o_orderkey
-[Planner] Proj: o_orderdate
-[Planner] Proj: o_totalprice
-[Planner] Proj: l_quantity
-[Planner] Forcing keep of global column: o_custkey
-[Planner] Forcing keep of global column: l_orderkey
-[Planner] Node PROJECTION output projections: c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, l_quantity, 
-[Planner] Parsing agg string: 'sum(#5)'
-[Planner] Resolved agg: sum(#5)
-[Planner] Looking up agg alias: 'sum(l_quantity)'
-[Planner] No alias found for agg, using generated name: sum(l_quantity)
-[Planner] Pushing spec with outputName='sum(l_quantity)'
-[Planner] Node HASH_GROUP_BY output projections: c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity), 
-[Planner] Node TOP_N output projections: c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity), 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'c_name'
-[Planner]   'c_custkey'
-[Planner]   'o_orderkey'
-[Planner]   'o_orderdate'
-[Planner]   'o_totalprice'
-[Planner]   'sum(l_quantity)'
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).

@@ -1,135 +1,8 @@
 --- Running (Engine Host) ---
-[Main] Using GpuExecutor generic executor.
----------------------------------------------------
-======================RESULT=======================
----------------------------------------------------
-totacctbal|numcust|cntrycode|
-6737713.50|888.00|13|
-6460573.50|861.00|17|
-7236687.50|964.00|18|
-6701457.50|892.00|23|
-7158865.00|948.00|29|
-6808437.50|909.00|30|
-6806671.00|922.00|31|
----------------------------------------------------
-Planning time: 21.76 ms
-Data Load Time (Disk+Upload): 776.91 ms
-GPU kernels time: 16.73 ms
-CPU postprocess time: 56.38 ms
-Total Internal Pipeline time: 850.02 ms
-Total Host Execution time: 850.89 ms
-Total Wall time (Plan+Exec): 872.65 ms
----------------------------------------------------
-GPU Kernel Timing Summary:
-─────────────────────────────────────────
-  compact        :    3.667 ms (21.913%) [16 calls]
-  filter         :    4.335 ms (25.909%) [16 calls]
-  gather         :    5.867 ms (35.061%) [17 calls]
-  groupby        :    0.691 ms (4.128%) [3 calls]
-  hash_join_probe_u32:    1.954 ms (11.679%) [8 calls]
-  sort           :    0.219 ms (1.310%) [4 calls]
-─────────────────────────────────────────
-  TOTAL GPU TIME: 16.733 ms
-  Kernel invocations: 64
-[Planner] Parsed aliases:
-[Planner]   'cntrycode' -> 'substring(c_phone from 1 for 2)'
-[Planner]   'substring(c_phonefrom1for2)' -> 'cntrycode'
-[Planner]   'totacctbal' -> 'sum(c_acctbal)'
-[Planner]   'numcust' -> 'count(*)'
-[Planner]   'sum(c_acctbal)' -> 'totacctbal'
-[Planner]   'count(*)' -> 'numcust'
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: RIGHT_DELIM_JOIN
-[Planner] Traversing: RIGHT_DELIM_JOIN
-[Planner] [TraverseNode] Logic for JOIN: RIGHT_DELIM_JOIN
-[Planner] Entering children traversal block. Name: right_delim_join Children: 3
-[Planner] Checking LHS (kids[0]) for delim...
-[Planner] checkDelim visiting: nested_loop_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: ungrouped_aggregate
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: ungrouped_aggregate
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: seq_scan 
-[Planner] Result LHS: 0
-[Planner] Checking RHS (kids[1]) for delim...
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: delim_scan
-[Planner] checkDelim FOUND: delim_scan
-[Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6161016872
-[Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
-[Planner] Traversing node: NESTED_LOOP_JOIN
-[Planner] Traversing: NESTED_LOOP_JOIN
-[Planner] [TraverseNode] Logic for JOIN: NESTED_LOOP_JOIN
-[Planner] Checking RHS capture for Join NESTED_LOOP_JOIN
-[Planner] Inspecting RHS node PROJECTION
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: UNGROUPED_AGGREGATE
-[Planner] Traversing: UNGROUPED_AGGREGATE
-[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: UNGROUPED_AGGREGATE
-[Planner] Traversing: UNGROUPED_AGGREGATE
-[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_acctbal
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6161016872
-[Planner] Node SEQ_SCAN  output projections: c_acctbal, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_acctbal
-[Planner] Node PROJECTION output projections: c_acctbal, 
-[Planner] Processing aggregate: 'avg(c_acctbal)'
-[Planner] Node UNGROUPED_AGGREGATE output projections: avg(c_acctbal), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: avg(c_acctbal)
-[Planner] Node PROJECTION output projections: avg(c_acctbal), 
-[Planner] Processing aggregate: '"first"(avg(c_acctbal))'
-[Planner] Processing aggregate: 'count_star()'
-[Planner] Node UNGROUPED_AGGREGATE output projections: "first"(avg(c_acctbal)), count_star(), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Fixing split CASE projection. Appending next line.
-[Planner] Proj: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END
-[Planner] Node PROJECTION output projections: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_phone
-[Planner] Proj: c_acctbal
-[Planner] Proj: c_custkey
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 8 Plan: 6161016872
-[Planner] Node SEQ_SCAN  output projections: c_phone, c_acctbal, c_custkey, 
 [Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_7'
 [Planner] Pre-resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
 [Planner] ChildProjs size: 4
@@ -140,107 +13,68 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
 [Planner] Keeping SUBQUERY token (RHS is complex: 'CASE  WHEN ((count_star() > 1)) THEN ("e...')
 [Planner] Resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
 DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
-[Planner] Node NESTED_LOOP_JOIN output projections: c_phone, c_acctbal, c_custkey, CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_10 at index 10 Plan: 6161016872
-[Planner] Created Save Node with type: 9
-[Planner] CONFIRMED: Back node is Save.
-[Planner] Post-Emit Size: 11
-[Planner] Pushed DELIM context: tmpl_delim_lhs_10 (stack size=1)
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node DUMMY_SCAN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: DUMMY_SCAN
-[Planner] Traversing: DUMMY_SCAN
-[Planner] Entering children traversal block. Name: dummy_scan Children: 0
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 11 Plan: 6161016872
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node DELIM_SCAN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: DELIM_SCAN
-[Planner] Traversing: DELIM_SCAN
-[Planner] Entering children traversal block. Name: delim_scan Children: 0
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 13 Plan: 6161016872
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_custkey
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 15 Plan: 6161016872
-[Planner] Node SEQ_SCAN  output projections: o_custkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
 [Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
 [Planner] ChildProjs size: 1
   #0: o_custkey
 [Planner] Resolved Condition: 'o_custkey = c_custkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_14'
-[Planner] Join Key Analysis: l => orders, r => customer
-[Planner] Captured RHS Table: tmpl_join_14
-[Planner] RHS Tables: tmpl_join_14, 
-[Planner] Checking matchesRHS: orders
-[Planner] Checking matchesRHS: customer
-[Planner] Node HASH_JOIN output projections: o_custkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_custkey
-[Planner] Forcing keep of global column: o_custkey
-[Planner] Node PROJECTION output projections: c_custkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_12'
 [Planner] Pre-resolved Condition: 'c_custkey IS NOT DISTINCT FROM c_custkey'
 [Planner] ChildProjs size: 1
   #0: c_custkey
 [Planner] Resolved Condition: 'c_custkey IS NOT DISTINCT FROM c_custkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
-[Planner] Join Key Analysis: l => customer, r => customer
-[Planner] Captured RHS Table: tmpl_join_12
-[Planner] RHS Tables: tmpl_join_12, 
-[Planner] Checking matchesRHS: customer
-[Planner] Checking matchesRHS: customer
-[Planner] Node HASH_JOIN output projections: c_custkey, 
-[Planner] Popping DELIM context: tmpl_delim_lhs_10
-[Planner] DELIM_JOIN condition: c_custkey IS NOT DISTINCT FROM c_custkey
-[Planner] Refined DELIM_JOIN condition: c_custkey = c_custkey -> c_custkey = c_custkey
-[Planner] DELIM_JOIN read Join Type from plan: 'RIGHT_ANTI'
-[Planner] DELIM_JOIN emitting join type: 6 (0=Inner, 1=Left, 4=Semi, 5=Anti)
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: cntrycode
-[Planner] Proj: c_acctbal
-[Planner] Projection: resolving alias 'cntrycode' -> 'substring(c_phone from 1 for 2)'
-[Planner] Forcing keep of global column: c_custkey
-[Planner] Forcing keep of global column: c_phone
-[Planner] Node PROJECTION output projections: cntrycode, c_acctbal, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: cntrycode
-[Planner] Proj: c_acctbal
-[Planner] Node PROJECTION output projections: cntrycode, c_acctbal, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: numcust
-[Planner] Pushing spec with outputName='numcust'
-[Planner] Parsing agg string: 'sum(#1)'
-[Planner] Resolved agg: sum(c_acctbal)
-[Planner] inputExpr 'c_acctbal' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(c_acctbal)'
-[Planner] Found alias for agg: totacctbal
-[Planner] Pushing spec with outputName='totacctbal'
-[Planner] Node HASH_GROUP_BY output projections: cntrycode, numcust, totacctbal, 
-[Planner] Node ORDER_BY output projections: cntrycode, numcust, totacctbal, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'cntrycode'
-[Planner]   'numcust'
-[Planner]   'totacctbal'
+[Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 6384
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=451618993 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=334175660 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 451618993 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=2398264082 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2297451273 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2498929796 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=334175660 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=518729469 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=451618993 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2280673654 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 7 GPU groups exceed CPU max revenue
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+totacctbal|numcust|cntrycode|
+6737714.50|888.00|13|
+6460573.50|861.00|17|
+7236688.50|964.00|18|
+6701459.50|892.00|23|
+7158866.50|948.00|29|
+6808437.00|909.00|30|
+6806669.00|922.00|31|
+---------------------------------------------------
+Planning time: 20.68 ms
+Data Load Time (Disk+Upload): 770.92 ms
+GPU kernels time: 16.62 ms
+CPU postprocess time: 49.18 ms
+Total Internal Pipeline time: 836.72 ms
+Total Host Execution time: 837.58 ms
+Total Wall time (Plan+Exec): 858.26 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.163 ms (0.979%) [1 calls]
+  compact        :    3.591 ms (21.612%) [16 calls]
+  filter         :    4.220 ms (25.395%) [16 calls]
+  gather         :    5.392 ms (32.449%) [17 calls]
+  groupby        :    0.677 ms (4.073%) [3 calls]
+  hash_join_probe_u32:    2.367 ms (14.244%) [8 calls]
+  sort           :    0.207 ms (1.247%) [3 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 16.618 ms
+  Kernel invocations: 64

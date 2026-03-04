@@ -54,13 +54,13 @@ public:
     
     // Register a table schema
     void registerTable(TableSchema schema) {
-        tables_[schema.name] = std::move(schema);
+        m_tables[schema.name] = std::move(schema);
     }
     
     // Get table schema
     const TableSchema* getTable(const std::string& name) const {
-        auto it = tables_.find(name);
-        return it != tables_.end() ? &it->second : nullptr;
+        auto it = m_tables.find(name);
+        return it != m_tables.end() ? &it->second : nullptr;
     }
     
     // Get column type for a table.column
@@ -176,7 +176,7 @@ private:
         initTPCH();  // Initialize with TPC-H by default
     }
     
-    std::unordered_map<std::string, TableSchema> tables_;
+    std::unordered_map<std::string, TableSchema> m_tables;
 };
 
 } // namespace engine

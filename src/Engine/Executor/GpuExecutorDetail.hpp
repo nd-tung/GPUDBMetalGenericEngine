@@ -10,6 +10,32 @@
 #include <cctype>
 #include <cstring>
 #include <iostream>
+
+// ============================================================================
+// Configuration constants (previously magic numbers scattered across the codebase)
+// ============================================================================
+namespace engine::config {
+    // Maximum number of suffix variations to try when resolving column names
+    // (e.g., col_1, col_2, ... col_N for multi-instance table columns)
+    constexpr int kMaxColumnSuffixSearch = 9;
+
+    // Threshold row count below which a date value is treated as days-since-epoch
+    // rather than YYYYMMDD format
+    constexpr uint32_t kDateFormatThreshold = 100000;
+
+    // Sample size for detecting whether a column has varying values
+    constexpr size_t kColumnSampleSize = 100;
+
+    // Thread spawn threshold for parallel CPU string gather in joins
+    constexpr uint32_t kParallelStringGatherThreshold = 10000;
+
+    // Maximum keys and aggregates per group in GPU hash table layout
+    constexpr uint32_t kMaxGroupByKeys = 8;
+    constexpr uint32_t kMaxGroupByAggs = 16;
+
+    // GPU block sort threshold — elements <= this use shared-memory bitonic sort
+    constexpr uint32_t kBlockSortThreshold = 1024;
+} // namespace engine::config
 #include <set>
 #include <map>
 #include <unordered_map>
@@ -314,7 +340,7 @@ struct ScanInstance {
 std::map<size_t, ScanInstance> buildScanInstanceMap(const Plan& plan);
 std::unordered_map<std::string, std::set<std::string>> collectNeededColumns(const Plan& plan);
 // GPU dedup helper: deduplicate an EvalContext by u32 key columns (GpuExecutor.cpp)
-uint32_t gpuDedupContext(EvalContext& ctx, const std::vector<std::string>& dedupCols, bool debug);
+uint32_t deduplicateContext(EvalContext& ctx, const std::vector<std::string>& dedupCols, bool debug);
 // Flatten/dict helpers (Scan.cpp) — callable from Join.cpp and other modules
 void flattenStringCol(EvalContext& ctx, const std::string& colName);
 void buildDictCol(EvalContext& ctx, const std::string& colName);
@@ -334,7 +360,7 @@ struct IRGpuLoader {
 // Inline helpers  (env_truthy is in EnvUtil.hpp)
 
 // Split a condition string by " AND " into parts.
-inline std::vector<std::string> splitConditionByAND(const std::string& s) {
+inline std::vector<std::string> splitConditionByAnd(const std::string& s) {
     std::vector<std::string> parts;
     size_t start = 0;
     while (start < s.size()) {

@@ -1,7 +1,7 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 #include "KernelTimer.hpp"
 
 #include <chrono>
@@ -27,14 +27,14 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             if (i + 1 < order.columns.size()) std::cerr << ", ";
         }
         std::cerr << "]\n";
-        std::cerr << "[Exec] OrderBy: table.u32_names=[";
-        for (const auto& n : table.u32_names) std::cerr << n << ", ";
+        std::cerr << "[Exec] OrderBy: table.u32Names=[";
+        for (const auto& n : table.u32Names) std::cerr << n << ", ";
         std::cerr << "]\n";
-        std::cerr << "[Exec] OrderBy: table.f32_names=[";
-        for (const auto& n : table.f32_names) std::cerr << n << ", ";
+        std::cerr << "[Exec] OrderBy: table.f32Names=[";
+        for (const auto& n : table.f32Names) std::cerr << n << ", ";
         std::cerr << "]\n";
-        std::cerr << "[Exec] OrderBy: table.string_names=[";
-        for (const auto& n : table.string_names) std::cerr << n << ", ";
+        std::cerr << "[Exec] OrderBy: table.stringNames=[";
+        for (const auto& n : table.stringNames) std::cerr << n << ", ";
         std::cerr << "]\n";
     }
     
@@ -54,20 +54,20 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
         
         // Check string_names FIRST — u32 columns for strings store hash values
         // that sort numerically (wrong). String sort is always correct.
-        for (size_t j = 0; j < table.string_names.size() && !found; ++j) {
-            if (table.string_names[j] == colName || base_ident(table.string_names[j]) == base_ident(colName)) {
+        for (size_t j = 0; j < table.stringNames.size() && !found; ++j) {
+            if (table.stringNames[j] == colName || base_ident(table.stringNames[j]) == base_ident(colName)) {
                 sortCols.push_back({2, asc, j});
                 found = true;
             }
         }
-        for (size_t j = 0; j < table.u32_names.size() && !found; ++j) {
-            if (table.u32_names[j] == colName || base_ident(table.u32_names[j]) == base_ident(colName)) {
+        for (size_t j = 0; j < table.u32Names.size() && !found; ++j) {
+            if (table.u32Names[j] == colName || base_ident(table.u32Names[j]) == base_ident(colName)) {
                 sortCols.push_back({0, asc, j});
                 found = true;
             }
         }
-        for (size_t j = 0; j < table.f32_names.size() && !found; ++j) {
-            if (table.f32_names[j] == colName || base_ident(table.f32_names[j]) == base_ident(colName)) {
+        for (size_t j = 0; j < table.f32Names.size() && !found; ++j) {
+            if (table.f32Names[j] == colName || base_ident(table.f32Names[j]) == base_ident(colName)) {
                 sortCols.push_back({1, asc, j});
                 found = true;
             }
@@ -83,8 +83,8 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             bool isMax = colLower.find("max(") != std::string::npos;
             
             if (isSum || isAvg || isCount || isMin || isMax) {
-                for (size_t j = 0; j < table.f32_names.size() && !found; ++j) {
-                    const std::string& name = table.f32_names[j];
+                for (size_t j = 0; j < table.f32Names.size() && !found; ++j) {
+                    const std::string& name = table.f32Names[j];
                     std::string nameLower = name;
                     std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
                     if ((isSum && (nameLower.find("revenue") != std::string::npos || 
@@ -103,15 +103,15 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
                     }
                 }
                 
-                if (!found && table.f32_names.size() == 1) {
+                if (!found && table.f32Names.size() == 1) {
                     sortCols.push_back({1, asc, 0});
                     found = true;
-                    if (debug) std::cerr << "[Exec] OrderBy: fallback '" << colName << "' to single f32 '" << table.f32_names[0] << "'\n";
+                    if (debug) std::cerr << "[Exec] OrderBy: fallback '" << colName << "' to single f32 '" << table.f32Names[0] << "'\n";
                 }
                 
                 if (!found && colLower.find("distinct") != std::string::npos) {
-                    for (size_t j = 0; j < table.f32_names.size() && !found; ++j) {
-                        const std::string& name = table.f32_names[j];
+                    for (size_t j = 0; j < table.f32Names.size() && !found; ++j) {
+                        const std::string& name = table.f32Names[j];
                         if (name.size() >= 2 && name[0] == '#') {
                             sortCols.push_back({1, asc, j});
                             found = true;
@@ -135,68 +135,68 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
         return true;
     }
 
-    auto buildRankU32 = [&](const std::vector<uint32_t>& col, bool asc) -> std::vector<uint32_t> {
-        // GPU path: upload, optionally invert for DESC, download
-        auto& s = ColumnStoreGPU::instance();
-        MTL::Buffer* srcBuf = s.device()->newBuffer(col.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto buildRankU32 = [&](const std::vector<uint32_t>& col, bool asc, MTL::Buffer* gpuBuf) -> MTL::Buffer* {
+        // GPU path: use existing GPU buffer or upload, optionally invert for DESC
+        auto& s = GpuColumnStore::instance();
+        MTL::Buffer* srcBuf = gpuBuf;
+        bool ownSrc = false;
+        if (!srcBuf) {
+            srcBuf = s.device()->newBuffer(col.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            ownSrc = true;
+        }
         if (asc) {
-            std::vector<uint32_t> rank(n);
-            std::memcpy(rank.data(), srcBuf->contents(), n * sizeof(uint32_t));
-            srcBuf->release();
-            return rank;
+            if (ownSrc) return srcBuf;
+            // Need a copy since we shouldn't modify the original
+            MTL::Buffer* copy = s.device()->newBuffer(srcBuf->contents(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            return copy;
         } else {
             MTL::Buffer* inv = GpuOps::invertU32(srcBuf, n);
-            srcBuf->release();
-            std::vector<uint32_t> rank(n);
-            std::memcpy(rank.data(), inv->contents(), n * sizeof(uint32_t));
-            inv->release();
-            return rank;
+            if (ownSrc) srcBuf->release();
+            return inv;
         }
     };
 
-    auto buildRankF32 = [&](const std::vector<float>& col, bool asc) -> std::vector<uint32_t> {
-        // GPU path: upload f32, convert to sort key u32 on GPU, download
-        auto& s = ColumnStoreGPU::instance();
-        MTL::Buffer* srcBuf = s.device()->newBuffer(col.data(), n * sizeof(float), MTL::ResourceStorageModeShared);
+    auto buildRankF32 = [&](const std::vector<float>& col, bool asc, MTL::Buffer* gpuBuf) -> MTL::Buffer* {
+        // GPU path: use existing GPU buffer or upload, convert to sort key u32 on GPU
+        auto& s = GpuColumnStore::instance();
+        MTL::Buffer* srcBuf = gpuBuf;
+        bool ownSrc = false;
+        if (!srcBuf) {
+            srcBuf = s.device()->newBuffer(col.data(), n * sizeof(float), MTL::ResourceStorageModeShared);
+            ownSrc = true;
+        }
         MTL::Buffer* keyBuf = GpuOps::floatToSortKeyU32(srcBuf, n, !asc);
-        srcBuf->release();
-        std::vector<uint32_t> rank(n);
-        std::memcpy(rank.data(), keyBuf->contents(), n * sizeof(uint32_t));
-        keyBuf->release();
-        return rank;
+        if (ownSrc) srcBuf->release();
+        return keyBuf;
     };
 
     auto buildRankString = [&](const std::vector<std::string>& col, bool asc,
-                               const std::string& colName) -> std::vector<uint32_t> {
+                               const std::string& colName) -> MTL::Buffer* {
         // Path 0: Dictionary ID path — dict IDs are already lexicographic ranks
-        // (dictionary is sorted at build time, IDs are 0-based sequential)
+        auto& s = GpuColumnStore::instance();
         auto dictIt = dictCols.find(colName);
         if (dictIt != dictCols.end() && dictIt->second.rowCount == n) {
             const auto& dict = dictIt->second;
-            uint32_t maxRank = static_cast<uint32_t>(dict.dictionary.size());
-            std::vector<uint32_t> rank(n);
             if (asc) {
-                // ASC: dict IDs are already lexicographic ranks — download from GPU
+                // ASC: dict IDs are already lexicographic ranks — use GPU buffer directly
                 if (dict.idsGPU) {
-                    std::memcpy(rank.data(), dict.idsGPU->contents(), n * sizeof(uint32_t));
+                    MTL::Buffer* copy = s.device()->newBuffer(dict.idsGPU->contents(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    return copy;
                 } else {
-                    std::copy(dict.ids.begin(), dict.ids.begin() + n, rank.begin());
+                    return s.device()->newBuffer(dict.ids.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                 }
             } else {
-                // DESC: invert on GPU (bitwise NOT preserves relative DESC ordering)
+                // DESC: invert on GPU
                 if (dict.idsGPU) {
                     MTL::Buffer* inv = GpuOps::invertU32(dict.idsGPU, n);
-                    std::memcpy(rank.data(), inv->contents(), n * sizeof(uint32_t));
-                    inv->release();
+                    return inv;
                 } else {
-                    for (uint32_t i = 0; i < n; ++i) rank[i] = maxRank - 1 - dict.ids[i];
+                    MTL::Buffer* buf = s.device()->newBuffer(dict.ids.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* inv = GpuOps::invertU32(buf, n);
+                    buf->release();
+                    return inv;
                 }
             }
-            if (debug) {
-                std::cerr << "[Exec] OrderBy: Dict ID rank for '" << colName
-                          << "' (" << maxRank << " unique)\n";
-            }
-            return rank;
         }
 
         // Path 1: Prefix-u64 accelerated ranking.
@@ -240,33 +240,40 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             std::cerr << "[Exec] OrderBy: Prefix-u64 rank for '" << colName
                       << "' (" << uniq.size() << " unique)\n";
         }
-        return rank;
+        return s.device()->newBuffer(rank.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     };
 
-    std::vector<std::vector<uint32_t>> ranks;
+    // Build rank GPU buffers — stay on GPU throughout (no CPU round-trip)
+    std::vector<MTL::Buffer*> rankBufs;
     for (const auto& sc : sortCols) {
+        MTL::Buffer* gpuBuf = nullptr;
         if (sc.type == 0) {
-            ranks.push_back(buildRankU32(table.u32_cols[sc.colIdx], sc.ascending));
+            // Check for pre-existing GPU buffer in TableResult
+            gpuBuf = (sc.colIdx < table.u32ColsGPU.size()) ? table.u32ColsGPU[sc.colIdx] : nullptr;
+            rankBufs.push_back(buildRankU32(table.u32Cols[sc.colIdx], sc.ascending, gpuBuf));
         } else if (sc.type == 1) {
-            ranks.push_back(buildRankF32(table.f32_cols[sc.colIdx], sc.ascending));
+            gpuBuf = (sc.colIdx < table.f32ColsGPU.size()) ? table.f32ColsGPU[sc.colIdx] : nullptr;
+            rankBufs.push_back(buildRankF32(table.f32Cols[sc.colIdx], sc.ascending, gpuBuf));
         } else {
-            ranks.push_back(buildRankString(table.string_cols[sc.colIdx], sc.ascending,
-                                            table.string_names[sc.colIdx]));
+            rankBufs.push_back(buildRankString(table.stringCols[sc.colIdx], sc.ascending,
+                                            table.stringNames[sc.colIdx]));
         }
     }
 
-    auto& store = ColumnStoreGPU::instance();
+    auto& store = GpuColumnStore::instance();
 
-    // GPU sort: pack all rank vectors into a single composite key and use
+    // GPU sort: pack all rank GPU buffers into a composite key and use
     // GPU radix sort (block sort for ≤1024, multi-pass radix for larger).
+    // Rank buffers stay on GPU throughout — no CPU round-trip.
     {
         if (debug) {
             std::cerr << "[Exec] OrderBy: sortCols.size()=" << sortCols.size()
-                      << " ranks.size()=" << ranks.size() << " n=" << n << "\n";
-            for (size_t k = 0; k < ranks.size(); ++k) {
-                std::cerr << "[Exec] OrderBy: ranks[" << k << "] = [";
+                      << " rankBufs.size()=" << rankBufs.size() << " n=" << n << "\n";
+            for (size_t k = 0; k < rankBufs.size(); ++k) {
+                std::cerr << "[Exec] OrderBy: rankBufs[" << k << "] first few = [";
+                auto* p = static_cast<const uint32_t*>(rankBufs[k]->contents());
                 for (uint32_t i = 0; i < std::min(n, 20u); ++i)
-                    std::cerr << ranks[k][i] << (i+1<n?",":"");
+                    std::cerr << p[i] << (i+1<n?",":"");
                 std::cerr << "]\n";
             }
         }
@@ -275,12 +282,11 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
 
         if (sortCols.size() <= 2) {
             // Pack into u64: primary key in upper 32 bits, secondary in lower 32.
-            MTL::Buffer* rank0Buf = store.device()->newBuffer(
-                ranks[0].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            // Use rank GPU buffers directly — no upload needed
+            MTL::Buffer* rank0Buf = rankBufs[0];
             MTL::Buffer* rank1Buf = nullptr;
             if (sortCols.size() > 1) {
-                rank1Buf = store.device()->newBuffer(
-                    ranks[1].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                rank1Buf = rankBufs[1];
             } else {
                 // Zero-filled secondary key
                 rank1Buf = store.device()->newBuffer(n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -288,19 +294,17 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             }
             MTL::Buffer* keyBuf = GpuOps::packU32ToU64(rank0Buf, rank1Buf, n);
             rank0Buf->release();
-            rank1Buf->release();
+            if (sortCols.size() <= 1) rank1Buf->release();  // only release zero-fill, not rankBufs[1]
+            else rank1Buf->release();  // rankBufs[1] ownership transferred
 
             GpuOps::radixSortU64(keyBuf, idxBuf, n);
             keyBuf->release();
         } else {
             // 3+ keys: stable LSD radix sort (least-significant-digit first).
-            // Embed position in low 32 bits of u64 key to ensure stability.
             for (int k = (int)sortCols.size() - 1; k >= 0; --k) {
-                // GPU: gather rank values at current permutation, pack with position
-                MTL::Buffer* rankBuf = store.device()->newBuffer(
-                    ranks[k].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                MTL::Buffer* gatheredRank = GpuOps::gatherU32(rankBuf, idxBuf, n, true);
-                rankBuf->release();
+                // Use rank GPU buffer directly — no upload needed
+                MTL::Buffer* gatheredRank = GpuOps::gatherU32(rankBufs[k], idxBuf, n, true);
+                rankBufs[k]->release();  // ownership transferred
                 MTL::Buffer* posBuf = GpuOps::iotaU32(n);
                 MTL::Buffer* keyBuf = GpuOps::packU32ToU64(gatheredRank, posBuf, n);
                 gatheredRank->release();
@@ -320,32 +324,44 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
         }
 
         // --- GPU Gather: reorder u32 and f32 columns on GPU ---
-        // Upload each column, gather with idxBuf, download result.
-        // Dispatch all gathers without sync for max throughput, then sync once.
-        uint32_t totalGatherElements = (uint32_t)(table.u32_cols.size() + table.f32_cols.size()) * n;
+        // Use pre-existing GPU buffers when available (from GroupBy output);
+        // otherwise upload from CPU. Dispatch all gathers without sync for max throughput.
+        uint32_t totalGatherElements = (uint32_t)(table.u32Cols.size() + table.f32Cols.size()) * n;
         auto gatherStart = std::chrono::high_resolution_clock::now();
 
         std::vector<MTL::Buffer*> gatheredU32;
-        std::vector<MTL::Buffer*> srcU32Bufs;      // track for release
-        gatheredU32.reserve(table.u32_cols.size());
-        srcU32Bufs.reserve(table.u32_cols.size());
-        for (auto& col : table.u32_cols) {
-            MTL::Buffer* srcBuf = store.device()->newBuffer(
-                col.data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        std::vector<MTL::Buffer*> srcU32Bufs;      // track for release (only if we uploaded)
+        gatheredU32.reserve(table.u32Cols.size());
+        srcU32Bufs.reserve(table.u32Cols.size());
+        for (size_t ci = 0; ci < table.u32Cols.size(); ++ci) {
+            MTL::Buffer* srcBuf = (ci < table.u32ColsGPU.size() && table.u32ColsGPU[ci])
+                ? table.u32ColsGPU[ci] : nullptr;
+            bool ownSrc = false;
+            if (!srcBuf) {
+                srcBuf = store.device()->newBuffer(
+                    table.u32Cols[ci].data(), n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                ownSrc = true;
+            }
             MTL::Buffer* dstBuf = GpuOps::gatherU32(srcBuf, idxBuf, n, /*sync=*/false);
-            srcU32Bufs.push_back(srcBuf);
+            srcU32Bufs.push_back(ownSrc ? srcBuf : nullptr);
             gatheredU32.push_back(dstBuf);
         }
 
         std::vector<MTL::Buffer*> gatheredF32;
         std::vector<MTL::Buffer*> srcF32Bufs;
-        gatheredF32.reserve(table.f32_cols.size());
-        srcF32Bufs.reserve(table.f32_cols.size());
-        for (auto& col : table.f32_cols) {
-            MTL::Buffer* srcBuf = store.device()->newBuffer(
-                col.data(), n * sizeof(float), MTL::ResourceStorageModeShared);
+        gatheredF32.reserve(table.f32Cols.size());
+        srcF32Bufs.reserve(table.f32Cols.size());
+        for (size_t ci = 0; ci < table.f32Cols.size(); ++ci) {
+            MTL::Buffer* srcBuf = (ci < table.f32ColsGPU.size() && table.f32ColsGPU[ci])
+                ? table.f32ColsGPU[ci] : nullptr;
+            bool ownSrc = false;
+            if (!srcBuf) {
+                srcBuf = store.device()->newBuffer(
+                    table.f32Cols[ci].data(), n * sizeof(float), MTL::ResourceStorageModeShared);
+                ownSrc = true;
+            }
             MTL::Buffer* dstBuf = GpuOps::gatherF32(srcBuf, idxBuf, n, /*sync=*/false);
-            srcF32Bufs.push_back(srcBuf);
+            srcF32Bufs.push_back(ownSrc ? srcBuf : nullptr);
             gatheredF32.push_back(dstBuf);
         }
 
@@ -356,25 +372,27 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
         KernelTimer::instance().record("orderby_gpu_gather", "sort",
             gatherMs, totalGatherElements);
 
-        // Download gathered results back to CPU vectors and release GPU buffers
-        for (size_t i = 0; i < table.u32_cols.size(); ++i) {
-            std::memcpy(table.u32_cols[i].data(), gatheredU32[i]->contents(), n * sizeof(uint32_t));
-            gatheredU32[i]->release();
-            srcU32Bufs[i]->release();
+        // Sync gathered GPU buffers to CPU vectors; keep GPU buffers alive for downstream reuse
+        table.u32ColsGPU.resize(table.u32Cols.size(), nullptr);
+        for (size_t i = 0; i < table.u32Cols.size(); ++i) {
+            std::memcpy(table.u32Cols[i].data(), gatheredU32[i]->contents(), n * sizeof(uint32_t));
+            table.u32ColsGPU[i] = gatheredU32[i];  // retain gathered GPU buffer
+            if (srcU32Bufs[i]) srcU32Bufs[i]->release();
         }
-        for (size_t i = 0; i < table.f32_cols.size(); ++i) {
-            std::memcpy(table.f32_cols[i].data(), gatheredF32[i]->contents(), n * sizeof(float));
-            gatheredF32[i]->release();
-            srcF32Bufs[i]->release();
+        table.f32ColsGPU.resize(table.f32Cols.size(), nullptr);
+        for (size_t i = 0; i < table.f32Cols.size(); ++i) {
+            std::memcpy(table.f32Cols[i].data(), gatheredF32[i]->contents(), n * sizeof(float));
+            table.f32ColsGPU[i] = gatheredF32[i];  // retain gathered GPU buffer
+            if (srcF32Bufs[i]) srcF32Bufs[i]->release();
         }
 
         // String columns: reorder via GPU dict ID gather, GPU flat string gather,
         // or CPU random-access move (in that priority order)
-        if (!table.string_cols.empty()) {
+        if (!table.stringCols.empty()) {
             std::vector<uint32_t> sortedIdx(n);
             std::memcpy(sortedIdx.data(), idxBuf->contents(), n * sizeof(uint32_t));
-            for (size_t ci = 0; ci < table.string_cols.size(); ++ci) {
-                const std::string& colName = table.string_names[ci];
+            for (size_t ci = 0; ci < table.stringCols.size(); ++ci) {
+                const std::string& colName = table.stringNames[ci];
                 auto dictIt = dictCols.find(colName);
                 if (dictIt != dictCols.end() && dictIt->second.idsGPU && dictIt->second.rowCount == n) {
                     // GPU path: gather dict IDs by sorted index, then sequential dictionary lookup
@@ -383,7 +401,7 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
                     std::memcpy(gatheredIds.data(), gathered->contents(), n * sizeof(uint32_t));
                     gathered->release();
                     const auto& dict = dictIt->second.dictionary;
-                    auto& col = table.string_cols[ci];
+                    auto& col = table.stringCols[ci];
                     for (uint32_t i = 0; i < n; ++i) {
                         col[i] = dict[gatheredIds[i]];
                     }
@@ -400,7 +418,7 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
                             const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
                             const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
                             const char* ch = static_cast<const char*>(r.chars->contents());
-                            auto& col = table.string_cols[ci];
+                            auto& col = table.stringCols[ci];
                             for (uint32_t i = 0; i < n; ++i) col[i].assign(ch + offs[i], lens[i]);
                             // Release gathered GPU buffers
                             r.chars->release();
@@ -412,7 +430,7 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
                         }
                     }
                     // CPU fallback: random-access string move
-                    auto& col = table.string_cols[ci];
+                    auto& col = table.stringCols[ci];
                     std::vector<std::string> tmp(n);
                     for (uint32_t i = 0; i < n; ++i) tmp[i] = std::move(col[sortedIdx[i]]);
                     col = std::move(tmp);

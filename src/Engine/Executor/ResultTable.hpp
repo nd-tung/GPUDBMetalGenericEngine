@@ -6,6 +6,8 @@
 #include <unordered_set>
 #include <vector>
 
+namespace MTL { class Buffer; }
+
 namespace engine {
 
 // CPU-visible table container for hybrid/GPU outputs.
@@ -17,17 +19,17 @@ struct TableResult {
         std::string name;
     };
 
-    std::vector<std::string> u32_names;
-    std::vector<std::vector<uint32_t>> u32_cols;
+    std::vector<std::string> u32Names;
+    std::vector<std::vector<uint32_t>> u32Cols;
 
-    std::vector<std::string> f32_names;
-    std::vector<std::vector<float>> f32_cols;
+    std::vector<std::string> f32Names;
+    std::vector<std::vector<float>> f32Cols;
 
-    std::vector<std::string> string_names;
-    std::vector<std::vector<std::string>> string_cols;
+    std::vector<std::string> stringNames;
+    std::vector<std::vector<std::string>> stringCols;
 
     // Explicit output column order (can interleave u32/f32). When empty, callers may
-    // fall back to u32_names followed by f32_names.
+    // fall back to u32Names followed by f32Names.
     std::vector<ColRef> order;
 
     // Column names that store single-char strings (should be decoded as char on output)
@@ -35,9 +37,14 @@ struct TableResult {
 
     std::size_t rowCount = 0;
 
-    double upload_ms = 0.0;
-    double gpu_ms = 0.0;
-    double cpu_post_ms = 0.0;
+    // GPU buffer mirrors — when available, downstream can skip CPU→GPU upload.
+    // Indexed in parallel with u32Cols/f32Cols (same order). nullptr = not available.
+    std::vector<MTL::Buffer*> u32ColsGPU;
+    std::vector<MTL::Buffer*> f32ColsGPU;
+
+    double uploadMs = 0.0;
+    double gpuMs = 0.0;
+    double cpuPostMs = 0.0;
 };
 
 } // namespace engine

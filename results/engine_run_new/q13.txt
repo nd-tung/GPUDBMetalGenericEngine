@@ -1,5 +1,89 @@
 --- Running (Engine Host) ---
+DEBUG: Scan table determined as: 'customer'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
+DEBUG: Scan table determined as: 'orders'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
+[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
+[Planner] ChildProjs size: 3
+  #0: o_custkey
+  #1: o_orderkey
+  #2: c_custkey
+[Planner] Resolved Condition: 'o_custkey = c_custkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
 [Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 1533923
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 0 GPU=1 CPU=44161
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 1 GPU=1 CPU=44162
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 2 GPU=1 CPU=44163
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 3 GPU=1 CPU=44164
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 4 GPU=1 CPU=44165
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 5 GPU=1 CPU=44166
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 6 GPU=1 CPU=44167
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 7 GPU=1 CPU=44192
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 8 GPU=1 CPU=44193
+[Exec] GroupBy VERIFY: AGG MISMATCH at row 9 GPU=1 CPU=44194
+[Exec] GroupBy VERIFY: agg mismatches = 1483917 / 1533923
+[Exec] GroupBy VERIFY: CPU grand total = 4452078961464.00
+[Exec] GroupBy VERIFY: GPU grand total = 1483918.00
+[Exec] GroupBy VERIFY: difference = -4452077477546.00
+[Exec] GroupBy VERIFY: CPU max key=122623 val=138470536.00
+[Exec] GroupBy VERIFY: GPU max key=102004 val=41.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 122623 = 40.00
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
+[Exec] GroupBy VERIFY: key mismatches = 0 / 150000
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=1108606976 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=0 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 1108606976 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=1107558400 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1108082688 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1109131264 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1108606976 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1109655552 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1101529088 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1091567616 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1096810496 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=0 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1090519040 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1094713344 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1099431936 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1092616192 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1097859072 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1098907648 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1099956224 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1088421888 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1105199104 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1102577664 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1084227584 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1103101952 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1102053376 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1105723392 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1093664768 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1104150528 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1101004800 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1077936128 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1100480512 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1103626240 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1086324736 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1106247680 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1104674816 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1095761920 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1082130432 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1106771968 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1107296256 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1073741824 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1107820544 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1065353216 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1109393408 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1108344832 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1108869120 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 42 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -47,118 +131,23 @@ custdist|c_count|
 2.00|41.00|
 1.00|39.00|
 ---------------------------------------------------
-Planning time: 19.44 ms
-Data Load Time (Disk+Upload): 2288.13 ms
-GPU kernels time: 21.30 ms
-CPU postprocess time: 414.44 ms
-Total Internal Pipeline time: 2723.87 ms
-Total Host Execution time: 2804.05 ms
-Total Wall time (Plan+Exec): 2823.49 ms
+Planning time: 19.23 ms
+Data Load Time (Disk+Upload): 2292.45 ms
+GPU kernels time: 18.16 ms
+CPU postprocess time: 470.47 ms
+Total Internal Pipeline time: 2781.08 ms
+Total Host Execution time: 2861.25 ms
+Total Wall time (Plan+Exec): 2880.48 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    1.153 ms (5.414%) [1 calls]
-  compact        :    0.463 ms (2.174%) [1 calls]
-  filter         :    1.712 ms (8.037%) [1 calls]
-  gather         :    4.838 ms (22.711%) [8 calls]
-  groupby        :   11.967 ms (56.176%) [6 calls]
-  hash_join_probe_u32:    0.892 ms (4.189%) [1 calls]
-  sort           :    0.277 ms (1.298%) [2 calls]
+  cast           :    1.338 ms (7.368%) [2 calls]
+  compact        :    0.437 ms (2.405%) [1 calls]
+  filter         :    1.659 ms (9.139%) [1 calls]
+  gather         :    3.362 ms (18.513%) [5 calls]
+  groupby        :   10.324 ms (56.858%) [6 calls]
+  hash_join_probe_u32:    0.762 ms (4.199%) [1 calls]
+  sort           :    0.276 ms (1.518%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 21.303 ms
-  Kernel invocations: 20
-[Planner] Parsed aliases:
-[Planner]   'c_count' -> 'count(o_orderkey)'
-[Planner]   'count(o_orderkey)' -> 'c_count'
-[Planner]   'custdist' -> 'count(*)'
-[Planner]   'count(*)' -> 'custdist'
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table customer
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_custkey
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6098641088
-[Planner] Node SEQ_SCAN  output projections: c_custkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_custkey
-[Planner] Proj: o_orderkey
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 0 Plan: 6098659368
-[Planner] Node SEQ_SCAN  output projections: o_custkey, o_orderkey, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
-[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
-[Planner] ChildProjs size: 3
-  #0: o_custkey
-  #1: o_orderkey
-  #2: c_custkey
-[Planner] Resolved Condition: 'o_custkey = c_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
-[Planner] Join Key Analysis: l => orders, r => customer
-[Planner] Captured RHS Table: customer
-[Planner] RHS Tables: customer, 
-[Planner] Checking matchesRHS: orders
-[Planner] Checking matchesRHS: customer
-[Planner] Node HASH_JOIN output projections: o_custkey, o_orderkey, c_custkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_custkey
-[Planner] Proj: o_orderkey
-[Planner] Forcing keep of global column: o_custkey
-[Planner] Node PROJECTION output projections: c_custkey, o_orderkey, 
-[Planner] Parsing agg string: 'count(#1)'
-[Planner] Resolved agg: count(o_orderkey)
-[Planner] inputExpr 'o_orderkey' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'count(o_orderkey)'
-[Planner] Found alias for agg: c_count
-[Planner] Pushing spec with outputName='c_count'
-[Planner] Node HASH_GROUP_BY output projections: c_custkey, c_count, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_count
-[Planner] Forcing keep of global column: c_custkey
-[Planner] Node PROJECTION output projections: c_count, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_count
-[Planner] Node PROJECTION output projections: c_count, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: custdist
-[Planner] Pushing spec with outputName='custdist'
-[Planner] Node HASH_GROUP_BY output projections: c_count, custdist, 
-[Planner] ORDER BY looking up alias: 'count_star()'
-[Planner] Node ORDER_BY output projections: c_count, custdist, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'c_count'
-[Planner]   'custdist'
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+  TOTAL GPU TIME: 18.157 ms
+  Kernel invocations: 18

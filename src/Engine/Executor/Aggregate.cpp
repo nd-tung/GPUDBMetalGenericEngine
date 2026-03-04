@@ -1,5 +1,5 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
 
 #include <iostream>
@@ -45,7 +45,7 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
         }
     }
 
-    MTL::Buffer* gpuInput = evalExprFloatGPU(agg.expr, ctx);
+    MTL::Buffer* gpuInput = evaluateExpression(agg.expr, ctx);
     if (gpuInput) {
         // Check if buffer is an intermediate (owned) vs borrowed from context
         bool isOwned = true;

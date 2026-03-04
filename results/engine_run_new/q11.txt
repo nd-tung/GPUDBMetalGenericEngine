@@ -1,5 +1,77 @@
 --- Running (Engine Host) ---
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 3
+  #0: s_suppkey
+  #1: s_nationkey
+  #2: n_nationkey
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+DEBUG: Scan table determined as: 'partsupp'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
+[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
+[Planner] ChildProjs size: 6
+  #0: ps_suppkey
+  #1: ps_supplycost
+  #2: ps_availqty
+  #3: s_suppkey
+  #4: s_nationkey
+  #5: n_nationkey
+[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
+DEBUG: Scan table determined as: 'nation'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
+DEBUG: Scan table determined as: 'supplier'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
+[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
+[Planner] ChildProjs size: 3
+  #0: s_suppkey
+  #1: s_nationkey
+  #2: n_nationkey
+[Planner] Resolved Condition: 's_nationkey = n_nationkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
+DEBUG: Scan table determined as: 'partsupp'
+DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
+[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
+[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
+[Planner] ChildProjs size: 7
+  #0: ps_suppkey
+  #1: ps_partkey
+  #2: ps_supplycost
+  #3: ps_availqty
+  #4: s_suppkey
+  #5: s_nationkey
+  #6: n_nationkey
+[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
+DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_15'
+[Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_12'
+[Planner] Pre-resolved Condition: 'CAST(sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) AS DECIMAL(38,6)) > SUBQUERY'
+[Planner] ChildProjs size: 3
+  #0: ps_partkey
+  #1: sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))
+  #2: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)) END
+[Planner] Keeping SUBQUERY token (RHS is complex: 'CASE  WHEN ((count_star() > 1)) THEN ("e...')
+[Planner] Resolved Condition: 'CAST(sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) AS DECIMAL(38,6)) > SUBQUERY'
+DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
 [Main] Using GpuExecutor generic executor.
+[GPU] Device: Apple M3 Ultra
+[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 31680
+[Exec] GroupBy VERIFY: agg mismatches = 0 / 31680
+[Exec] GroupBy VERIFY: CPU grand total = 78741031080.86
+[Exec] GroupBy VERIFY: GPU grand total = 78741031074.73
+[Exec] GroupBy VERIFY: difference = -6.13
+[Exec] GroupBy VERIFY: CPU max key=129760 val=17538457.00
+[Exec] GroupBy VERIFY: GPU max key=129760 val=17538456.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 129760 = 17538456.00
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -1053,286 +1125,23 @@ ps_partkey|value|
 72073|7877736.00|
 5182|7874521.50|
 ---------------------------------------------------
-Planning time: 24.82 ms
-Data Load Time (Disk+Upload): 1191.67 ms
-GPU kernels time: 10.84 ms
-CPU postprocess time: 29.21 ms
-Total Internal Pipeline time: 1231.72 ms
-Total Host Execution time: 1231.77 ms
-Total Wall time (Plan+Exec): 1256.58 ms
+Planning time: 21.55 ms
+Data Load Time (Disk+Upload): 1195.03 ms
+GPU kernels time: 10.48 ms
+CPU postprocess time: 31.11 ms
+Total Internal Pipeline time: 1236.63 ms
+Total Host Execution time: 1236.67 ms
+Total Wall time (Plan+Exec): 1258.22 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.632 ms (5.828%) [3 calls]
-  compact        :    0.629 ms (5.801%) [3 calls]
-  filter         :    1.227 ms (11.323%) [3 calls]
-  gather         :    4.084 ms (37.678%) [18 calls]
-  groupby        :    0.853 ms (7.872%) [3 calls]
-  hash_join_probe_u32:    3.171 ms (29.255%) [4 calls]
-  sort           :    0.243 ms (2.243%) [2 calls]
+  cast           :    0.671 ms (6.398%) [3 calls]
+  compact        :    0.635 ms (6.060%) [3 calls]
+  filter         :    1.186 ms (11.311%) [3 calls]
+  gather         :    3.053 ms (29.126%) [14 calls]
+  groupby        :    1.479 ms (14.114%) [3 calls]
+  hash_join_probe_u32:    3.251 ms (31.015%) [4 calls]
+  sort           :    0.207 ms (1.976%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 10.838 ms
-  Kernel invocations: 36
-[Planner] Parsed aliases:
-[Planner]   'value' -> 'sum(ps_supplycost * ps_availqty)'
-[Planner]   'sum(ps_supplycost*ps_availqty)' -> 'value'
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: NESTED_LOOP_JOIN
-[Planner] Traversing: NESTED_LOOP_JOIN
-[Planner] [TraverseNode] Logic for JOIN: NESTED_LOOP_JOIN
-[Planner] Checking RHS capture for Join NESTED_LOOP_JOIN
-[Planner] Inspecting RHS node PROJECTION
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: UNGROUPED_AGGREGATE
-[Planner] Traversing: UNGROUPED_AGGREGATE
-[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: UNGROUPED_AGGREGATE
-[Planner] Traversing: UNGROUPED_AGGREGATE
-[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table nation
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: n_nationkey
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6162528384
-[Planner] Node SEQ_SCAN  output projections: n_nationkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 0 Plan: 6162556968
-[Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 3
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: n_nationkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-[Planner] Join Key Analysis: l => supplier, r => nation
-[Planner] Captured RHS Table: nation
-[Planner] RHS Tables: nation, 
-[Planner] Checking matchesRHS: supplier
-[Planner] Checking matchesRHS: nation
-[Planner] Node HASH_JOIN output projections: s_suppkey, s_nationkey, n_nationkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_supplycost
-[Planner] Proj: ps_availqty
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 3 Plan: 6162556968
-[Planner] Node SEQ_SCAN  output projections: ps_suppkey, ps_supplycost, ps_availqty, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 6
-  #0: ps_suppkey
-  #1: ps_supplycost
-  #2: ps_availqty
-  #3: s_suppkey
-  #4: s_nationkey
-  #5: n_nationkey
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
-[Planner] Join Key Analysis: l => partsupp, r => supplier
-[Planner] Captured RHS Table: tmpl_join_2
-[Planner] RHS Tables: tmpl_join_2, 
-[Planner] Checking matchesRHS: partsupp
-[Planner] Checking matchesRHS: supplier
-[Planner] Node HASH_JOIN output projections: ps_suppkey, ps_supplycost, ps_availqty, s_suppkey, s_nationkey, n_nationkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: (ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))
-[Planner] Forcing keep of global column: s_nationkey
-[Planner] Forcing keep of global column: s_suppkey
-[Planner] Forcing keep of global column: ps_supplycost
-[Planner] Forcing keep of global column: ps_availqty
-[Planner] Forcing keep of global column: n_nationkey
-[Planner] Forcing keep of global column: ps_suppkey
-[Planner] Node PROJECTION output projections: (ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0))), 
-[Planner] Processing aggregate: 'sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0))))'
-[Planner] Node UNGROUPED_AGGREGATE output projections: sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: (sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)
-[Planner] Node PROJECTION output projections: (sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: (sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)
-[Planner] Node PROJECTION output projections: (sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001), 
-[Planner] Processing aggregate: '"first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001))'
-[Planner] Processing aggregate: 'count_star()'
-[Planner] Node UNGROUPED_AGGREGATE output projections: "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)), count_star(), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Fixing split CASE projection. Appending next line.
-[Planner] Proj: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)) END
-[Planner] Node PROJECTION output projections: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)) END, 
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node HASH_JOIN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table nation
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: n_nationkey
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6162536112
-[Planner] Node SEQ_SCAN  output projections: n_nationkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 13 Plan: 6162556968
-[Planner] Node SEQ_SCAN  output projections: s_suppkey, s_nationkey, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 3
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: n_nationkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-[Planner] Join Key Analysis: l => supplier, r => nation
-[Planner] Captured RHS Table: nation
-[Planner] RHS Tables: nation, 
-[Planner] Checking matchesRHS: supplier
-[Planner] Checking matchesRHS: nation
-[Planner] Node HASH_JOIN output projections: s_suppkey, s_nationkey, n_nationkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_partkey
-[Planner] Proj: ps_supplycost
-[Planner] Proj: ps_availqty
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Generating Scan: partsupp at index 16 Plan: 6162556968
-[Planner] Node SEQ_SCAN  output projections: ps_suppkey, ps_partkey, ps_supplycost, ps_availqty, 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 7
-  #0: ps_suppkey
-  #1: ps_partkey
-  #2: ps_supplycost
-  #3: ps_availqty
-  #4: s_suppkey
-  #5: s_nationkey
-  #6: n_nationkey
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_15'
-[Planner] Join Key Analysis: l => partsupp, r => supplier
-[Planner] Captured RHS Table: tmpl_join_15
-[Planner] RHS Tables: tmpl_join_15, 
-[Planner] Checking matchesRHS: partsupp
-[Planner] Checking matchesRHS: supplier
-[Planner] Node HASH_JOIN output projections: ps_suppkey, ps_partkey, ps_supplycost, ps_availqty, s_suppkey, s_nationkey, n_nationkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: ps_suppkey
-[Planner] Proj: ps_partkey
-[Planner] Proj: ps_supplycost
-[Planner] Proj: ps_availqty
-[Planner] Proj: s_suppkey
-[Planner] Proj: s_nationkey
-[Planner] Proj: n_nationkey
-[Planner] Node PROJECTION output projections: ps_suppkey, ps_partkey, ps_supplycost, ps_availqty, s_suppkey, s_nationkey, n_nationkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: ps_partkey
-[Planner] Proj: (ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))
-[Planner] Forcing keep of global column: s_nationkey
-[Planner] Forcing keep of global column: s_suppkey
-[Planner] Forcing keep of global column: ps_supplycost
-[Planner] Forcing keep of global column: ps_availqty
-[Planner] Forcing keep of global column: n_nationkey
-[Planner] Forcing keep of global column: ps_suppkey
-[Planner] Node PROJECTION output projections: ps_partkey, (ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0))), 
-[Planner] Parsing agg string: 'sum(#1)'
-[Planner] Resolved agg: sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0))))
-[Planner] inputExpr '(ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))'
-[Planner] No alias found for agg, using generated name: sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))
-[Planner] Pushing spec with outputName='sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))'
-[Planner] Node HASH_GROUP_BY output projections: ps_partkey, sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0)))), 
-[Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_12'
-[Planner] Pre-resolved Condition: 'CAST(sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) AS DECIMAL(38,6)) > SUBQUERY'
-[Planner] ChildProjs size: 3
-  #0: ps_partkey
-  #1: sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))
-  #2: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)) END
-[Planner] Keeping SUBQUERY token (RHS is complex: 'CASE  WHEN ((count_star() > 1)) THEN ("e...')
-[Planner] Resolved Condition: 'CAST(sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) AS DECIMAL(38,6)) > SUBQUERY'
-DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
-[Planner] Node NESTED_LOOP_JOIN output projections: ps_partkey, sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0)))), CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)) END, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: ps_partkey
-[Planner] Proj: value
-[Planner] Projection: resolving alias 'value' -> 'sum(ps_supplycost * ps_availqty)'
-[Planner] Node PROJECTION output projections: ps_partkey, value, 
-[Planner] ORDER BY looking up alias: 'sum((ps_supplycost*ps_availqty))'
-[Planner] Node ORDER_BY output projections: ps_partkey, value, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'ps_partkey'
-[Planner]   'value'
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+  TOTAL GPU TIME: 10.482 ms
+  Kernel invocations: 32

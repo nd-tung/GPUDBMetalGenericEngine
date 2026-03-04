@@ -242,6 +242,13 @@ struct IRNode {
         return n;
     }
 
+    static IRNode distinct(std::vector<TypedExprPtr> exprs = {}) {
+        IRNode n;
+        n.type = Type::Distinct;
+        n.data = IRDistinct{std::move(exprs)};
+        return n;
+    }
+
     // Accessors
     IRScan& asScan() { return std::get<IRScan>(data); }
     const IRScan& asScan() const { return std::get<IRScan>(data); }
@@ -266,6 +273,9 @@ struct IRNode {
     
     IRAggregate& asAggregate() { return std::get<IRAggregate>(data); }
     const IRAggregate& asAggregate() const { return std::get<IRAggregate>(data); }
+
+    IRDistinct& asDistinct() { return std::get<IRDistinct>(data); }
+    const IRDistinct& asDistinct() const { return std::get<IRDistinct>(data); }
 
     static IRNode save(const std::string& name) {
         IRNode n;

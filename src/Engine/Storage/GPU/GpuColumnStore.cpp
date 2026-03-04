@@ -1,5 +1,5 @@
 // GPU column staging implementation
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 #include <Metal/Metal.hpp>
 #include <Foundation/Foundation.hpp>
 #include <iostream>
@@ -8,9 +8,9 @@
 
 namespace engine {
 
-ColumnStoreGPU& ColumnStoreGPU::instance() { static ColumnStoreGPU inst; return inst; }
+GpuColumnStore& GpuColumnStore::instance() { static GpuColumnStore inst; return inst; }
 
-void ColumnStoreGPU::initialize() {
+void GpuColumnStore::initialize() {
     if (m_device) return; // already
 
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
@@ -71,7 +71,7 @@ void ColumnStoreGPU::initialize() {
     pool->release();
 }
 
-GPUColumn* ColumnStoreGPU::stageFloatColumn(const std::string& name,
+GpuColumn* GpuColumnStore::stageFloatColumn(const std::string& name,
                                             const std::vector<float>& data) {
     initialize();
     if (!m_device || !m_library) return nullptr;
@@ -83,14 +83,14 @@ GPUColumn* ColumnStoreGPU::stageFloatColumn(const std::string& name,
         if (it->second.buffer) it->second.buffer->release();
         m_columns.erase(it);
     }
-    GPUColumn col; col.name = name; col.count = data.size();
+    GpuColumn col; col.name = name; col.count = data.size();
     const unsigned long bytes = data.size() * sizeof(float);
     col.buffer = m_device->newBuffer(data.data(), bytes, MTL::ResourceStorageModeShared);
     auto [insertIt, _] = m_columns.emplace(name, col);
     return &insertIt->second;
 }
 
-GPUColumn* ColumnStoreGPU::stageU32Column(const std::string& name,
+GpuColumn* GpuColumnStore::stageU32Column(const std::string& name,
                                           const std::vector<uint32_t>& data) {
     initialize();
     if (!m_device || !m_library) return nullptr;
@@ -100,7 +100,7 @@ GPUColumn* ColumnStoreGPU::stageU32Column(const std::string& name,
         if (it->second.buffer) it->second.buffer->release();
         m_columns.erase(it);
     }
-    GPUColumn col;
+    GpuColumn col;
     col.name = name;
     col.count = data.size();
     const unsigned long bytes = data.size() * sizeof(uint32_t);
@@ -109,7 +109,7 @@ GPUColumn* ColumnStoreGPU::stageU32Column(const std::string& name,
     return &insertIt->second;
 }
 
-GPUColumn* ColumnStoreGPU::getColumn(const std::string& name) {
+GpuColumn* GpuColumnStore::getColumn(const std::string& name) {
     initialize();
     auto it = m_columns.find(name);
     if (it == m_columns.end()) return nullptr;

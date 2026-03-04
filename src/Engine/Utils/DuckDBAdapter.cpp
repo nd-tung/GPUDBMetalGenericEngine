@@ -11,7 +11,7 @@
 
 namespace engine {
 
-static std::string run_cmd_capture(const std::string& cmd) {
+static std::string runCmdCapture(const std::string& cmd) {
     std::array<char, 4096> buf{};
     std::string out;
     FILE* pipe = popen(cmd.c_str(), "r");
@@ -21,7 +21,7 @@ static std::string run_cmd_capture(const std::string& cmd) {
     return out;
 }
 
-static std::string escape_for_double_quoted_shell_arg(std::string s) {
+static std::string escapeShellArg(std::string s) {
     // This string will be embedded inside a shell double-quoted argument.
     // Escape backslashes and double-quotes to preserve the SQL.
     std::string out;
@@ -37,7 +37,7 @@ static std::string escape_for_double_quoted_shell_arg(std::string s) {
     return out;
 }
 
-static std::string strip_sql_comments(std::string s) {
+static std::string stripSqlComments(std::string s) {
     // Remove SQL single-line comments (-- ...)
     std::string out;
     out.reserve(s.size());
@@ -62,7 +62,7 @@ static std::string strip_sql_comments(std::string s) {
 std::string DuckDBAdapter::explainJSON(const std::string& sql) {
     // Use persistent DuckDB database to preserve correct predicate semantics
     // (:memory: with views incorrectly transforms >= AND < into BETWEEN).
-    const std::string q = escape_for_double_quoted_shell_arg(strip_sql_comments(sql));
+    const std::string q = escapeShellArg(stripSqlComments(sql));
 
     std::string datasetPath = "data/SF-1/";
     if (const char* p = std::getenv("GPUDB_DATASET_PATH")) {
@@ -86,7 +86,7 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
             std::cerr << "[DuckDBAdapter] cmd: " << oss.str() << "\n";
         }
         
-        return run_cmd_capture(oss.str());
+        return runCmdCapture(oss.str());
     }
     
     // Fallback to :memory: with views (may have BETWEEN transformation issue)
@@ -227,7 +227,7 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
         std::cerr << "[DuckDBAdapter] cmd: " << oss.str() << "\n";
     }
 
-    return run_cmd_capture(oss.str());
+    return runCmdCapture(oss.str());
 }
 
 } // namespace engine

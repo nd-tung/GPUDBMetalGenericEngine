@@ -1,9 +1,8 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "TypedExpr.hpp"
-#include "Predicate.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 #include <Metal/Metal.hpp>
 #include <future>
 #include <thread>
@@ -395,7 +394,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
 
     if (!isCrossJoin && resolvedKeys.size() > 2) throw std::runtime_error("GPU Join > 2 columns not implemented");
 
-    auto& store = ColumnStoreGPU::instance();
+    auto& store = GpuColumnStore::instance();
     
     auto ensureGPU = [&](EvalContext& ctx, const std::string& col) -> MTL::Buffer* {
         uint32_t expectedSize = ctx.activeRowsGPU ? ctx.activeRowsCountGPU : (uint32_t)ctx.rowCount;
@@ -493,24 +492,37 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         }
         // Compact CPU u32 columns via GPU gather
         {
-            auto& s = ColumnStoreGPU::instance();
+            auto& s = GpuColumnStore::instance();
             for (auto& [name, vec] : ctx.u32Cols) {
                 if (vec.size() > count) {
-                    MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
-                    vec.resize(count);
-                    std::memcpy(vec.data(), dst->contents(), count * sizeof(uint32_t));
-                    src->release(); dst->release();
+                    auto itGpu = ctx.u32ColsGPU.find(name);
+                    if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
+                        // GPU buffer already compacted above — sync CPU from it (zero-cost on unified mem)
+                        vec.resize(count);
+                        std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(uint32_t));
+                    } else {
+                        MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                        MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
+                        vec.resize(count);
+                        std::memcpy(vec.data(), dst->contents(), count * sizeof(uint32_t));
+                        src->release(); dst->release();
+                    }
                 }
             }
             // Compact CPU f32 columns via GPU gather
             for (auto& [name, vec] : ctx.f32Cols) {
                 if (vec.size() > count) {
-                    MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
-                    vec.resize(count);
-                    std::memcpy(vec.data(), dst->contents(), count * sizeof(float));
-                    src->release(); dst->release();
+                    auto itGpu = ctx.f32ColsGPU.find(name);
+                    if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
+                        vec.resize(count);
+                        std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(float));
+                    } else {
+                        MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                        MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
+                        vec.resize(count);
+                        std::memcpy(vec.data(), dst->contents(), count * sizeof(float));
+                        src->release(); dst->release();
+                    }
                 }
             }
         }
@@ -610,7 +622,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             if (debug) std::cerr << "[Exec] GPU Join: Cross Join 1=1 (" << lCount << " x " << rCount << ")\n";
             uint64_t totalCount = (uint64_t)lCount * (uint64_t)rCount;
              
-            auto device = ColumnStoreGPU::instance().device();
+            auto device = GpuColumnStore::instance().device();
             if (totalCount > UINT32_MAX) {
                 std::cerr << "[Exec] WARNING: Cross join produces " << totalCount 
                           << " rows, exceeding uint32_t max. Clamping to " << UINT32_MAX << ".\n";
@@ -1311,6 +1323,13 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         // GPU buffer already has combined data — sync from it
                         vec.resize(totalCount);
                         std::memcpy(vec.data(), outCtx.u32ColsGPU.at(name)->contents(), totalCount * sizeof(uint32_t));
+                    } else if (leftCtx.u32ColsGPU.count(name) && leftCtx.u32ColsGPU.at(name)) {
+                        // Prefer existing GPU buffer from left context
+                        MTL::Buffer* g = GpuOps::gatherU32(leftCtx.u32ColsGPU.at(name), unmatchedBuf, unmatchedCount, false);
+                        size_t oldSz = vec.size();
+                        vec.resize(oldSz + unmatchedCount);
+                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
+                        g->release();
                     } else if (leftCtx.u32Cols.count(name)) {
                         const auto& leftVec = leftCtx.u32Cols.at(name);
                         MTL::Buffer* src = store.device()->newBuffer(leftVec.data(), leftVec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -1329,6 +1348,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                     if (outCtx.f32ColsGPU.count(name)) {
                         vec.resize(totalCount);
                         std::memcpy(vec.data(), outCtx.f32ColsGPU.at(name)->contents(), totalCount * sizeof(float));
+                    } else if (leftCtx.f32ColsGPU.count(name) && leftCtx.f32ColsGPU.at(name)) {
+                        MTL::Buffer* g = GpuOps::gatherF32(leftCtx.f32ColsGPU.at(name), unmatchedBuf, unmatchedCount, false);
+                        size_t oldSz = vec.size();
+                        vec.resize(oldSz + unmatchedCount);
+                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
+                        g->release();
                     } else if (leftCtx.f32Cols.count(name)) {
                         const auto& leftVec = leftCtx.f32Cols.at(name);
                         MTL::Buffer* src = store.device()->newBuffer(leftVec.data(), leftVec.size() * sizeof(float), MTL::ResourceStorageModeShared);
@@ -1503,7 +1528,16 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         for (const auto& [origName, mappedName] : rightColumnMapping) {
                             if (mappedName == name) { srcName = origName; break; }
                         }
-                        if (rightCtx.u32Cols.count(srcName)) {
+                        // Prefer existing GPU buffer from right context
+                        MTL::Buffer* rightGpu = nullptr;
+                        if (rightCtx.u32ColsGPU.count(srcName)) rightGpu = rightCtx.u32ColsGPU.at(srcName);
+                        if (rightGpu) {
+                            MTL::Buffer* g = GpuOps::gatherU32(rightGpu, unmatchedBuf, unmatchedCount, false);
+                            size_t oldSz = vec.size();
+                            vec.resize(oldSz + unmatchedCount);
+                            std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
+                            g->release();
+                        } else if (rightCtx.u32Cols.count(srcName)) {
                             const auto& rightVec = rightCtx.u32Cols.at(srcName);
                             MTL::Buffer* src = store.device()->newBuffer(rightVec.data(), rightVec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                             MTL::Buffer* g = GpuOps::gatherU32(src, unmatchedBuf, unmatchedCount, false);
@@ -1527,7 +1561,15 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         for (const auto& [origName, mappedName] : rightColumnMapping) {
                             if (mappedName == name) { srcName = origName; break; }
                         }
-                        if (rightCtx.f32Cols.count(srcName)) {
+                        MTL::Buffer* rightGpu = nullptr;
+                        if (rightCtx.f32ColsGPU.count(srcName)) rightGpu = rightCtx.f32ColsGPU.at(srcName);
+                        if (rightGpu) {
+                            MTL::Buffer* g = GpuOps::gatherF32(rightGpu, unmatchedBuf, unmatchedCount, false);
+                            size_t oldSz = vec.size();
+                            vec.resize(oldSz + unmatchedCount);
+                            std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
+                            g->release();
+                        } else if (rightCtx.f32Cols.count(srcName)) {
                             const auto& rightVec = rightCtx.f32Cols.at(srcName);
                             MTL::Buffer* src = store.device()->newBuffer(rightVec.data(), rightVec.size() * sizeof(float), MTL::ResourceStorageModeShared);
                             MTL::Buffer* g = GpuOps::gatherF32(src, unmatchedBuf, unmatchedCount, false);
@@ -1727,7 +1769,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
 }
 
 
-bool GpuExecutor::orchestrateJoin(
+bool GpuExecutor::executeJoinPipeline(
     const IRJoin& join,
     const std::string& datasetPath,
     EvalContext& currentCtx,
@@ -1985,22 +2027,22 @@ bool GpuExecutor::orchestrateJoin(
                     // Find the comparison operator
                     size_t opPos = std::string::npos;
                     std::string opStr;
-                    engine::expr::CompOp compOp = engine::expr::CompOp::EQ;
+                    engine::GpuFilterOp compOp = engine::GpuFilterOp::EQ;
                     if ((opPos = condStr.find(" > SUBQUERY")) != std::string::npos) {
                         opStr = ">";
-                        compOp = engine::expr::CompOp::GT;
+                        compOp = engine::GpuFilterOp::GT;
                     } else if ((opPos = condStr.find(" >= SUBQUERY")) != std::string::npos) {
                         opStr = ">=";
-                        compOp = engine::expr::CompOp::GE;
+                        compOp = engine::GpuFilterOp::GE;
                     } else if ((opPos = condStr.find(" < SUBQUERY")) != std::string::npos) {
                         opStr = "<";
-                        compOp = engine::expr::CompOp::LT;
+                        compOp = engine::GpuFilterOp::LT;
                     } else if ((opPos = condStr.find(" <= SUBQUERY")) != std::string::npos) {
                         opStr = "<=";
-                        compOp = engine::expr::CompOp::LE;
+                        compOp = engine::GpuFilterOp::LE;
                     } else if ((opPos = condStr.find(" = SUBQUERY")) != std::string::npos) {
                         opStr = "=";
-                        compOp = engine::expr::CompOp::EQ;
+                        compOp = engine::GpuFilterOp::EQ;
                     }
                     
                     if (opPos == std::string::npos) {
@@ -2047,7 +2089,7 @@ bool GpuExecutor::orchestrateJoin(
                     
                     // Apply scalar subquery filter on GPU
                     // 1. Ensure data columns are uploaded to GPU
-                    auto device = ColumnStoreGPU::instance().device();
+                    auto device = GpuColumnStore::instance().device();
                     for (auto& [name, vec] : currentCtx.f32Cols) {
                         if (currentCtx.f32ColsGPU.find(name) == currentCtx.f32ColsGPU.end()) {
                             auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
@@ -2064,12 +2106,12 @@ bool GpuExecutor::orchestrateJoin(
                     // 2. Build a TypedExpr comparison predicate: aggColName <op> scalarValue
                     CompareOp typedOp = CompareOp::Eq;
                     switch (compOp) {
-                        case engine::expr::CompOp::GT: typedOp = CompareOp::Gt; break;
-                        case engine::expr::CompOp::GE: typedOp = CompareOp::Ge; break;
-                        case engine::expr::CompOp::LT: typedOp = CompareOp::Lt; break;
-                        case engine::expr::CompOp::LE: typedOp = CompareOp::Le; break;
-                        case engine::expr::CompOp::EQ: typedOp = CompareOp::Eq; break;
-                        case engine::expr::CompOp::NE: typedOp = CompareOp::Ne; break;
+                        case engine::GpuFilterOp::GT: typedOp = CompareOp::Gt; break;
+                        case engine::GpuFilterOp::GE: typedOp = CompareOp::Ge; break;
+                        case engine::GpuFilterOp::LT: typedOp = CompareOp::Lt; break;
+                        case engine::GpuFilterOp::LE: typedOp = CompareOp::Le; break;
+                        case engine::GpuFilterOp::EQ: typedOp = CompareOp::Eq; break;
+                        case engine::GpuFilterOp::NE: typedOp = CompareOp::Ne; break;
                         default: break;
                     }
                     auto filterPred = TypedExpr::compare(
@@ -2079,7 +2121,7 @@ bool GpuExecutor::orchestrateJoin(
                     );
                     
                     // 3. Execute GPU filter
-                    if (!executeGPUFilterRecursive(filterPred, currentCtx)) {
+                    if (!executeFilterRecursive(filterPred, currentCtx)) {
                         result.error = "Scalar subquery join: GPU filter failed for " + aggColName;
                         return false;
                     }
@@ -2322,7 +2364,7 @@ bool GpuExecutor::orchestrateJoin(
                         
                         if (it != dataCtx.f32Cols.end()) {
                             // Valid column to filter
-                            auto& store = ColumnStoreGPU::instance();
+                            auto& store = GpuColumnStore::instance();
                              
                             // Ensure column is on GPU
                             MTL::Buffer* colBuf = nullptr;
@@ -2336,12 +2378,12 @@ bool GpuExecutor::orchestrateJoin(
                             }
 
                             // Map Op
-                            engine::expr::CompOp op = engine::expr::CompOp::EQ;
-                            if (opStr == ">") op = engine::expr::CompOp::GT;
-                            else if (opStr == ">=") op = engine::expr::CompOp::GE;
-                            else if (opStr == "<") op = engine::expr::CompOp::LT;
-                            else if (opStr == "<=") op = engine::expr::CompOp::LE;
-                            else if (opStr == "=") op = engine::expr::CompOp::EQ;
+                            engine::GpuFilterOp op = engine::GpuFilterOp::EQ;
+                            if (opStr == ">") op = engine::GpuFilterOp::GT;
+                            else if (opStr == ">=") op = engine::GpuFilterOp::GE;
+                            else if (opStr == "<") op = engine::GpuFilterOp::LT;
+                            else if (opStr == "<=") op = engine::GpuFilterOp::LE;
+                            else if (opStr == "=") op = engine::GpuFilterOp::EQ;
 
                             std::optional<FilterResult> filterRes;
                             if (dataCtx.activeRowsGPU) {
@@ -2658,13 +2700,13 @@ bool GpuExecutor::orchestrateJoin(
                                                 }
                                                 {
                                                     // --- GPU scalar subquery filter ---
-                                                    // Map filterOp string to CompOp enum
-                                                    engine::expr::CompOp compOp = engine::expr::CompOp::EQ;
-                                                    if (filterOp == ">") compOp = engine::expr::CompOp::GT;
-                                                    else if (filterOp == ">=") compOp = engine::expr::CompOp::GE;
-                                                    else if (filterOp == "<") compOp = engine::expr::CompOp::LT;
-                                                    else if (filterOp == "<=") compOp = engine::expr::CompOp::LE;
-                                                    else if (filterOp == "=") compOp = engine::expr::CompOp::EQ;
+                                                    // Map filterOp string to GpuFilterOp enum
+                                                    engine::GpuFilterOp compOp = engine::GpuFilterOp::EQ;
+                                                    if (filterOp == ">") compOp = engine::GpuFilterOp::GT;
+                                                    else if (filterOp == ">=") compOp = engine::GpuFilterOp::GE;
+                                                    else if (filterOp == "<") compOp = engine::GpuFilterOp::LT;
+                                                    else if (filterOp == "<=") compOp = engine::GpuFilterOp::LE;
+                                                    else if (filterOp == "=") compOp = engine::GpuFilterOp::EQ;
 
                                                     // Ensure the filter column has a GPU buffer
                                                     MTL::Buffer* filterColGPU = nullptr;
@@ -3158,7 +3200,7 @@ bool GpuExecutor::orchestrateJoin(
                 if (join.rightFilter) {
                     if (debug) std::cerr << "[Exec] Join: Applying right filter to right side (GPU)\n";
                     
-                    if (!executeGPUFilterRecursive(join.rightFilter, rightCtx)) {
+                    if (!executeFilterRecursive(join.rightFilter, rightCtx)) {
                          throw std::runtime_error("GPU Join Right Filter failed.");
                     }
                 }
@@ -3172,7 +3214,7 @@ bool GpuExecutor::orchestrateJoin(
                     std::vector<std::string> delimDedupKeys;
                     bool hasINDFKey = false; // Has "IS NOT DISTINCT FROM" pattern
                     
-                    auto parts = splitConditionByAND(join.conditionStr);
+                    auto parts = splitConditionByAnd(join.conditionStr);
                     for (const auto& part : parts) {
                         bool isINDF = false;
                         std::string col = parseSelfComparison(part, &isINDF);
@@ -3209,7 +3251,9 @@ bool GpuExecutor::orchestrateJoin(
                                           << compactCount << " active rows)\n";
                             }
                             rightCtx.gatherAllGPU(rightCtx.activeRowsGPU, compactCount);
-                            rightCtx.syncCPUFromGPU(compactCount);
+                            // NOTE: syncCPUFromGPU removed — unified memory means
+                            // ->contents() already provides zero-cost CPU access.
+                            // Downstream code uses GPU buffers directly.
                             rightCtx.clearActiveRows();
                             rightCtx.rowCount = compactCount;
                         }
@@ -3282,7 +3326,9 @@ bool GpuExecutor::orchestrateJoin(
                                 }
                                 // GPU gather all GPU columns (u32, f32, dict, flat string)
                                 rightCtx.gatherAllGPU(uniqueIdx, newCount);
-                                rightCtx.syncCPUFromGPU(newCount);
+                                // NOTE: syncCPUFromGPU removed — unified memory means
+                                // ->contents() already provides zero-cost CPU access.
+                                // CPU-only columns below are gathered explicitly.
                                 // CPU-only columns: download uniqueIdx and gather
                                 std::vector<uint32_t> keepIdx(newCount);
                                 memcpy(keepIdx.data(), uniqueIdx->contents(), newCount * sizeof(uint32_t));
@@ -3318,8 +3364,16 @@ bool GpuExecutor::orchestrateJoin(
                                 // Strip right-side columns that already exist on the left side
                                 {
                                     std::set<std::string> keepU32(resolvedKeys.begin(), resolvedKeys.end());
+                                    // Check both CPU and GPU column maps (CPU may be absent
+                                    // when syncCPUFromGPU is skipped — unified memory)
                                     for (const auto& [name, _] : rightCtx.u32Cols) {
-                                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end())
+                                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() &&
+                                            currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end())
+                                            keepU32.insert(name);
+                                    }
+                                    for (const auto& [name, _] : rightCtx.u32ColsGPU) {
+                                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() &&
+                                            currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end())
                                             keepU32.insert(name);
                                     }
                                     for (auto it2 = rightCtx.u32Cols.begin(); it2 != rightCtx.u32Cols.end(); ) {
@@ -3331,11 +3385,15 @@ bool GpuExecutor::orchestrateJoin(
                                         else ++it2;
                                     }
                                     for (auto it2 = rightCtx.f32Cols.begin(); it2 != rightCtx.f32Cols.end(); ) {
-                                        if (currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end()) it2 = rightCtx.f32Cols.erase(it2);
+                                        if (currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end() ||
+                                            currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end())
+                                            it2 = rightCtx.f32Cols.erase(it2);
                                         else ++it2;
                                     }
                                     for (auto it2 = rightCtx.f32ColsGPU.begin(); it2 != rightCtx.f32ColsGPU.end(); ) {
-                                        if (currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end()) it2 = rightCtx.f32ColsGPU.erase(it2);
+                                        if (currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end() ||
+                                            currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end())
+                                            it2 = rightCtx.f32ColsGPU.erase(it2);
                                         else ++it2;
                                     }
                                     if (debug) {

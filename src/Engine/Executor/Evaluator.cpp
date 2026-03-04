@@ -1,6 +1,5 @@
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp" // Included for GpuOps::filter*
-#include "Predicate.hpp"    // Included for engine::expr::CompOp
 
 #include <iostream>
 #include <algorithm>
@@ -52,14 +51,14 @@ static std::string normalizeFuzzy(const std::string& input) {
 // Operator Implementations
 // ============================================================================
 
-static std::optional<engine::expr::CompOp> mapCompOp(engine::CompareOp op) {
+static std::optional<engine::GpuFilterOp> mapToGpuFilterOp(engine::CompareOp op) {
     switch (op) {
-        case engine::CompareOp::Eq: return engine::expr::CompOp::EQ;
-        case engine::CompareOp::Ne: return engine::expr::CompOp::NE;
-        case engine::CompareOp::Lt: return engine::expr::CompOp::LT;
-        case engine::CompareOp::Le: return engine::expr::CompOp::LE;
-        case engine::CompareOp::Gt: return engine::expr::CompOp::GT;
-        case engine::CompareOp::Ge: return engine::expr::CompOp::GE;
+        case engine::CompareOp::Eq: return engine::GpuFilterOp::EQ;
+        case engine::CompareOp::Ne: return engine::GpuFilterOp::NE;
+        case engine::CompareOp::Lt: return engine::GpuFilterOp::LT;
+        case engine::CompareOp::Le: return engine::GpuFilterOp::LE;
+        case engine::CompareOp::Gt: return engine::GpuFilterOp::GT;
+        case engine::CompareOp::Ge: return engine::GpuFilterOp::GE;
         default: return std::nullopt;
     }
 }
@@ -81,7 +80,7 @@ static uint32_t getTotalRowCapacity(const EvalContext& ctx) {
     return cap;
 }
 
-bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx) {
+bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (!expr) return true;
     
@@ -92,10 +91,10 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
     if (debug) std::cerr << "[Exec] DEBUG REC: Kind=" << (int)expr->kind << "\n";
 
     if (expr->kind == TypedExpr::Kind::Cast) {
-        return executeGPUFilterRecursive(expr->asCast().expr, ctx);
+        return executeFilterRecursive(expr->asCast().expr, ctx);
     }
     if (expr->kind == TypedExpr::Kind::Alias) {
-        return executeGPUFilterRecursive(expr->asAlias().expr, ctx);
+        return executeFilterRecursive(expr->asAlias().expr, ctx);
     }
     
     if (expr->kind == TypedExpr::Kind::Unary) {
@@ -115,7 +114,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              }
 
              // 2. Execute Operand (Filter for "True")
-             if (!executeGPUFilterRecursive(un.operand, ctx)) {
+             if (!executeFilterRecursive(un.operand, ctx)) {
                   if (inputIndices) inputIndices->release();
                   return false; 
              }
@@ -204,16 +203,16 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                      }
                 }
             }
-            if (root) return executeGPUFilterRecursive(root, ctx);
+            if (root) return executeFilterRecursive(root, ctx);
             return false;
             }
         }
 
         // Handle LIKE, NOTLIKE, SUFFIX, PREFIX, CONTAINS
         if ((fn.name == "LIKE" || fn.name == "NOTLIKE" || fn.name == "SUFFIX" || fn.name == "PREFIX" || fn.name == "CONTAINS") && fn.args.size() == 2) {
-             engine::expr::CompOp op = engine::expr::CompOp::EQ;
-             if (fn.name == "NOTLIKE") op = engine::expr::CompOp::NE;
-             else if (fn.name == "LIKE" || fn.name == "SUFFIX" || fn.name == "CONTAINS") op = engine::expr::CompOp::LIKE_PATTERN;
+             engine::GpuFilterOp op = engine::GpuFilterOp::EQ;
+             if (fn.name == "NOTLIKE") op = engine::GpuFilterOp::NE;
+             else if (fn.name == "LIKE" || fn.name == "SUFFIX" || fn.name == "CONTAINS") op = engine::GpuFilterOp::LIKE_PATTERN;
 
              const TypedExpr* left = unwrapExpr(fn.args[0].get());
              const TypedExpr* right = unwrapExpr(fn.args[1].get());
@@ -299,8 +298,8 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
         const auto& bin = expr->asBinary();
         if (bin.op == BinaryOp::And) {
             // Sequential filtering updates activeRowsGPU
-            if (!executeGPUFilterRecursive(bin.left, ctx)) return false;
-            return executeGPUFilterRecursive(bin.right, ctx);
+            if (!executeFilterRecursive(bin.left, ctx)) return false;
+            return executeFilterRecursive(bin.right, ctx);
         }
         if (bin.op == BinaryOp::Or) {
              // 1. Capture current state (Input Indices)
@@ -313,7 +312,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              if (inputIndices) inputIndices->retain();
 
              // 2. Run Left
-             if (!executeGPUFilterRecursive(bin.left, ctx)) {
+             if (!executeFilterRecursive(bin.left, ctx)) {
                   if (inputIndices) inputIndices->release();
                   return false;
              }
@@ -327,7 +326,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              ctx.activeRowsCountGPU = inputCount;
              
              // 4. Run Right
-             if (!executeGPUFilterRecursive(bin.right, ctx)) {
+             if (!executeFilterRecursive(bin.right, ctx)) {
                   if (leftRes) leftRes->release();
                   return false;
              }
@@ -437,12 +436,12 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                   
                   // Map Op
                   int opInt = 0;
-                  if (cmp.op == engine::CompareOp::Eq) opInt = (int)engine::expr::CompOp::EQ;
-                  else if (cmp.op == engine::CompareOp::Ne) opInt = (int)engine::expr::CompOp::NE;
-                  else if (cmp.op == engine::CompareOp::Lt) opInt = (int)engine::expr::CompOp::LT;
-                  else if (cmp.op == engine::CompareOp::Le) opInt = (int)engine::expr::CompOp::LE;
-                  else if (cmp.op == engine::CompareOp::Gt) opInt = (int)engine::expr::CompOp::GT;
-                  else if (cmp.op == engine::CompareOp::Ge) opInt = (int)engine::expr::CompOp::GE;
+                  if (cmp.op == engine::CompareOp::Eq) opInt = (int)engine::GpuFilterOp::EQ;
+                  else if (cmp.op == engine::CompareOp::Ne) opInt = (int)engine::GpuFilterOp::NE;
+                  else if (cmp.op == engine::CompareOp::Lt) opInt = (int)engine::GpuFilterOp::LT;
+                  else if (cmp.op == engine::CompareOp::Le) opInt = (int)engine::GpuFilterOp::LE;
+                  else if (cmp.op == engine::CompareOp::Gt) opInt = (int)engine::GpuFilterOp::GT;
+                  else if (cmp.op == engine::CompareOp::Ge) opInt = (int)engine::GpuFilterOp::GE;
                   else return false;
 
                   MTL::Buffer* rootA = (lIsF32) ? ctx.f32ColsGPU.at(lActual) : ctx.u32ColsGPU.at(lActual);
@@ -559,7 +558,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                           fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
                       }
 
-                      engine::expr::CompOp op = (cmp.op == engine::CompareOp::Like) ? engine::expr::CompOp::LIKE_PATTERN : engine::expr::CompOp::EQ;
+                      engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Like) ? engine::GpuFilterOp::LIKE_PATTERN : engine::GpuFilterOp::EQ;
                       auto res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
                       
                       if (res) {
@@ -629,7 +628,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                          if (env_truthy("GPUDB_DEBUG_OPS"))
                              std::cerr << "[Exec] Found StringHash col " << actualCol << " for pattern '" << pat << "' (hashing=" << hashVal << ")" << std::endl;
                      }
-                     engine::expr::CompOp op = (cmp.op == engine::CompareOp::Eq) ? engine::expr::CompOp::EQ : engine::expr::CompOp::NE;
+                     engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Eq) ? engine::GpuFilterOp::EQ : engine::GpuFilterOp::NE;
                      
                      MTL::Buffer* colBuf = ctx.u32ColsGPU.at(actualCol);
                      uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
@@ -783,11 +782,11 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                  }
              }
              
-             return executeGPUFilterRecursive(root, ctx);
+             return executeFilterRecursive(root, ctx);
         }
 
-        if (!mapCompOp(cmp.op)) return false;
-        engine::expr::CompOp op = *mapCompOp(cmp.op);
+        if (!mapToGpuFilterOp(cmp.op)) return false;
+        engine::GpuFilterOp op = *mapToGpuFilterOp(cmp.op);
 
         
         const TypedExpr* leftUnwrapped = unwrapExpr(cmp.left.get());
@@ -824,10 +823,10 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
             litExpr = leftUnwrapped;
             // Flip operator
             switch (op) {
-                case engine::expr::CompOp::LT: op = engine::expr::CompOp::GT; break;
-                case engine::expr::CompOp::LE: op = engine::expr::CompOp::GE; break;
-                case engine::expr::CompOp::GT: op = engine::expr::CompOp::LT; break;
-                case engine::expr::CompOp::GE: op = engine::expr::CompOp::LE; break;
+                case engine::GpuFilterOp::LT: op = engine::GpuFilterOp::GT; break;
+                case engine::GpuFilterOp::LE: op = engine::GpuFilterOp::GE; break;
+                case engine::GpuFilterOp::GT: op = engine::GpuFilterOp::LT; break;
+                case engine::GpuFilterOp::GE: op = engine::GpuFilterOp::LE; break;
                 default: break;
             }
         }
@@ -837,10 +836,10 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
         else if ((funcColName = getFuncCol(rightUnwrapped)) != "" && leftUnwrapped->kind == TypedExpr::Kind::Literal) {
              litExpr = leftUnwrapped;
              switch (op) {
-                case engine::expr::CompOp::LT: op = engine::expr::CompOp::GT; break;
-                case engine::expr::CompOp::LE: op = engine::expr::CompOp::GE; break;
-                case engine::expr::CompOp::GT: op = engine::expr::CompOp::LT; break;
-                case engine::expr::CompOp::GE: op = engine::expr::CompOp::LE; break;
+                case engine::GpuFilterOp::LT: op = engine::GpuFilterOp::GT; break;
+                case engine::GpuFilterOp::LE: op = engine::GpuFilterOp::GE; break;
+                case engine::GpuFilterOp::GT: op = engine::GpuFilterOp::LT; break;
+                case engine::GpuFilterOp::GE: op = engine::GpuFilterOp::LE; break;
                 default: break;
             }
         }
@@ -960,7 +959,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                  if (std::holds_alternative<double>(lit.value)) leftLitVal = (float)std::get<double>(lit.value);
                  else if (std::holds_alternative<int64_t>(lit.value)) leftLitVal = (float)std::get<int64_t>(lit.value);
              } else {
-                 leftBuf = evalExprFloatGPU(cmp.left, ctx);
+                 leftBuf = evaluateExpression(cmp.left, ctx);
                  if (!leftBuf) return false;
              }
              
@@ -974,7 +973,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                  if (std::holds_alternative<double>(lit.value)) rightLitVal = (float)std::get<double>(lit.value);
                  else if (std::holds_alternative<int64_t>(lit.value)) rightLitVal = (float)std::get<int64_t>(lit.value);
              } else {
-                 rightBuf = evalExprFloatGPU(cmp.right, ctx); 
+                 rightBuf = evaluateExpression(cmp.right, ctx); 
                  if (!rightBuf) { if(leftBuf) leftBuf->release(); return false; }
              }
              
@@ -982,15 +981,15 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              
              if (leftIsLit && rightBuf) {
                  // Lit op Col -> Flip Op -> Col flippedOp Lit
-                 engine::expr::CompOp flipped;
+                 engine::GpuFilterOp flipped;
                  bool valid = true;
                  switch(op) {
-                     case engine::expr::CompOp::EQ: flipped = engine::expr::CompOp::EQ; break;
-                     case engine::expr::CompOp::NE: flipped = engine::expr::CompOp::NE; break;
-                     case engine::expr::CompOp::LT: flipped = engine::expr::CompOp::GT; break; 
-                     case engine::expr::CompOp::LE: flipped = engine::expr::CompOp::GE; break;
-                     case engine::expr::CompOp::GT: flipped = engine::expr::CompOp::LT; break;
-                     case engine::expr::CompOp::GE: flipped = engine::expr::CompOp::LE; break;
+                     case engine::GpuFilterOp::EQ: flipped = engine::GpuFilterOp::EQ; break;
+                     case engine::GpuFilterOp::NE: flipped = engine::GpuFilterOp::NE; break;
+                     case engine::GpuFilterOp::LT: flipped = engine::GpuFilterOp::GT; break; 
+                     case engine::GpuFilterOp::LE: flipped = engine::GpuFilterOp::GE; break;
+                     case engine::GpuFilterOp::GT: flipped = engine::GpuFilterOp::LT; break;
+                     case engine::GpuFilterOp::GE: flipped = engine::GpuFilterOp::LE; break;
                      default: valid = false; break;
                  }
                  if(valid) res = GpuOps::filterF32("expr", rightBuf, count, flipped, leftLitVal);
@@ -1134,12 +1133,12 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                 float colVal = *static_cast<const float*>(buf->contents());
                 bool pass = false;
                 switch(op) {
-                    case engine::expr::CompOp::EQ: pass = (colVal == val); break;
-                    case engine::expr::CompOp::NE: pass = (colVal != val); break;
-                    case engine::expr::CompOp::LT: pass = (colVal < val); break;
-                    case engine::expr::CompOp::LE: pass = (colVal <= val); break;
-                    case engine::expr::CompOp::GT: pass = (colVal > val); break;
-                    case engine::expr::CompOp::GE: pass = (colVal >= val); break;
+                    case engine::GpuFilterOp::EQ: pass = (colVal == val); break;
+                    case engine::GpuFilterOp::NE: pass = (colVal != val); break;
+                    case engine::GpuFilterOp::LT: pass = (colVal < val); break;
+                    case engine::GpuFilterOp::LE: pass = (colVal <= val); break;
+                    case engine::GpuFilterOp::GT: pass = (colVal > val); break;
+                    case engine::GpuFilterOp::GE: pass = (colVal >= val); break;
                     default: break;
                 }
                 if (!pass) {
@@ -1226,12 +1225,12 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
                 uint32_t colVal = *static_cast<const uint32_t*>(buf->contents());
                 bool pass = false;
                 switch(op) {
-                    case engine::expr::CompOp::EQ: pass = (colVal == val); break;
-                    case engine::expr::CompOp::NE: pass = (colVal != val); break;
-                    case engine::expr::CompOp::LT: pass = (colVal < val); break;
-                    case engine::expr::CompOp::LE: pass = (colVal <= val); break;
-                    case engine::expr::CompOp::GT: pass = (colVal > val); break;
-                    case engine::expr::CompOp::GE: pass = (colVal >= val); break;
+                    case engine::GpuFilterOp::EQ: pass = (colVal == val); break;
+                    case engine::GpuFilterOp::NE: pass = (colVal != val); break;
+                    case engine::GpuFilterOp::LT: pass = (colVal < val); break;
+                    case engine::GpuFilterOp::LE: pass = (colVal <= val); break;
+                    case engine::GpuFilterOp::GT: pass = (colVal > val); break;
+                    case engine::GpuFilterOp::GE: pass = (colVal >= val); break;
                     default: break;
                 }
                 if (!pass) {
@@ -1337,11 +1336,11 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
              
              std::optional<FilterResult> res;
              if (isF32) {
-                 if (ctx.activeRowsGPU) res = GpuOps::filterF32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, engine::expr::CompOp::NE, 0.0f);
-                 else res = GpuOps::filterF32(colName, buf, currentCount, engine::expr::CompOp::NE, 0.0f);
+                 if (ctx.activeRowsGPU) res = GpuOps::filterF32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, engine::GpuFilterOp::NE, 0.0f);
+                 else res = GpuOps::filterF32(colName, buf, currentCount, engine::GpuFilterOp::NE, 0.0f);
              } else {
-                 if (ctx.activeRowsGPU) res = GpuOps::filterU32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, engine::expr::CompOp::NE, 0);
-                 else res = GpuOps::filterU32(colName, buf, currentCount, engine::expr::CompOp::NE, 0);
+                 if (ctx.activeRowsGPU) res = GpuOps::filterU32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, engine::GpuFilterOp::NE, 0);
+                 else res = GpuOps::filterU32(colName, buf, currentCount, engine::GpuFilterOp::NE, 0);
              }
              
              if (res) {
@@ -1423,7 +1422,7 @@ bool GpuExecutor::executeGPUFilterRecursive(const TypedExprPtr& expr, EvalContex
 // Expression Evaluation
 // ============================================================================
 
-MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext& ctx) {
+MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx) {
     if (!expr) return nullptr;
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
 
@@ -1467,7 +1466,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                         if (ptr[i] != first) { varying = true; break; }
                     }
                     if (varying) {
-                        if (debug) std::cerr << "[Exec] evalExprFloatGPU: agg match varying col '" << name << "' for '" << col << "'\n";
+                        if (debug) std::cerr << "[Exec] evaluateExpression: agg match varying col '" << name << "' for '" << col << "'\n";
                         buf = b;
                         break;
                     }
@@ -1546,7 +1545,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
             std::string colLower = normalizeFuzzy(col);
             
             if (env_truthy("GPUDB_DEBUG_OPS") && col.find("sum") != std::string::npos) {
-                std::cerr << "[Exec] evalExprFloatGPU: fuzzy search for col='" << col << "' normalized='" << colLower << "'\n";
+                std::cerr << "[Exec] evaluateExpression: fuzzy search for col='" << col << "' normalized='" << colLower << "'\n";
             }
             
             // Search for matching column in f32ColsGPU
@@ -1555,7 +1554,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 std::string nameLower = normalizeFuzzy(name);
                 
                 if (colLower == nameLower) {
-                    if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evalExprFloatGPU: fuzzy matched '" << col << "' to '" << name << "'\n";
+                    if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evaluateExpression: fuzzy matched '" << col << "' to '" << name << "'\n";
                     buf = b;
                     break;
                 }
@@ -1566,7 +1565,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                     if (!b) continue;
                     std::string nameLower = normalizeFuzzy(name);
                     if (colLower == nameLower) {
-                        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evalExprFloatGPU: fuzzy matched (u32) '" << col << "' to '" << name << "'\n";
+                        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evaluateExpression: fuzzy matched (u32) '" << col << "' to '" << name << "'\n";
                         buf = b;
                         isU32 = true;
                         break;
@@ -1586,7 +1585,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                     col.find("count(") != std::string::npos || col.find("COUNT(") != std::string::npos) {
                     
                     std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
-                    if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evalExprFloatGPU: heuristic mapping " << col << " to " << posKey << "\n";
+                    if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] evaluateExpression: heuristic mapping " << col << " to " << posKey << "\n";
                     
                     if (ctx.f32ColsGPU.count(posKey)) { buf = ctx.f32ColsGPU[posKey]; ctx.aggregateCounter++; }
                     else if (ctx.u32ColsGPU.count(posKey)) { buf = ctx.u32ColsGPU[posKey]; isU32=true; ctx.aggregateCounter++; }
@@ -1735,7 +1734,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
         EvalContext subCtx = ctx; 
         if (ctx.activeRowsGPU) ctx.activeRowsGPU->retain();
 
-        if (executeGPUFilterRecursive(std::const_pointer_cast<TypedExpr>(expr), subCtx)) {
+        if (executeFilterRecursive(std::const_pointer_cast<TypedExpr>(expr), subCtx)) {
             // subCtx.activeRowsGPU matches condition
             MTL::Buffer* outBuf = GpuOps::createFilledF32(0.0f, count);
 
@@ -1748,7 +1747,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
             return outBuf;
         } else {
             // Filter eval failed -> return nullptr
-            if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] Eval Compare: executeGPUFilterRecursive failed\n";
+            if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] Eval Compare: executeFilterRecursive failed\n";
             if (subCtx.activeRowsGPU) subCtx.activeRowsGPU->release();
             return nullptr;
         }
@@ -1779,7 +1778,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
             
             if (leftIsLit) {
                 // Lit op Right
-                MTL::Buffer* rightBuf = evalExprFloatGPU(bin.right, ctx);
+                MTL::Buffer* rightBuf = evaluateExpression(bin.right, ctx);
                 if (!rightBuf) return nullptr;
                 MTL::Buffer* result = nullptr;
                 if (isMul) result = GpuOps::arithMulF32ColScalar(rightBuf, leftVal, count);
@@ -1794,7 +1793,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 return result;
             } else if (rightIsLit) {
                 // Left op Lit
-                MTL::Buffer* leftBuf = evalExprFloatGPU(bin.left, ctx);
+                MTL::Buffer* leftBuf = evaluateExpression(bin.left, ctx);
                 if (!leftBuf) return nullptr;
                 MTL::Buffer* result = nullptr;
                 if (isMul) result = GpuOps::arithMulF32ColScalar(leftBuf, rightVal, count);
@@ -1808,8 +1807,8 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 return result;
             } else {
                 // Left op Right
-                MTL::Buffer* leftBuf = evalExprFloatGPU(bin.left, ctx);
-                MTL::Buffer* rightBuf = evalExprFloatGPU(bin.right, ctx);
+                MTL::Buffer* leftBuf = evaluateExpression(bin.left, ctx);
+                MTL::Buffer* rightBuf = evaluateExpression(bin.right, ctx);
                 if (!leftBuf || !rightBuf) {
                     // Clean up on partial failure
                     if (leftBuf) {
@@ -1844,15 +1843,15 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
     }
     
     if (expr->kind == TypedExpr::Kind::Alias) {
-        return evalExprFloatGPU(expr->asAlias().expr, ctx);
+        return evaluateExpression(expr->asAlias().expr, ctx);
     }
 
     if (expr->kind == TypedExpr::Kind::Cast) {
-        return evalExprFloatGPU(expr->asCast().expr, ctx);
+        return evaluateExpression(expr->asCast().expr, ctx);
     }
     
     if (expr->kind == TypedExpr::Kind::Case) {
-        if (debug) std::cerr << "[Exec] evalExprFloatGPU: Entering CASE expression handler\n";
+        if (debug) std::cerr << "[Exec] evaluateExpression: Entering CASE expression handler\n";
         
         // Safely access CaseExpr data
         if (!std::holds_alternative<CaseExpr>(expr->data)) {
@@ -1878,14 +1877,14 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 
                 outBuf = GpuOps::createFilledF32(elseVal, count);
             } else {
-                MTL::Buffer* elseBuf = evalExprFloatGPU(c.elseExpr, ctx);
+                MTL::Buffer* elseBuf = evaluateExpression(c.elseExpr, ctx);
                 if (!elseBuf) return nullptr;
                 
                 // Copy elseBuf to outBuf (always copy to avoid modifying source columns)
                 outBuf = GpuOps::createBuffer(nullptr, count * sizeof(float));
                 memcpy(outBuf->contents(), elseBuf->contents(), count * sizeof(float));
                 
-                // Release elseBuf — always release since evalExprFloatGPU transfers ownership
+                // Release elseBuf — always release since evaluateExpression transfers ownership
                 elseBuf->release();
             }
         } else {
@@ -1921,7 +1920,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
              // Retain activeRowsGPU as subCtx takes ownership of a reference
              if (ctx.activeRowsGPU) ctx.activeRowsGPU->retain(); 
              
-             if (executeGPUFilterRecursive(w.when, subCtx)) {
+             if (executeFilterRecursive(w.when, subCtx)) {
                  // subCtx.activeRowsGPU now holds the indices where condition is true.
                  // Get value for THEN
                  float thenVal = 0.0f;
@@ -1938,7 +1937,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                      if (literalThen) {
                          GpuOps::scatterConstantF32(outBuf, subCtx.activeRowsGPU, subCtx.activeRowsCountGPU, thenVal);
                      } else {
-                         MTL::Buffer* thenBuf = evalExprFloatGPU(w.then, subCtx);
+                         MTL::Buffer* thenBuf = evaluateExpression(w.then, subCtx);
                          if (thenBuf) {
                              GpuOps::scatterF32(thenBuf, outBuf, subCtx.activeRowsGPU, subCtx.activeRowsCountGPU);
                              thenBuf->release();
@@ -2007,7 +2006,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
         // When evaluating in post-join context, look for pre-computed first(...) column to avoid
         // accidentally matching varying grouped columns instead of the scalar broadcast
         if (fnName == "FIRST" || fnName == "\"FIRST\"") {
-            if (debug) std::cerr << "[Exec] evalExprFloatGPU: FIRST aggregate, evaluating argument\n";
+            if (debug) std::cerr << "[Exec] evaluateExpression: FIRST aggregate, evaluating argument\n";
             if (fn.args.size() >= 1 && fn.args[0]) {
                 // Look for any pre-computed "first"(...) column that has uniform values (scalar broadcast)
                 // This avoids accidentally picking varying grouped columns
@@ -2028,7 +2027,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                             }
                         }
                         if (uniform) {
-                            if (debug) std::cerr << "[Exec] evalExprFloatGPU: FIRST using scalar column '" << colName << "' val=" << ptr[0] << "\n";
+                            if (debug) std::cerr << "[Exec] evaluateExpression: FIRST using scalar column '" << colName << "' val=" << ptr[0] << "\n";
                             buf->retain();
                             return buf;
                         }
@@ -2036,7 +2035,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 }
                 
                 // Fallback to recursive evaluation (shouldn't be needed if column exists)
-                return evalExprFloatGPU(fn.args[0], ctx);
+                return evaluateExpression(fn.args[0], ctx);
             }
         }
 
@@ -2053,7 +2052,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 std::transform(lowerCol.begin(), lowerCol.end(), lowerCol.begin(), ::tolower);
                 // Check if column starts with the aggregate function
                 if (lowerCol.find(fnPrefix) == 0 && buf) {
-                    if (debug) std::cerr << "[Exec] evalExprFloatGPU: Found aggregate col '" << colName << "' for " << fnName << "\n";
+                    if (debug) std::cerr << "[Exec] evaluateExpression: Found aggregate col '" << colName << "' for " << fnName << "\n";
                     buf->retain();
                     return buf;
                 }
@@ -2063,7 +2062,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
                 std::string lowerCol = colName;
                 std::transform(lowerCol.begin(), lowerCol.end(), lowerCol.begin(), ::tolower);
                 if (lowerCol.find(fnPrefix) == 0 && buf) {
-                    if (debug) std::cerr << "[Exec] evalExprFloatGPU: Found aggregate col (u32) '" << colName << "' for " << fnName << ", casting to f32\n";
+                    if (debug) std::cerr << "[Exec] evaluateExpression: Found aggregate col (u32) '" << colName << "' for " << fnName << ", casting to f32\n";
                     if (ctx.activeRowsGPU) {
                         MTL::Buffer* gathered = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count);
                         MTL::Buffer* casted = GpuOps::castU32ToF32(gathered, count);
@@ -2077,7 +2076,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
             
             // Fallback: positional heuristic for #N columns
             std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
-             if (debug) std::cerr << "[Exec] evalExprFloatGPU: Function heuristic mapping " << fnName << " to " << posKey << "\n";
+             if (debug) std::cerr << "[Exec] evaluateExpression: Function heuristic mapping " << fnName << " to " << posKey << "\n";
              
              if (ctx.f32ColsGPU.count(posKey)) {
                  MTL::Buffer* buf = ctx.f32ColsGPU[posKey];
@@ -2134,7 +2133,7 @@ MTL::Buffer* GpuExecutor::evalExprFloatGPU(const TypedExprPtr& expr, EvalContext
              std::transform(unitStr.begin(), unitStr.end(), unitStr.begin(), ::toupper);
              
              if (unitStr == "YEAR") {
-                 MTL::Buffer* inBuf = evalExprFloatGPU(valArg, ctx);
+                 MTL::Buffer* inBuf = evaluateExpression(valArg, ctx);
                  if (!inBuf) {
                      if (debug) {
                          std::cerr << "[Exec] EXTRACT failed: could not evaluate valArg. Kind=" << (int)valArg->kind << "\n";

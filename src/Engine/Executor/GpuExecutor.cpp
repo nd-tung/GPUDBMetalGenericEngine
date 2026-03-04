@@ -1,7 +1,7 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
-#include "ColumnStoreGPU.hpp"
+#include "GpuColumnStore.hpp"
 #include <Metal/Metal.hpp>
 
 #include "Planner.hpp"
@@ -20,7 +20,7 @@ namespace engine {
 // ── GPU dedup helper: deduplicate an EvalContext by u32 key columns ──
 // Uses GpuOps::dedupByKeys on GPU buffers, then GPU gather for u32/f32,
 // CPU gather for strings. Returns new row count (0 = no dedup needed).
-uint32_t gpuDedupContext(EvalContext& ctx,
+uint32_t deduplicateContext(EvalContext& ctx,
                                 const std::vector<std::string>& dedupCols,
                                 bool debug) {
     if (dedupCols.empty() || ctx.rowCount <= 1) return 0;
@@ -74,33 +74,26 @@ uint32_t gpuDedupContext(EvalContext& ctx,
         }
     }
 
-    // CPU gather u32 columns (sync from GPU)
+    // NOTE: CPU mirror sync removed — unified memory means GPU buffers
+    // are directly accessible via ->contents(). Invalidate stale CPU mirrors
+    // so lazy download refreshes them if needed.
     for (auto& [name, buf] : ctx.u32ColsGPU) {
-        if (buf) {
-            size_t n = buf->length() / sizeof(uint32_t);
-            ctx.u32Cols[name].resize(n);
-            memcpy(ctx.u32Cols[name].data(), buf->contents(), n * sizeof(uint32_t));
-        }
+        if (buf) ctx.u32Cols[name].clear();
     }
-    // CPU gather f32 columns (sync from GPU)
     for (auto& [name, buf] : ctx.f32ColsGPU) {
-        if (buf) {
-            size_t n = buf->length() / sizeof(float);
-            ctx.f32Cols[name].resize(n);
-            memcpy(ctx.f32Cols[name].data(), buf->contents(), n * sizeof(float));
-        }
+        if (buf) ctx.f32Cols[name].clear();
     }
-    // CPU-only u32/f32 columns: upload → GPU gather → download
+    // CPU-only u32/f32 columns: upload → GPU gather → keep as GPU buffer
     {
-        auto& s = ColumnStoreGPU::instance();
+        auto& s = GpuColumnStore::instance();
         for (auto& [name, col] : ctx.u32Cols) {
             if (!ctx.u32ColsGPU.count(name) && col.size() >= ctx.rowCount) {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                 MTL::Buffer* dst = GpuOps::gatherU32(src, uniqueIdx, uniqueCount);
                 if (dst) {
-                    col.resize(uniqueCount);
-                    std::memcpy(col.data(), dst->contents(), uniqueCount * sizeof(uint32_t));
-                    dst->release();
+                    // Promote to GPU buffer — no need for CPU mirror
+                    ctx.u32ColsGPU[name] = dst;
+                    col.clear();
                 }
                 src->release();
             }
@@ -110,9 +103,9 @@ uint32_t gpuDedupContext(EvalContext& ctx,
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
                 MTL::Buffer* dst = GpuOps::gatherF32(src, uniqueIdx, uniqueCount);
                 if (dst) {
-                    col.resize(uniqueCount);
-                    std::memcpy(col.data(), dst->contents(), uniqueCount * sizeof(float));
-                    dst->release();
+                    // Promote to GPU buffer — no need for CPU mirror
+                    ctx.f32ColsGPU[name] = dst;
+                    col.clear();
                 }
                 src->release();
             }
@@ -161,13 +154,12 @@ uint32_t gpuDedupContext(EvalContext& ctx,
 
 // --- GPU Feasibility Checking ---
 
-std::vector<std::string> GpuExecutor::getGPUBlockers(const Plan& plan) {
+std::vector<std::string> GpuExecutor::getUnsupportedFeatures(const Plan& plan) {
     std::vector<std::string> blockers;
 
     // Count nodes and track table scans
     size_t joinCount = 0;
     bool hasEmptyScan = false;
-    bool hasDistinct = false;
     bool hasOuterJoin = false;
     bool hasSubqueryInCondition = false;
     bool hasIsNotDistinctFrom = false;
@@ -230,7 +222,7 @@ std::vector<std::string> GpuExecutor::getGPUBlockers(const Plan& plan) {
                 break;
             }
             case IRNode::Type::Distinct:
-                hasDistinct = true;
+                // DISTINCT is now handled on GPU — no blocker needed
                 break;
             default:
                 break;
@@ -244,9 +236,6 @@ std::vector<std::string> GpuExecutor::getGPUBlockers(const Plan& plan) {
     }
     if (hasOuterJoin) {
         blockers.push_back("FULL OUTER/CROSS JOIN not supported (INNER/LEFT/RIGHT/SEMI/ANTI supported)");
-    }
-    if (hasDistinct) {
-        blockers.push_back("DISTINCT not supported on GPU");
     }
     if (hasSubqueryInCondition) {
         // DuckDB decorrelates correlated subqueries using SEMI/ANTI/MARK joins.
@@ -304,7 +293,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
         return result;
     }
 
-    auto blockers = getGPUBlockers(plan);
+    auto blockers = getUnsupportedFeatures(plan);
     if (!blockers.empty()) {
         result.error = "GPU execution blocked: " + blockers[0];
         for (size_t i = 1; i < blockers.size(); ++i) {
@@ -361,7 +350,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
 
     if (debug) {
         std::cerr << "[Exec] Loaded " << tableContexts.size() << " tables in " 
-                  << result.table.upload_ms << "ms\n";
+                  << result.table.uploadMs << "ms\n";
     }
 
     // Execute operators in pipeline order
@@ -389,7 +378,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 bool hasSelfComp = false;
                 std::vector<std::string> corrCols;
                 // Parse "colA IS NOT DISTINCT FROM colA" and "colA = colA" patterns
-                auto condParts = splitConditionByAND(cond);
+                auto condParts = splitConditionByAnd(cond);
                 for (const auto& part : condParts) {
                     std::string col = parseSelfComparison(part);
                     if (!col.empty()) {
@@ -602,7 +591,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                     }
                                 }
                                 if (!dedupCols.empty()) {
-                                    uint32_t newCount = gpuDedupContext(tableCtx, dedupCols, debug);
+                                    uint32_t newCount = deduplicateContext(tableCtx, dedupCols, debug);
                                     if (newCount > 0) {
                                         // Strip payload columns
                                         tableCtx.f32Cols.clear();
@@ -759,7 +748,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                 std::cerr << "]\n";
                             }
                             if (!dedupCols.empty()) {
-                                uint32_t newCount = gpuDedupContext(currentCtx, dedupCols, debug);
+                                uint32_t newCount = deduplicateContext(currentCtx, dedupCols, debug);
                                 if (newCount > 0) {
                                     // Strip non-correlation columns from DELIM_SCAN context
                                     currentCtx.f32Cols.clear();
@@ -868,7 +857,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 
                 // Compact tableResult only if its row count matches the pre-filter
                 // context size (otherwise it's from a different pipeline stage).
-                if (!tableResult.u32_cols.empty() || !tableResult.f32_cols.empty()) {
+                if (!tableResult.u32Cols.empty() || !tableResult.f32Cols.empty()) {
                     // Find the physical buffer size (pre-filter row count)
                     size_t physicalRows = 0;
                     for (const auto& [name, buf] : currentCtx.u32ColsGPU) {
@@ -880,34 +869,61 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         }
                     }
                     bool sizeMatch = (tableResult.rowCount == physicalRows) || 
-                                     (physicalRows == 0 && !tableResult.u32_cols.empty() && 
-                                      tableResult.u32_cols[0].size() == currentCtx.activeRowsCountGPU);
+                                     (physicalRows == 0 && !tableResult.u32Cols.empty() && 
+                                      tableResult.u32Cols[0].size() == currentCtx.activeRowsCountGPU);
                     
                     if (sizeMatch && currentCtx.activeRowsCountGPU > 0 && currentCtx.activeRowsGPU) {
                         // Compact tableResult based on activeRows via GPU gather
                         uint32_t arCount = currentCtx.activeRowsCountGPU;
-                        auto& s = ColumnStoreGPU::instance();
-                        for (auto& col : tableResult.u32_cols) {
-                            MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                            MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, arCount);
-                            col.resize(arCount);
-                            std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
-                            src->release(); dst->release();
+                        auto& s = GpuColumnStore::instance();
+                        for (size_t ci = 0; ci < tableResult.u32Cols.size(); ++ci) {
+                            auto& col = tableResult.u32Cols[ci];
+                            // Prefer existing GPU buffer from context over uploading CPU vector
+                            MTL::Buffer* gpuBuf = nullptr;
+                            if (ci < tableResult.u32Names.size()) {
+                                auto it = currentCtx.u32ColsGPU.find(tableResult.u32Names[ci]);
+                                if (it != currentCtx.u32ColsGPU.end()) gpuBuf = it->second;
+                            }
+                            if (gpuBuf) {
+                                MTL::Buffer* dst = GpuOps::gatherU32(gpuBuf, currentCtx.activeRowsGPU, arCount);
+                                col.resize(arCount);
+                                std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
+                                dst->release();
+                            } else {
+                                MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                                MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, arCount);
+                                col.resize(arCount);
+                                std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
+                                src->release(); dst->release();
+                            }
                         }
-                        for (auto& col : tableResult.f32_cols) {
-                            MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                            MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, arCount);
-                            col.resize(arCount);
-                            std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
-                            src->release(); dst->release();
+                        for (size_t ci = 0; ci < tableResult.f32Cols.size(); ++ci) {
+                            auto& col = tableResult.f32Cols[ci];
+                            MTL::Buffer* gpuBuf = nullptr;
+                            if (ci < tableResult.f32Names.size()) {
+                                auto it = currentCtx.f32ColsGPU.find(tableResult.f32Names[ci]);
+                                if (it != currentCtx.f32ColsGPU.end()) gpuBuf = it->second;
+                            }
+                            if (gpuBuf) {
+                                MTL::Buffer* dst = GpuOps::gatherF32(gpuBuf, currentCtx.activeRowsGPU, arCount);
+                                col.resize(arCount);
+                                std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
+                                dst->release();
+                            } else {
+                                MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                                MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, arCount);
+                                col.resize(arCount);
+                                std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
+                                src->release(); dst->release();
+                            }
                         }
-                        for (auto& col : tableResult.string_cols) {
+                        for (auto& col : tableResult.stringCols) {
                             // Try GPU gather via flatStringCols if available
                             bool gpuDone = false;
-                            // Find matching column name from tableResult.string_names
-                            size_t colIdx = &col - &tableResult.string_cols[0];
-                            if (colIdx < tableResult.string_names.size()) {
-                                const auto& colName = tableResult.string_names[colIdx];
+                            // Find matching column name from tableResult.stringNames
+                            size_t colIdx = &col - &tableResult.stringCols[0];
+                            if (colIdx < tableResult.stringNames.size()) {
+                                const auto& colName = tableResult.stringNames[colIdx];
                                 auto fit = currentCtx.flatStringCols.find(colName);
                                 if (fit != currentCtx.flatStringCols.end() && fit->second.chars) {
                                     auto r = GpuOps::gatherFlatString(
@@ -942,12 +958,12 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         // tableResult is from a different pipeline stage, clear it
                         if (debug) std::cerr << "[Exec] Filter: clearing stale tableResult (size " 
                                              << tableResult.rowCount << " != physical " << physicalRows << ")\n";
-                        tableResult.u32_cols.clear();
-                        tableResult.u32_names.clear();
-                        tableResult.f32_cols.clear();
-                        tableResult.f32_names.clear();
-                        tableResult.string_cols.clear();
-                        tableResult.string_names.clear();
+                        tableResult.u32Cols.clear();
+                        tableResult.u32Names.clear();
+                        tableResult.f32Cols.clear();
+                        tableResult.f32Names.clear();
+                        tableResult.stringCols.clear();
+                        tableResult.stringNames.clear();
                         tableResult.order.clear();
                         tableResult.rowCount = 0;
                     }
@@ -973,25 +989,40 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         }
                     }
 
-                    // Compact CPU-only columns via GPU gather (upload→gather→download)
+                    // Compact CPU-only columns via GPU gather — retain gathered GPU buffer
                     {
-                        auto& s = ColumnStoreGPU::instance();
+                        auto& s = GpuColumnStore::instance();
                         for (auto& [name, col] : currentCtx.u32Cols) {
                             if (col.size() > compactCount) {
-                                MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                                MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, compactCount);
-                                col.resize(compactCount);
-                                std::memcpy(col.data(), dst->contents(), compactCount * sizeof(uint32_t));
-                                src->release(); dst->release();
+                                // Skip if GPU buffer already exists (was already compacted above)
+                                auto itGpu = currentCtx.u32ColsGPU.find(name);
+                                if (itGpu != currentCtx.u32ColsGPU.end() && itGpu->second) {
+                                    col.resize(compactCount);
+                                    std::memcpy(col.data(), itGpu->second->contents(), compactCount * sizeof(uint32_t));
+                                } else {
+                                    MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                                    MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, compactCount);
+                                    col.resize(compactCount);
+                                    std::memcpy(col.data(), dst->contents(), compactCount * sizeof(uint32_t));
+                                    currentCtx.u32ColsGPU[name] = dst; // promote to GPU
+                                    src->release();
+                                }
                             }
                         }
                         for (auto& [name, col] : currentCtx.f32Cols) {
                             if (col.size() > compactCount) {
-                                MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                                MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, compactCount);
-                                col.resize(compactCount);
-                                std::memcpy(col.data(), dst->contents(), compactCount * sizeof(float));
-                                src->release(); dst->release();
+                                auto itGpu = currentCtx.f32ColsGPU.find(name);
+                                if (itGpu != currentCtx.f32ColsGPU.end() && itGpu->second) {
+                                    col.resize(compactCount);
+                                    std::memcpy(col.data(), itGpu->second->contents(), compactCount * sizeof(float));
+                                } else {
+                                    MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                                    MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, compactCount);
+                                    col.resize(compactCount);
+                                    std::memcpy(col.data(), dst->contents(), compactCount * sizeof(float));
+                                    currentCtx.f32ColsGPU[name] = dst; // promote to GPU
+                                    src->release();
+                                }
                             }
                         }
                     }
@@ -1019,20 +1050,15 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         }
                     }
 
-                    // Sync compacted GPU data back to CPU mirrors
+                    // NOTE: CPU mirror sync removed — unified memory means GPU buffers
+                    // are directly accessible via ->contents(). Downstream operators
+                    // (Join, GroupBy, Project) check GPU buffers first.
+                    // Invalidate stale CPU mirrors so lazy download refreshes them if needed.
                     for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-                        if (buf) {
-                            size_t n = buf->length() / sizeof(uint32_t);
-                            currentCtx.u32Cols[name].resize(n);
-                            memcpy(currentCtx.u32Cols[name].data(), buf->contents(), n * sizeof(uint32_t));
-                        }
+                        if (buf) currentCtx.u32Cols[name].clear();
                     }
                     for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-                        if (buf) {
-                            size_t n = buf->length() / sizeof(float);
-                            currentCtx.f32Cols[name].resize(n);
-                            memcpy(currentCtx.f32Cols[name].data(), buf->contents(), n * sizeof(float));
-                        }
+                        if (buf) currentCtx.f32Cols[name].clear();
                     }
 
                     currentCtx.activeRows.clear();
@@ -1047,7 +1073,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
             }
 
             case IRNode::Type::Join: {
-                if (!orchestrateJoin(node.asJoin(), datasetPath, currentCtx, tableContexts, 
+                if (!executeJoinPipeline(node.asJoin(), datasetPath, currentCtx, tableContexts, 
                                      savedPipelines, savedPipelineTables, joinedTables, hasPipeline, result)) {
                     return result;
                 }
@@ -1113,27 +1139,27 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 
                 // Build set of f32 column names to detect float keys restored from u32
                 std::set<std::string> f32NameSet;
-                for (const auto& fn : tableResult.f32_names) f32NameSet.insert(fn);
+                for (const auto& fn : tableResult.f32Names) f32NameSet.insert(fn);
                 
-                for (size_t i = 0; i < tableResult.u32_cols.size(); ++i) {
-                    if (i < tableResult.u32_names.size()) {
-                        const std::string& name = tableResult.u32_names[i];
+                for (size_t i = 0; i < tableResult.u32Cols.size(); ++i) {
+                    if (i < tableResult.u32Names.size()) {
+                        const std::string& name = tableResult.u32Names[i];
                         // Skip named registration if this column was restored to f32
                         // (the u32 version contains raw IEEE 754 bits, not the actual value)
                         bool restoredToF32 = f32NameSet.count(name) > 0;
                         if (!restoredToF32) {
-                            currentCtx.u32Cols[name] = tableResult.u32_cols[i];
+                            currentCtx.u32Cols[name] = tableResult.u32Cols[i];
                         }
                         // Register positional key only if not restored to f32
                         if (!restoredToF32) {
                             std::string posKey = "#" + std::to_string(i);
-                            currentCtx.u32Cols[posKey] = tableResult.u32_cols[i];
+                            currentCtx.u32Cols[posKey] = tableResult.u32Cols[i];
                         }
                         // Re-register columns under their aliases (for CTE support)
                         if (!restoredToF32) {
                             for (const auto& [alias, canonical] : currentCtx.columnAliases) {
                                 if (canonical == name) {
-                                    currentCtx.u32Cols[alias] = tableResult.u32_cols[i];
+                                    currentCtx.u32Cols[alias] = tableResult.u32Cols[i];
                                     if (debug) std::cerr << "[Exec] GroupBy: re-registering alias " << alias << " -> " << canonical << "\n";
                                 }
                             }
@@ -1142,20 +1168,20 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 }
                 // Recount non-skipped u32 columns for f32 positional offset
                 size_t u32RegisteredCount = 0;
-                for (size_t i = 0; i < tableResult.u32_cols.size(); ++i) {
-                    if (i < tableResult.u32_names.size() && !f32NameSet.count(tableResult.u32_names[i]))
+                for (size_t i = 0; i < tableResult.u32Cols.size(); ++i) {
+                    if (i < tableResult.u32Names.size() && !f32NameSet.count(tableResult.u32Names[i]))
                         u32RegisteredCount++;
                 }
-                for (size_t i = 0; i < tableResult.f32_cols.size(); ++i) {
-                    if (i < tableResult.f32_names.size()) {
-                        currentCtx.f32Cols[tableResult.f32_names[i]] = tableResult.f32_cols[i];
+                for (size_t i = 0; i < tableResult.f32Cols.size(); ++i) {
+                    if (i < tableResult.f32Names.size()) {
+                        currentCtx.f32Cols[tableResult.f32Names[i]] = tableResult.f32Cols[i];
                         // Also register under positional name for #N references (offset by registered u32 count)
                         std::string posKey = "#" + std::to_string(i + u32RegisteredCount);
-                        currentCtx.f32Cols[posKey] = tableResult.f32_cols[i];
+                        currentCtx.f32Cols[posKey] = tableResult.f32Cols[i];
                         // Re-register columns under their aliases (for CTE support)
                         for (const auto& [alias, canonical] : currentCtx.columnAliases) {
-                            if (canonical == tableResult.f32_names[i]) {
-                                currentCtx.f32Cols[alias] = tableResult.f32_cols[i];
+                            if (canonical == tableResult.f32Names[i]) {
+                                currentCtx.f32Cols[alias] = tableResult.f32Cols[i];
                                 if (debug) std::cerr << "[Exec] GroupBy: re-registering f32 alias " << alias << " -> " << canonical << "\n";
                             }
                         }
@@ -1163,38 +1189,72 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 }
                 
                 // Populate stringCols from GroupBy result and build dictCols
-                for (size_t i = 0; i < tableResult.string_cols.size(); ++i) {
-                    if (i < tableResult.string_names.size()) {
-                        const std::string& sname = tableResult.string_names[i];
-                        currentCtx.stringCols[sname] = tableResult.string_cols[i];
+                for (size_t i = 0; i < tableResult.stringCols.size(); ++i) {
+                    if (i < tableResult.stringNames.size()) {
+                        const std::string& sname = tableResult.stringNames[i];
+                        currentCtx.stringCols[sname] = tableResult.stringCols[i];
                         // Build dictionary encoding for downstream operators
                         buildDictCol(currentCtx, sname);
                         if (debug) std::cerr << "[Exec] GroupBy: setting stringCol+dictCol " << sname
-                                            << " with " << tableResult.string_cols[i].size() << " rows\n";
+                                            << " with " << tableResult.stringCols[i].size() << " rows\n";
                     }
                 }
 
-                // Strict Mode: Upload GroupBy results to GPU
-                if (debug) std::cerr << "[Exec] Uploading GroupBy results to GPU (Strict Mode)\n";
+                // Use GPU buffers from GroupBy output directly (avoid CPU→GPU re-upload).
+                // For each unique column in TableResult, transfer the pre-created GPU buffer;
+                // for positional keys and aliases, share the same buffer with retain().
+                if (debug) std::cerr << "[Exec] Transferring GroupBy GPU buffers directly (zero-copy)\n";
                 
-                for(const auto& [name, vec] : currentCtx.u32Cols) {
-                    if (!vec.empty()) {
-                         MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
-                         if (buf) {
-                            currentCtx.u32ColsGPU[name] = buf;
-                         } else {
-                            std::cerr << "[Exec] ERROR: Failed to create GPU buffer for u32 col " << name << "\n";
-                         }
+                for (size_t i = 0; i < tableResult.u32Cols.size(); ++i) {
+                    if (i >= tableResult.u32Names.size()) continue;
+                    const std::string& name = tableResult.u32Names[i];
+                    bool restoredToF32 = f32NameSet.count(name) > 0;
+                    if (restoredToF32) continue;
+                    
+                    // Transfer GPU buffer from TableResult (or create if missing)
+                    MTL::Buffer* buf = (i < tableResult.u32ColsGPU.size()) ? tableResult.u32ColsGPU[i] : nullptr;
+                    if (!buf && !tableResult.u32Cols[i].empty()) {
+                        buf = GpuOps::createBuffer(tableResult.u32Cols[i].data(),
+                                                   tableResult.u32Cols[i].size() * sizeof(uint32_t));
+                    }
+                    if (buf) {
+                        currentCtx.u32ColsGPU[name] = buf;
+                        // Positional key shares the same buffer
+                        std::string posKey = "#" + std::to_string(i);
+                        buf->retain();
+                        currentCtx.u32ColsGPU[posKey] = buf;
+                        // Aliases share the same buffer
+                        for (const auto& [alias, canonical] : currentCtx.columnAliases) {
+                            if (canonical == name) {
+                                buf->retain();
+                                currentCtx.u32ColsGPU[alias] = buf;
+                            }
+                        }
                     }
                 }
-                for(const auto& [name, vec] : currentCtx.f32Cols) {
-                    if (!vec.empty()) {
-                         MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
-                         if (buf) {
-                            currentCtx.f32ColsGPU[name] = buf;
-                         } else {
-                            std::cerr << "[Exec] ERROR: Failed to create GPU buffer for f32 col " << name << "\n";
-                         }
+                for (size_t i = 0; i < tableResult.f32Cols.size(); ++i) {
+                    if (i >= tableResult.f32Names.size()) continue;
+                    const std::string& name = tableResult.f32Names[i];
+                    
+                    // Transfer GPU buffer from TableResult (or create if missing)
+                    MTL::Buffer* buf = (i < tableResult.f32ColsGPU.size()) ? tableResult.f32ColsGPU[i] : nullptr;
+                    if (!buf && !tableResult.f32Cols[i].empty()) {
+                        buf = GpuOps::createBuffer(tableResult.f32Cols[i].data(),
+                                                   tableResult.f32Cols[i].size() * sizeof(float));
+                    }
+                    if (buf) {
+                        currentCtx.f32ColsGPU[name] = buf;
+                        // Positional key shares the same buffer
+                        std::string posKey = "#" + std::to_string(i + u32RegisteredCount);
+                        buf->retain();
+                        currentCtx.f32ColsGPU[posKey] = buf;
+                        // Aliases share the same buffer
+                        for (const auto& [alias, canonical] : currentCtx.columnAliases) {
+                            if (canonical == name) {
+                                buf->retain();
+                                currentCtx.f32ColsGPU[alias] = buf;
+                            }
+                        }
                     }
                 } 
 
@@ -1212,12 +1272,14 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 hasPipeline = true;
                 
                 // Clear stale tableResult to avoid misaligned filter compaction
-                tableResult.u32_cols.clear();
-                tableResult.u32_names.clear();
-                tableResult.f32_cols.clear();
-                tableResult.f32_names.clear();
-                tableResult.string_cols.clear();
-                tableResult.string_names.clear();
+                tableResult.u32Cols.clear();
+                tableResult.u32Names.clear();
+                tableResult.u32ColsGPU.clear();
+                tableResult.f32Cols.clear();
+                tableResult.f32Names.clear();
+                tableResult.f32ColsGPU.clear();
+                tableResult.stringCols.clear();
+                tableResult.stringNames.clear();
                 tableResult.order.clear();
                 tableResult.rowCount = 0;
                 
@@ -1289,63 +1351,78 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                   << currentCtx.rowCount << " rows, tableResult had "
                                   << tableResult.rowCount << ")\n";
                     }
-                    tableResult.u32_cols.clear();
-                    tableResult.u32_names.clear();
-                    tableResult.f32_cols.clear();
-                    tableResult.f32_names.clear();
-                    tableResult.string_cols.clear();
-                    tableResult.string_names.clear();
+                    tableResult.u32Cols.clear();
+                    tableResult.u32Names.clear();
+                    tableResult.u32ColsGPU.clear();
+                    tableResult.f32Cols.clear();
+                    tableResult.f32Names.clear();
+                    tableResult.f32ColsGPU.clear();
+                    tableResult.stringCols.clear();
+                    tableResult.stringNames.clear();
                     tableResult.order.clear();
 
-                    // Download GPU columns to CPU if needed
+                    // Download GPU columns to CPU if needed, and populate GPU buffer vectors
                     for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-                        if (buf && (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() ||
-                                    currentCtx.u32Cols.at(name).empty())) {
-                            uint32_t count = (uint32_t)(buf->length() / sizeof(uint32_t));
-                            if (count >= currentCtx.rowCount) {
-                                std::vector<uint32_t> v(currentCtx.rowCount);
-                                std::memcpy(v.data(), buf->contents(), currentCtx.rowCount * sizeof(uint32_t));
-                                currentCtx.u32Cols[name] = std::move(v);
-                            }
+                        if (!buf) continue;
+                        if (name.find("__internal_") != std::string::npos) continue;
+                        if (name.size() >= 2 && name[0] == '#' && std::isdigit(name[1])) continue;
+                        uint32_t count = (uint32_t)(buf->length() / sizeof(uint32_t));
+                        if (count < currentCtx.rowCount) continue;
+                        // Ensure CPU vector exists (download from GPU via ->contents())
+                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() ||
+                            currentCtx.u32Cols.at(name).empty()) {
+                            std::vector<uint32_t> v(currentCtx.rowCount);
+                            std::memcpy(v.data(), buf->contents(), currentCtx.rowCount * sizeof(uint32_t));
+                            currentCtx.u32Cols[name] = std::move(v);
                         }
+                        tableResult.u32Names.push_back(name);
+                        tableResult.u32Cols.push_back(currentCtx.u32Cols[name]);
+                        tableResult.u32ColsGPU.push_back(buf);  // pass GPU buffer to OrderBy
                     }
                     for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-                        if (buf && (currentCtx.f32Cols.find(name) == currentCtx.f32Cols.end() ||
-                                    currentCtx.f32Cols.at(name).empty())) {
-                            uint32_t count = (uint32_t)(buf->length() / sizeof(float));
-                            if (count >= currentCtx.rowCount) {
-                                std::vector<float> v(currentCtx.rowCount);
-                                std::memcpy(v.data(), buf->contents(), currentCtx.rowCount * sizeof(float));
-                                currentCtx.f32Cols[name] = std::move(v);
-                            }
+                        if (!buf) continue;
+                        if (name.size() >= 2 && name[0] == '#' && std::isdigit(name[1])) continue;
+                        uint32_t count = (uint32_t)(buf->length() / sizeof(float));
+                        if (count < currentCtx.rowCount) continue;
+                        if (currentCtx.f32Cols.find(name) == currentCtx.f32Cols.end() ||
+                            currentCtx.f32Cols.at(name).empty()) {
+                            std::vector<float> v(currentCtx.rowCount);
+                            std::memcpy(v.data(), buf->contents(), currentCtx.rowCount * sizeof(float));
+                            currentCtx.f32Cols[name] = std::move(v);
                         }
+                        tableResult.f32Names.push_back(name);
+                        tableResult.f32Cols.push_back(currentCtx.f32Cols[name]);
+                        tableResult.f32ColsGPU.push_back(buf);  // pass GPU buffer to OrderBy
                     }
-
+                    // Also pick up CPU-only columns that have no GPU buffer
                     for (const auto& [name, vec] : currentCtx.u32Cols) {
-                        if (!vec.empty() && name.find("__internal_") == std::string::npos
-                            && !(name.size() >= 2 && name[0] == '#' && std::isdigit(name[1]))) {
-                            tableResult.u32_names.push_back(name);
-                            tableResult.u32_cols.push_back(vec);
-                        }
+                        if (vec.empty()) continue;
+                        if (name.find("__internal_") != std::string::npos) continue;
+                        if (name.size() >= 2 && name[0] == '#' && std::isdigit(name[1])) continue;
+                        if (currentCtx.u32ColsGPU.count(name)) continue;  // already handled above
+                        tableResult.u32Names.push_back(name);
+                        tableResult.u32Cols.push_back(vec);
+                        tableResult.u32ColsGPU.push_back(nullptr);
                     }
                     for (const auto& [name, vec] : currentCtx.f32Cols) {
-                        if (!vec.empty()
-                            && !(name.size() >= 2 && name[0] == '#' && std::isdigit(name[1]))) {
-                            tableResult.f32_names.push_back(name);
-                            tableResult.f32_cols.push_back(vec);
-                        }
+                        if (vec.empty()) continue;
+                        if (name.size() >= 2 && name[0] == '#' && std::isdigit(name[1])) continue;
+                        if (currentCtx.f32ColsGPU.count(name)) continue;  // already handled above
+                        tableResult.f32Names.push_back(name);
+                        tableResult.f32Cols.push_back(vec);
+                        tableResult.f32ColsGPU.push_back(nullptr);
                     }
                     for (const auto& [name, vec] : currentCtx.stringCols) {
                         if (!vec.empty()) {
-                            tableResult.string_names.push_back(name);
-                            tableResult.string_cols.push_back(vec);
+                            tableResult.stringNames.push_back(name);
+                            tableResult.stringCols.push_back(vec);
                         }
                     }
                     // Also materialize any dict-only string columns not yet in stringCols
                     for (const auto& [name, dict] : currentCtx.dictCols) {
                         if (dict.valid() && !currentCtx.stringCols.count(name)) {
-                            tableResult.string_names.push_back(name);
-                            tableResult.string_cols.push_back(dict.materialize());
+                            tableResult.stringNames.push_back(name);
+                            tableResult.stringCols.push_back(dict.materialize());
                         }
                     }
                     tableResult.rowCount = currentCtx.rowCount;
@@ -1356,18 +1433,18 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 }
                 // Sync ctx with sorted tableResult so that a subsequent Project
                 // does not re-read unsorted data from the old context.
-                for (size_t i = 0; i < tableResult.u32_cols.size(); ++i) {
-                    if (i < tableResult.u32_names.size())
-                        currentCtx.u32Cols[tableResult.u32_names[i]] = tableResult.u32_cols[i];
+                for (size_t i = 0; i < tableResult.u32Cols.size(); ++i) {
+                    if (i < tableResult.u32Names.size())
+                        currentCtx.u32Cols[tableResult.u32Names[i]] = tableResult.u32Cols[i];
                 }
-                for (size_t i = 0; i < tableResult.f32_cols.size(); ++i) {
-                    if (i < tableResult.f32_names.size())
-                        currentCtx.f32Cols[tableResult.f32_names[i]] = tableResult.f32_cols[i];
+                for (size_t i = 0; i < tableResult.f32Cols.size(); ++i) {
+                    if (i < tableResult.f32Names.size())
+                        currentCtx.f32Cols[tableResult.f32Names[i]] = tableResult.f32Cols[i];
                 }
-                for (size_t i = 0; i < tableResult.string_cols.size(); ++i) {
-                    if (i < tableResult.string_names.size()) {
-                        const std::string& sname = tableResult.string_names[i];
-                        currentCtx.stringCols[sname] = tableResult.string_cols[i];
+                for (size_t i = 0; i < tableResult.stringCols.size(); ++i) {
+                    if (i < tableResult.stringNames.size()) {
+                        const std::string& sname = tableResult.stringNames[i];
+                        currentCtx.stringCols[sname] = tableResult.stringCols[i];
                         // Rebuild dictionary encoding for sorted string columns
                         buildDictCol(currentCtx, sname);
                     }
@@ -1389,6 +1466,19 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 break;
             }
 
+            case IRNode::Type::Distinct: {
+                if (!executeDistinct(node.asDistinct(), currentCtx)) {
+                    result.error = "Distinct execution failed";
+                    return result;
+                }
+                // Sync tableResult row count with context
+                tableResult.rowCount = currentCtx.rowCount;
+                if (debug) {
+                    std::cerr << "[Exec] Distinct: " << currentCtx.rowCount << " rows\n";
+                }
+                break;
+            }
+
             case IRNode::Type::Project: {
                 if (!executeProject(node.asProject(), currentCtx, tableResult, &tableContexts)) {
                     result.error = "Project execution failed";
@@ -1398,10 +1488,10 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 // If this is a projection after aggregates (e.g., 100.0 * sum(...) / sum(...)),
                 // the projection output is the final result, not the raw aggregate value
                 // Note: We relax the rowCount==1 check because vector broadcasting might have produced N rows
-                if (result.isScalarAggregate && !tableResult.f32_cols.empty()) {
+                if (result.isScalarAggregate && !tableResult.f32Cols.empty()) {
                     // Update the scalar result with the projection output
-                    result.scalarValue = tableResult.f32_cols[0][0];
-                    result.scalarName = tableResult.f32_names.empty() ? "result" : tableResult.f32_names[0];
+                    result.scalarValue = tableResult.f32Cols[0][0];
+                    result.scalarName = tableResult.f32Names.empty() ? "result" : tableResult.f32Names[0];
                     if (debug) {
                         std::cerr << "[Exec] Project after Aggregate: updated scalar to " 
                                   << result.scalarValue << " (" << result.scalarName << ")\n";
@@ -1457,8 +1547,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
 
     // If tableResult is empty but currentCtx has data (scan-only pipeline),
     // materialize ctx columns into tableResult so the output path can render them.
-    if (tableResult.u32_names.empty() && tableResult.f32_names.empty() &&
-        tableResult.string_names.empty() && !result.isScalarAggregate &&
+    if (tableResult.u32Names.empty() && tableResult.f32Names.empty() &&
+        tableResult.stringNames.empty() && !result.isScalarAggregate &&
         currentCtx.rowCount > 0) {
         
         // Materialize GPU buffers to CPU vectors
@@ -1478,8 +1568,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 } else {
                     std::memcpy(col.data(), buf->contents(), arCount * sizeof(uint32_t));
                 }
-                tableResult.u32_names.push_back(name);
-                tableResult.u32_cols.push_back(std::move(col));
+                tableResult.u32Names.push_back(name);
+                tableResult.u32Cols.push_back(std::move(col));
             }
             for (const auto& [name, buf] : currentCtx.f32ColsGPU) {
                 if (!buf) continue;
@@ -1491,8 +1581,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 } else {
                     std::memcpy(col.data(), buf->contents(), arCount * sizeof(float));
                 }
-                tableResult.f32_names.push_back(name);
-                tableResult.f32_cols.push_back(std::move(col));
+                tableResult.f32Names.push_back(name);
+                tableResult.f32Cols.push_back(std::move(col));
             }
             for (const auto& [name, vec] : currentCtx.stringCols) {
                 // Skip if dict or flat alternative available — let those loops handle it
@@ -1503,11 +1593,11 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     for (uint32_t i = 0; i < arCount; ++i) {
                         if (arPtr[i] < vec.size()) col[i] = vec[arPtr[i]];
                     }
-                    tableResult.string_names.push_back(name);
-                    tableResult.string_cols.push_back(std::move(col));
+                    tableResult.stringNames.push_back(name);
+                    tableResult.stringCols.push_back(std::move(col));
                 } else {
-                    tableResult.string_names.push_back(name);
-                    tableResult.string_cols.push_back(
+                    tableResult.stringNames.push_back(name);
+                    tableResult.stringCols.push_back(
                         std::vector<std::string>(vec.begin(), vec.begin() + std::min((size_t)arCount, vec.size())));
                 }
             }
@@ -1522,11 +1612,11 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         col[i] = dict.lookupString(ids[i]);
                     }
                     gatheredIds->release();
-                    tableResult.string_names.push_back(name);
-                    tableResult.string_cols.push_back(std::move(col));
+                    tableResult.stringNames.push_back(name);
+                    tableResult.stringCols.push_back(std::move(col));
                 } else {
-                    tableResult.string_names.push_back(name);
-                    tableResult.string_cols.push_back(dict.materialize());
+                    tableResult.stringNames.push_back(name);
+                    tableResult.stringCols.push_back(dict.materialize());
                 }
             }
             // Materialize flat-only string columns not yet handled above
@@ -1535,7 +1625,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 if (currentCtx.dictCols.count(name)) continue; // Already handled by dict loop
                 // Already handled by stringCols loop if it wasn't skipped
                 bool alreadyHandled = false;
-                for (const auto& sn : tableResult.string_names) {
+                for (const auto& sn : tableResult.stringNames) {
                     if (sn == name) { alreadyHandled = true; break; }
                 }
                 if (alreadyHandled) continue;
@@ -1548,8 +1638,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         const char* ch = static_cast<const char*>(r.chars->contents());
                         std::vector<std::string> col(arCount);
                         for (uint32_t i = 0; i < arCount; ++i) col[i].assign(ch + offs[i], lens[i]);
-                        tableResult.string_names.push_back(name);
-                        tableResult.string_cols.push_back(std::move(col));
+                        tableResult.stringNames.push_back(name);
+                        tableResult.stringCols.push_back(std::move(col));
                     }
                 } else {
                     const uint32_t* offs = static_cast<const uint32_t*>(fc.offsets->contents());
@@ -1558,8 +1648,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     uint32_t cnt = std::min((uint32_t)arCount, fc.rowCount);
                     std::vector<std::string> col(cnt);
                     for (uint32_t i = 0; i < cnt; ++i) col[i].assign(ch + offs[i], lens[i]);
-                    tableResult.string_names.push_back(name);
-                    tableResult.string_cols.push_back(std::move(col));
+                    tableResult.stringNames.push_back(name);
+                    tableResult.stringCols.push_back(std::move(col));
                 }
             }
             tableResult.rowCount = arCount;
@@ -1567,9 +1657,9 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
         materialize();
         if (debug) {
             std::cerr << "[Exec] Scan-only pipeline: materialized " << tableResult.rowCount
-                      << " rows (" << tableResult.u32_names.size() << " u32, "
-                      << tableResult.f32_names.size() << " f32, "
-                      << tableResult.string_names.size() << " string cols)\n";
+                      << " rows (" << tableResult.u32Names.size() << " u32, "
+                      << tableResult.f32Names.size() << " f32, "
+                      << tableResult.stringNames.size() << " string cols)\n";
         }
     }
 
@@ -1638,14 +1728,14 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
         for (const auto& [pos, orig] : posToOriginal) {
             std::cerr << "  " << pos << " -> " << orig << "\n";
         }
-        std::cerr << "[Exec] Cleanup: tableResult.u32_names=";
-        for (const auto& n : tableResult.u32_names) std::cerr << "'" << n << "' ";
+        std::cerr << "[Exec] Cleanup: tableResult.u32Names=";
+        for (const auto& n : tableResult.u32Names) std::cerr << "'" << n << "' ";
         std::cerr << "\n";
     }
     
     // Clean up u32 column names
-    for (size_t i = 0; i < tableResult.u32_names.size(); ++i) {
-        std::string& name = tableResult.u32_names[i];
+    for (size_t i = 0; i < tableResult.u32Names.size(); ++i) {
+        std::string& name = tableResult.u32Names[i];
         name = cleanupColumnName(name);
         
         // If it's a positional ref, try to map to original name
@@ -1664,8 +1754,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     }
     
     // Clean up f32 column names
-    for (size_t i = 0; i < tableResult.f32_names.size(); ++i) {
-        std::string& name = tableResult.f32_names[i];
+    for (size_t i = 0; i < tableResult.f32Names.size(); ++i) {
+        std::string& name = tableResult.f32Names[i];
         name = cleanupColumnName(name);
         
         // DuckDB scalar subquery CASE wrapper cleanup:
@@ -1702,19 +1792,19 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     // --- Convert U32 hashes back to strings ---
     std::vector<std::string> new_u32_names;
     std::vector<std::vector<uint32_t>> new_u32_cols;
-    std::vector<size_t> u32_remap(tableResult.u32_names.size());
-    std::vector<bool> is_converted(tableResult.u32_names.size(), false);
-    std::vector<size_t> string_converted_idx(tableResult.u32_names.size(), 0);
+    std::vector<size_t> u32_remap(tableResult.u32Names.size());
+    std::vector<bool> is_converted(tableResult.u32Names.size(), false);
+    std::vector<size_t> string_converted_idx(tableResult.u32Names.size(), 0);
 
-    for (size_t i = 0; i < tableResult.u32_names.size(); ++i) {
-        std::string colName = tableResult.u32_names[i];
+    for (size_t i = 0; i < tableResult.u32Names.size(); ++i) {
+        std::string colName = tableResult.u32Names[i];
         std::string tableName = tableForColumn(colName);
         bool converted = false;
 
         // Check if a string column with this name already exists (e.g. from GroupBy string recovery)
         bool alreadyHasString = false;
-        for (size_t si = 0; si < tableResult.string_names.size(); ++si) {
-            if (tableResult.string_names[si] == colName) {
+        for (size_t si = 0; si < tableResult.stringNames.size(); ++si) {
+            if (tableResult.stringNames[si] == colName) {
                 // String column already exists — just mark u32 for removal, keep existing string
                 is_converted[i] = true;
                 string_converted_idx[i] = si;
@@ -1734,7 +1824,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     auto dictIt = currentCtx.dictCols.find(colName);
                     if (dictIt != currentCtx.dictCols.end() && dictIt->second.valid()) {
                         const auto& dict = dictIt->second;
-                        const auto& u32col = tableResult.u32_cols[i];
+                        const auto& u32col = tableResult.u32Cols[i];
                         
                         // Check if the u32 values are dictionary IDs (max val < dict size)
                         // vs FNV1a hashes (values are hash codes)
@@ -1765,10 +1855,10 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                             }
                         }
 
-                        tableResult.string_names.push_back(colName);
-                        tableResult.string_cols.push_back(std::move(strCol));
+                        tableResult.stringNames.push_back(colName);
+                        tableResult.stringCols.push_back(std::move(strCol));
                         is_converted[i] = true;
-                        string_converted_idx[i] = tableResult.string_names.size() - 1;
+                        string_converted_idx[i] = tableResult.stringNames.size() - 1;
                         converted = true;
                     } else {
                         // Fallback: try ctx.stringCols
@@ -1781,17 +1871,17 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                             }
 
                             std::vector<std::string> strCol;
-                            strCol.reserve(tableResult.u32_cols[i].size());
-                            for (uint32_t val : tableResult.u32_cols[i]) {
+                            strCol.reserve(tableResult.u32Cols[i].size());
+                            for (uint32_t val : tableResult.u32Cols[i]) {
                                 auto hit = hashMap.find(val);
                                 if (hit != hashMap.end()) strCol.push_back(hit->second);
                                 else strCol.push_back(std::to_string(val));
                             }
 
-                            tableResult.string_names.push_back(colName);
-                            tableResult.string_cols.push_back(std::move(strCol));
+                            tableResult.stringNames.push_back(colName);
+                            tableResult.stringCols.push_back(std::move(strCol));
                             is_converted[i] = true;
-                            string_converted_idx[i] = tableResult.string_names.size() - 1;
+                            string_converted_idx[i] = tableResult.stringNames.size() - 1;
                             converted = true;
                         } else {
                             // Last resort: re-read from disk (should be rare with always-flatten)
@@ -1806,25 +1896,25 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                             }
 
                             std::vector<std::string> strCol;
-                            strCol.reserve(tableResult.u32_cols[i].size());
-                            for (uint32_t val : tableResult.u32_cols[i]) {
+                            strCol.reserve(tableResult.u32Cols[i].size());
+                            for (uint32_t val : tableResult.u32Cols[i]) {
                                 if (map.count(val)) strCol.push_back(map[val]);
                                 else strCol.push_back(std::to_string(val));
                             }
 
-                            tableResult.string_names.push_back(colName);
-                            tableResult.string_cols.push_back(std::move(strCol));
+                            tableResult.stringNames.push_back(colName);
+                            tableResult.stringCols.push_back(std::move(strCol));
                             is_converted[i] = true;
-                            string_converted_idx[i] = tableResult.string_names.size() - 1;
+                            string_converted_idx[i] = tableResult.stringNames.size() - 1;
                             converted = true;
                         }
                     }
                 } else if (cSchema && cSchema->type == ColumnType::Float32) {
                     // GroupBy bit-reinterprets f32 keys as u32. Restore to f32.
-                    std::vector<float> f32Col(tableResult.u32_cols[i].size());
-                    std::memcpy(f32Col.data(), tableResult.u32_cols[i].data(), f32Col.size() * sizeof(float));
-                    tableResult.f32_names.push_back(colName);
-                    tableResult.f32_cols.push_back(std::move(f32Col));
+                    std::vector<float> f32Col(tableResult.u32Cols[i].size());
+                    std::memcpy(f32Col.data(), tableResult.u32Cols[i].data(), f32Col.size() * sizeof(float));
+                    tableResult.f32Names.push_back(colName);
+                    tableResult.f32Cols.push_back(std::move(f32Col));
                     is_converted[i] = true;
                     // Mark as f32-converted (use a high sentinel so it doesn't collide with string index)
                     string_converted_idx[i] = SIZE_MAX;
@@ -1835,14 +1925,14 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
 
         if (!converted) {
             new_u32_names.push_back(colName);
-            new_u32_cols.push_back(std::move(tableResult.u32_cols[i]));
+            new_u32_cols.push_back(std::move(tableResult.u32Cols[i]));
             u32_remap[i] = new_u32_names.size() - 1;
         }
     }
 
     // Apply strict update to u32 columns
-    tableResult.u32_names = std::move(new_u32_names);
-    tableResult.u32_cols = std::move(new_u32_cols);
+    tableResult.u32Names = std::move(new_u32_names);
+    tableResult.u32Cols = std::move(new_u32_cols);
     
     // Update the order refs to use cleaned names
     for (auto& ref : tableResult.order) {
@@ -1854,8 +1944,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         // Converted to f32 (was bit-reinterpreted u32)
                         ref.kind = TableResult::ColRef::Kind::F32;
                         // Find the f32 index by name
-                        for (size_t fi = 0; fi < tableResult.f32_names.size(); ++fi) {
-                            if (tableResult.f32_names[fi] == ref.name) {
+                        for (size_t fi = 0; fi < tableResult.f32Names.size(); ++fi) {
+                            if (tableResult.f32Names[fi] == ref.name) {
                                 ref.index = fi;
                                 break;
                             }
@@ -1863,27 +1953,27 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     } else {
                         ref.kind = TableResult::ColRef::Kind::String;
                         ref.index = string_converted_idx[ref.index];
-                        if (ref.index < tableResult.string_names.size()) {
-                             ref.name = tableResult.string_names[ref.index];
+                        if (ref.index < tableResult.stringNames.size()) {
+                             ref.name = tableResult.stringNames[ref.index];
                         }
                     }
                 } else {
                     ref.index = u32_remap[ref.index];
-                    if (ref.index < tableResult.u32_names.size()) {
-                        ref.name = tableResult.u32_names[ref.index];
+                    if (ref.index < tableResult.u32Names.size()) {
+                        ref.name = tableResult.u32Names[ref.index];
                     }
                 }
             }
-        } else if (ref.kind == TableResult::ColRef::Kind::F32 && ref.index < tableResult.f32_names.size()) {
-            ref.name = tableResult.f32_names[ref.index];
-        } else if (ref.kind == TableResult::ColRef::Kind::String && ref.index < tableResult.string_names.size()) {
-            ref.name = tableResult.string_names[ref.index];
+        } else if (ref.kind == TableResult::ColRef::Kind::F32 && ref.index < tableResult.f32Names.size()) {
+            ref.name = tableResult.f32Names[ref.index];
+        } else if (ref.kind == TableResult::ColRef::Kind::String && ref.index < tableResult.stringNames.size()) {
+            ref.name = tableResult.stringNames[ref.index];
         }
     }
 
     // Update GPU timing from kernel timer
-    tableResult.gpu_ms = KernelTimer::instance().totalGpuMs();
-    tableResult.upload_ms = result.table.upload_ms;
+    tableResult.gpuMs = KernelTimer::instance().totalGpuMs();
+    tableResult.uploadMs = result.table.uploadMs;
     
     // Filter final output to only include columns from the plan's outputColumns
     // This strips intermediate join keys and sort-only columns
@@ -1916,31 +2006,31 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
             filtered.rowCount = tableResult.rowCount;
             filtered.singleCharCols = tableResult.singleCharCols;
             
-            for (size_t i = 0; i < tableResult.u32_names.size(); ++i) {
-                if (isExpected(tableResult.u32_names[i])) {
-                    filtered.u32_names.push_back(tableResult.u32_names[i]);
-                    filtered.u32_cols.push_back(tableResult.u32_cols[i]);
+            for (size_t i = 0; i < tableResult.u32Names.size(); ++i) {
+                if (isExpected(tableResult.u32Names[i])) {
+                    filtered.u32Names.push_back(tableResult.u32Names[i]);
+                    filtered.u32Cols.push_back(tableResult.u32Cols[i]);
                 }
             }
-            for (size_t i = 0; i < tableResult.f32_names.size(); ++i) {
-                if (isExpected(tableResult.f32_names[i])) {
-                    filtered.f32_names.push_back(tableResult.f32_names[i]);
-                    filtered.f32_cols.push_back(tableResult.f32_cols[i]);
+            for (size_t i = 0; i < tableResult.f32Names.size(); ++i) {
+                if (isExpected(tableResult.f32Names[i])) {
+                    filtered.f32Names.push_back(tableResult.f32Names[i]);
+                    filtered.f32Cols.push_back(tableResult.f32Cols[i]);
                 }
             }
-            for (size_t i = 0; i < tableResult.string_names.size(); ++i) {
-                if (isExpected(tableResult.string_names[i])) {
-                    filtered.string_names.push_back(tableResult.string_names[i]);
-                    filtered.string_cols.push_back(tableResult.string_cols[i]);
+            for (size_t i = 0; i < tableResult.stringNames.size(); ++i) {
+                if (isExpected(tableResult.stringNames[i])) {
+                    filtered.stringNames.push_back(tableResult.stringNames[i]);
+                    filtered.stringCols.push_back(tableResult.stringCols[i]);
                 }
             }
             
-            tableResult.u32_cols = std::move(filtered.u32_cols);
-            tableResult.u32_names = std::move(filtered.u32_names);
-            tableResult.f32_cols = std::move(filtered.f32_cols);
-            tableResult.f32_names = std::move(filtered.f32_names);
-            tableResult.string_cols = std::move(filtered.string_cols);
-            tableResult.string_names = std::move(filtered.string_names);
+            tableResult.u32Cols = std::move(filtered.u32Cols);
+            tableResult.u32Names = std::move(filtered.u32Names);
+            tableResult.f32Cols = std::move(filtered.f32Cols);
+            tableResult.f32Names = std::move(filtered.f32Names);
+            tableResult.stringCols = std::move(filtered.stringCols);
+            tableResult.stringNames = std::move(filtered.stringNames);
         } else {
             // Filter order vector
             std::vector<TableResult::ColRef> filteredOrder;
@@ -1954,17 +2044,17 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
         
         if (debug) {
             std::cerr << "[Exec] Final output filter: " << plan.outputColumns.size() << " expected cols, "
-                      << "result has " << tableResult.u32_names.size() << " u32, "
-                      << tableResult.f32_names.size() << " f32, "
-                      << tableResult.string_names.size() << " string cols\n";
+                      << "result has " << tableResult.u32Names.size() << " u32, "
+                      << tableResult.f32Names.size() << " f32, "
+                      << tableResult.stringNames.size() << " string cols\n";
         }
     }
     
     // CPU post-processing = pipeline wall-clock minus GPU kernel time + column cleanup time
     auto postEnd = std::chrono::high_resolution_clock::now();
     double postProcessMs = std::chrono::duration<double, std::milli>(postEnd - endTime).count();
-    double cpuPipelineMs = pipelineWallMs - tableResult.gpu_ms;
-    tableResult.cpu_post_ms = cpuPipelineMs + postProcessMs;
+    double cpuPipelineMs = pipelineWallMs - tableResult.gpuMs;
+    tableResult.cpuPostMs = cpuPipelineMs + postProcessMs;
 
     result.success = true;
     result.table = std::move(tableResult);

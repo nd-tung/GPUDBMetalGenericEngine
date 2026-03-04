@@ -1,5 +1,5 @@
 #include "GpuExecutor.hpp"
-#include "GpuExecutorPriv.hpp"
+#include "GpuExecutorDetail.hpp"
 #include "Relation.hpp"
 
 #include <iostream>
@@ -44,7 +44,7 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
 
     // Try GPU Filter first
     if (!ctx.u32ColsGPU.empty() || !ctx.f32ColsGPU.empty()) {
-        if (executeGPUFilterRecursive(pred, ctx)) {
+        if (executeFilterRecursive(pred, ctx)) {
             if (debug) std::cerr << "[Exec] GPU Filter success, count=" << ctx.activeRowsCountGPU << "\n";
             // Lazy sync: only update rowCount here.
             // CPU activeRows vector is populated on demand via ctx.ensureActiveRowsCPU().

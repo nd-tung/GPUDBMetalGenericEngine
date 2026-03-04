@@ -1,112 +1,9 @@
 --- Running (Engine Host) ---
-[Main] Using GpuExecutor generic executor.
----------------------------------------------------
-======================RESULT=======================
----------------------------------------------------
-high_line_count|low_line_count|l_shipmode|
-6202.00|9324.00|MAIL|
-6200.00|9262.00|SHIP|
----------------------------------------------------
-Planning time: 20.35 ms
-Data Load Time (Disk+Upload): 12733.24 ms
-GPU kernels time: 25.35 ms
-CPU postprocess time: 88.59 ms
-Total Internal Pipeline time: 12847.17 ms
-Total Host Execution time: 12847.74 ms
-Total Wall time (Plan+Exec): 12868.09 ms
----------------------------------------------------
-GPU Kernel Timing Summary:
-─────────────────────────────────────────
-  compact        :    5.840 ms (23.042%) [12 calls]
-  filter         :    6.685 ms (26.372%) [12 calls]
-  gather         :    9.529 ms (37.596%) [24 calls]
-  groupby        :    1.861 ms (7.341%) [3 calls]
-  hash_join_probe_u32:    1.174 ms (4.633%) [3 calls]
-  sort           :    0.258 ms (1.016%) [2 calls]
-─────────────────────────────────────────
-  TOTAL GPU TIME: 25.347 ms
-  Kernel invocations: 56
-[Planner] Parsed aliases:
-[Planner]   'high_line_count' -> 'sum(case
-        when o_orderpriority = '1-URGENT'
-            or o_orderpriority = '2-HIGH'
-            then 1
-        else 0
-    end)'
-[Planner]   'low_line_count' -> 'sum(case
-        when o_orderpriority <> '1-URGENT'
-            and o_orderpriority <> '2-HIGH'
-            then 1
-        else 0
-    end)'
-[Planner]   'sum(casewheno_orderpriority!='1-urgent'ando_orderpriority!='2-high'then1else0end)' -> 'low_line_count'
-[Planner]   'sum(casewheno_orderpriority='1-urgent'oro_orderpriority='2-high'then1else0end)' -> 'high_line_count'
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node PROJECTION
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: FILTER
-[Planner] Traversing: FILTER
-[Planner] Entering children traversal block. Name: filter Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_commitdate
-[Planner] Proj: l_receiptdate
-[Planner] Proj: l_shipdate
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6131099688
-[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
 Expression: ((l_commitdate < l_receiptdate) AND (l_shipdate < l_commitdate) AND ((l_shipmode = 'MAIL') OR (l_shipmode = 'SHIP')))
-[Planner] DEBUG FILTER CHILD PROJS: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
-[Planner] Node FILTER output projections: l_orderkey, l_shipmode, l_commitdate, l_receiptdate, l_shipdate, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_shipmode
-[Planner] Forcing keep of global column: l_commitdate
-[Planner] Forcing keep of global column: l_shipdate
-[Planner] Forcing keep of global column: l_receiptdate
-[Planner] Node PROJECTION output projections: l_orderkey, l_shipmode, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_orderkey
-[Planner] Proj: o_orderpriority
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 4 Plan: 6131099688
-[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_orderpriority, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
 [Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
 [Planner] ChildProjs size: 4
@@ -116,60 +13,42 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
   #3: l_shipmode
 [Planner] Resolved Condition: 'o_orderkey = l_orderkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_3'
-[Planner] Join Key Analysis: l => orders, r => lineitem
-[Planner] Captured RHS Table: tmpl_join_3
-[Planner] RHS Tables: tmpl_join_3, 
-[Planner] Checking matchesRHS: orders
-[Planner] Checking matchesRHS: lineitem
-[Planner] Node HASH_JOIN output projections: o_orderkey, o_orderpriority, l_orderkey, l_shipmode, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: o_orderkey
-[Planner] Proj: o_orderpriority
-[Planner] Forcing keep of global column: l_orderkey
-[Planner] Forcing keep of global column: l_shipmode
-[Planner] Node PROJECTION output projections: o_orderkey, o_orderpriority, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END
-[Planner] Proj: CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END
-[Planner] Forcing keep of global column: o_orderpriority
-[Planner] Forcing keep of global column: o_orderkey
-[Planner] Node PROJECTION output projections: l_shipmode, CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END, CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END, 
-[Planner] Parsing agg string: 'sum(#1)'
-[Planner] Resolved agg: sum(CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END)
-[Planner] inputExpr 'CASE  WHEN (((o_orderpriority = '1-URGENT') OR (o_orderpriority = '2-HIGH'))) THEN (1) ELSE 0 END' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(casewhen(((o_orderpriority='1-urgent')or(o_orderpriority='2-high')))then(1)else0end)'
-[Planner] Found alias via stripped comparison: 'high_line_count'
-[Planner] Found alias for agg: high_line_count
-[Planner] Pushing spec with outputName='high_line_count'
-[Planner] Parsing agg string: 'sum(#2)'
-[Planner] Resolved agg: sum(CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END)
-[Planner] inputExpr 'CASE  WHEN (((o_orderpriority != '1-URGENT') AND (o_orderpriority != '2-HIGH'))) THEN (1) ELSE 0 END' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(casewhen(((o_orderpriority!='1-urgent')and(o_orderpriority!='2-high')))then(1)else0end)'
-[Planner] Found alias via stripped comparison: 'low_line_count'
-[Planner] Found alias for agg: low_line_count
-[Planner] Pushing spec with outputName='low_line_count'
-[Planner] Node HASH_GROUP_BY output projections: l_shipmode, high_line_count, low_line_count, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: high_line_count
-[Planner] Proj: low_line_count
-[Planner] Node PROJECTION output projections: l_shipmode, high_line_count, low_line_count, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: high_line_count
-[Planner] Proj: low_line_count
-[Planner] Node PROJECTION output projections: l_shipmode, high_line_count, low_line_count, 
-[Planner] Node ORDER_BY output projections: l_shipmode, high_line_count, low_line_count, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: high_line_count
-[Planner] Proj: low_line_count
-[Planner] Node PROJECTION output projections: l_shipmode, high_line_count, low_line_count, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'l_shipmode'
-[Planner]   'high_line_count'
-[Planner]   'low_line_count'
+[Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 30988
+[Exec] GroupBy VERIFY: agg mismatches = 0 / 30988
+[Exec] GroupBy VERIFY: CPU grand total = 12402.00
+[Exec] GroupBy VERIFY: GPU grand total = 12402.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=2 val=6202.00
+[Exec] GroupBy VERIFY: GPU max key=2 val=6202.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 2 = 6202.00
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+high_line_count|low_line_count|l_shipmode|
+6202.00|9324.00|MAIL|
+6200.00|9262.00|SHIP|
+---------------------------------------------------
+Planning time: 20.49 ms
+Data Load Time (Disk+Upload): 12735.26 ms
+GPU kernels time: 22.23 ms
+CPU postprocess time: 75.44 ms
+Total Internal Pipeline time: 12832.94 ms
+Total Host Execution time: 12833.51 ms
+Total Wall time (Plan+Exec): 12854.00 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  compact        :    5.644 ms (25.387%) [12 calls]
+  filter         :    6.770 ms (30.453%) [12 calls]
+  gather         :    7.092 ms (31.902%) [19 calls]
+  groupby        :    1.321 ms (5.941%) [3 calls]
+  hash_join_probe_u32:    1.189 ms (5.347%) [3 calls]
+  sort           :    0.216 ms (0.970%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 22.230 ms
+  Kernel invocations: 51
