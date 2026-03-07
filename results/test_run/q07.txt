@@ -1,179 +1,87 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-Expression: ((n_name = 'GERMANY') OR (n_name = 'FRANCE'))
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 'c_nationkey = n_nationkey'
-[Planner] ChildProjs size: 4
-  #0: c_custkey
-  #1: c_nationkey
-  #2: n_nationkey
-  #3: n_name
-[Planner] Resolved Condition: 'c_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-Expression: ((n_name = 'FRANCE') OR (n_name = 'GERMANY'))
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 4
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: n_nationkey
-  #3: n_name
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
-[Planner] Pre-resolved Condition: 'l_suppkey = s_suppkey'
-[Planner] ChildProjs size: 9
-  #0: l_suppkey
-  #1: l_orderkey
-  #2: l_shipdate
-  #3: l_extendedprice
-  #4: l_discount
-  #5: s_suppkey
-  #6: s_nationkey
-  #7: n_nationkey
-  #8: n_name
-[Planner] Resolved Condition: 'l_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_8'
-[Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
-[Planner] ChildProjs size: 11
-  #0: o_orderkey
-  #1: o_custkey
-  #2: l_suppkey
-  #3: l_orderkey
-  #4: l_shipdate
-  #5: l_extendedprice
-  #6: l_discount
-  #7: s_suppkey
-  #8: s_nationkey
-  #9: n_nationkey
-  #10: n_name
-[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_8'
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
-[Planner] ChildProjs size: 15
-  #0: o_orderkey
-  #1: o_custkey
-  #2: l_suppkey
-  #3: l_orderkey
-  #4: l_shipdate
-  #5: l_extendedprice
-  #6: l_discount
-  #7: s_suppkey
-  #8: s_nationkey
-  #9: n_nationkey
-  #10: n_name
-  #11: c_custkey
-  #12: c_nationkey
-  #13: n_nationkey_1
-  #14: n_name_1
-[Planner] Resolved Condition: 'o_custkey = c_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
-Expression: (((n_name = 'FRANCE') AND (n_name = 'GERMANY')) OR ((n_name = 'GERMANY') AND (n_name = 'FRANCE')))
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 5924
-[Exec] GroupBy VERIFY: agg mismatches = 0 / 5924
-[Exec] GroupBy VERIFY: CPU grand total = 214325111.68
-[Exec] GroupBy VERIFY: GPU grand total = 214325108.00
-[Exec] GroupBy VERIFY: difference = -3.68
-[Exec] GroupBy VERIFY: CPU max key=7 val=109272816.08
-[Exec] GroupBy VERIFY: GPU max key=7 val=54639728.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 7 = 54639728.00
-[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 l_year|revenue|supp_nation|cust_nation|
-1995|54639728.00|FRANCE|GERMANY|
-1996|54633088.00|FRANCE|GERMANY|
-1995|52531748.00|GERMANY|FRANCE|
-1996|52520544.00|GERMANY|FRANCE|
+1995|54639756.00|FRANCE|GERMANY|
+1996|54633064.00|FRANCE|GERMANY|
+1995|52531736.00|GERMANY|FRANCE|
+1996|52520528.00|GERMANY|FRANCE|
 ---------------------------------------------------
-Planning time: 2.84 ms
-Data Load Time (Disk+Upload): 3141.34 ms
-GPU kernels time: 16.38 ms
-CPU postprocess time: 42.90 ms
-Total Internal Pipeline time: 3200.61 ms
-Total Host Execution time: 3200.69 ms
-Total Wall time (Plan+Exec): 3203.53 ms
+Planning time: 2.54 ms
+Data Load Time (Disk+Upload): 3146.28 ms
+GPU kernels time: 16.13 ms
+CPU postprocess time: 42.97 ms
+Total Internal Pipeline time: 3205.37 ms
+Total Host Execution time: 3205.46 ms
+Total Wall time (Plan+Exec): 3208.00 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    6.558 ms (40.044%) [11 calls]
-  gather         :    5.282 ms (32.248%) [24 calls]
-  groupby        :    0.708 ms (4.323%) [3 calls]
-  hash_join_probe_u32:    3.622 ms (22.113%) [7 calls]
-  sort           :    0.208 ms (1.273%) [4 calls]
+  filter         :    6.391 ms (39.625%) [11 calls]
+  gather         :    5.259 ms (32.609%) [24 calls]
+  groupby        :    0.682 ms (4.228%) [3 calls]
+  hash_join_probe_u32:    3.597 ms (22.302%) [7 calls]
+  sort           :    0.199 ms (1.235%) [4 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 16.378 ms
+  TOTAL GPU TIME: 16.127 ms
   Kernel invocations: 49
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_le_u32                   1.326         150000        113.119
-ops::filter_string_eq                0.304             25          0.082
-ops::filter_string_eq                0.284             25          0.088
-hash_join_probe_write_multi          0.478         149999        313.915
-ops::filter_string_eq                0.258             25          0.097
-ops::filter_string_eq                0.277             25          0.090
-hash_join_probe_write_multi          0.275          10000         36.320
-ops::filter_ge_u32                   2.040        6001215       2941.592
-ops::filter_le_u32_indexed           1.092        3426687       3138.831
-hash_join_probe_write_multi          1.665        1828450       1098.333
-hash_join_probe_write_multi          0.492        1500000       3051.627
-hash_join_probe_write_multi          0.267         145703        546.644
-ops::filter_string_eq                0.250          11723         46.861
-ops::filter_string_eq                0.256          11723         45.845
-hash_join_probe_write_multi          0.227           5833         25.715
-ops::gather_col_u32                  0.203           3014         14.875
-ops::filter_string_eq                0.236          11723         49.613
-ops::filter_string_eq                0.236          11723         49.656
-hash_join_probe_write_multi          0.219           5890         26.926
-ops::gather_col_u32                  0.206           2910         14.103
-ops::gather_col_u32                  0.214           5924         27.698
-ops::gather_col_u32                  0.217           5924         27.247
-ops::gather_col_u32                  0.212           5924         27.943
-ops::gather_col_u32                  0.219           5924         27.071
-ops::gather_col_u32                  0.213           5924         27.785
-ops::gather_col_u32                  0.221           5924         26.765
-ops::gather_col_u32                  0.221           5924         26.760
-ops::gather_col_u32                  0.225           5924         26.309
-ops::gather_col_u32                  0.218           5924         27.216
-ops::gather_col_u32                  0.224           5924         26.501
-ops::gather_col_u32                  0.220           5924         26.922
-ops::gather_col_u32                  0.231           5924         25.654
-ops::gather_col_u32                  0.216           5924         27.363
-ops::gather_col_f32                  0.526           5924         11.272
-ops::gather_col_f32                  0.192           5924         30.841
-ops::gather_col_u32                  0.194           5924         30.529
-ops::gather_col_u32                  0.205           5924         28.927
-ops::groupby_agg_multi_key_ty        0.328           5924         18.068
-ops::ht_mark_valid                   0.198          16384         82.591
-ops::ht_extract_compact              0.182              4          0.022
+ops::filter_le_u32                   1.151         150000        130.270
+ops::filter_string_eq                0.290             25          0.086
+ops::filter_string_eq                0.259             25          0.097
+hash_join_probe_write_multi          0.457         149999        328.315
+ops::filter_string_eq                0.252             25          0.099
+ops::filter_string_eq                0.261             25          0.096
+hash_join_probe_write_multi          0.279          10000         35.848
+ops::filter_ge_u32                   2.049        6001215       2928.315
+ops::filter_le_u32_indexed           1.158        3426687       2957.970
+hash_join_probe_write_multi          1.687        1828450       1084.141
+hash_join_probe_write_multi          0.449        1500000       3342.618
+hash_join_probe_write_multi          0.273         145703        534.690
+ops::filter_string_eq                0.251          11723         46.721
+ops::filter_string_eq                0.236          11723         49.569
+hash_join_probe_write_multi          0.224           5833         26.031
+ops::gather_col_u32                  0.208           3014         14.493
+ops::filter_string_eq                0.235          11723         49.929
+ops::filter_string_eq                0.247          11723         47.526
+hash_join_probe_write_multi          0.229           5890         25.725
+ops::gather_col_u32                  0.224           2910         13.013
+ops::gather_col_u32                  0.200           5924         29.688
+ops::gather_col_u32                  0.220           5924         26.963
+ops::gather_col_u32                  0.210           5924         28.154
+ops::gather_col_u32                  0.224           5924         26.486
+ops::gather_col_u32                  0.209           5924         28.390
+ops::gather_col_u32                  0.218           5924         27.180
+ops::gather_col_u32                  0.211           5924         28.109
+ops::gather_col_u32                  0.220           5924         26.948
+ops::gather_col_u32                  0.211           5924         28.032
+ops::gather_col_u32                  0.211           5924         28.109
+ops::gather_col_u32                  0.210           5924         28.143
+ops::gather_col_u32                  0.676           5924          8.762
+ops::gather_col_u32                  0.195           5924         30.412
+ops::gather_col_f32                  0.186           5924         31.892
+ops::gather_col_f32                  0.177           5924         33.398
+ops::gather_col_u32                  0.179           5924         33.079
+ops::gather_col_u32                  0.179           5924         33.003
+ops::groupby_agg_multi_key_ty        0.325           5924         18.242
+ops::ht_mark_valid                   0.179          16384         91.552
+ops::ht_extract_compact              0.178              4          0.022
+ops::gather_col_u32                  0.183              4          0.022
+block_sort_kv_u64                    0.000              4          0.000
 ops::gather_col_u32                  0.178              4          0.022
 block_sort_kv_u64                    0.000              4          0.000
-ops::gather_col_u32                  0.185              4          0.022
+ops::gather_col_u32                  0.176              4          0.023
 block_sort_kv_u64                    0.000              4          0.000
-ops::gather_col_u32                  0.180              4          0.022
-block_sort_kv_u64                    0.000              4          0.000
-orderby_gpu_gather                   0.208              8          0.038
-ops::gather_col_u32                  0.181              4          0.022
-ops::gather_col_u32                  0.180              4          0.022
+orderby_gpu_gather                   0.199              8          0.040
+ops::gather_col_u32                  0.184              4          0.022
+ops::gather_col_u32                  0.171              4          0.023
 ─────────────────────────────────────────────────────────────────
-TOTAL: 16.378 ms
+TOTAL: 16.127 ms

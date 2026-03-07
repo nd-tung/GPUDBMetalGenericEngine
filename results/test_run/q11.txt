@@ -1,77 +1,8 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 3
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: n_nationkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 6
-  #0: ps_suppkey
-  #1: ps_supplycost
-  #2: ps_availqty
-  #3: s_suppkey
-  #4: s_nationkey
-  #5: n_nationkey
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 3
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: n_nationkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_15'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 7
-  #0: ps_suppkey
-  #1: ps_partkey
-  #2: ps_supplycost
-  #3: ps_availqty
-  #4: s_suppkey
-  #5: s_nationkey
-  #6: n_nationkey
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_15'
-[Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_12'
-[Planner] Pre-resolved Condition: 'CAST(sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) AS DECIMAL(38,6)) > SUBQUERY'
-[Planner] ChildProjs size: 3
-  #0: ps_partkey
-  #1: sum((ps_supplycost*cast(ps_availqtyasdecimal(18,0))))
-  #2: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"((sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) * 0.0001)) END
-[Planner] Keeping SUBQUERY token (RHS is complex: 'CASE  WHEN ((count_star() > 1)) THEN ("e...')
-[Planner] Resolved Condition: 'CAST(sum((ps_supplycost * CAST(ps_availqty AS DECIMAL(18,0)))) AS DECIMAL(38,6)) > SUBQUERY'
-DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 31680
-[Exec] GroupBy VERIFY: agg mismatches = 0 / 31680
-[Exec] GroupBy VERIFY: CPU grand total = 78741031080.86
-[Exec] GroupBy VERIFY: GPU grand total = 78741031074.73
-[Exec] GroupBy VERIFY: difference = -6.13
-[Exec] GroupBy VERIFY: CPU max key=129760 val=17538457.00
-[Exec] GroupBy VERIFY: GPU max key=129760 val=17538456.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 129760 = 17538456.00
-[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -1125,47 +1056,47 @@ ps_partkey|value|
 72073|7877736.00|
 5182|7874521.50|
 ---------------------------------------------------
-Planning time: 2.54 ms
-Data Load Time (Disk+Upload): 360.58 ms
-GPU kernels time: 6.46 ms
-CPU postprocess time: 30.55 ms
-Total Internal Pipeline time: 397.59 ms
-Total Host Execution time: 397.67 ms
-Total Wall time (Plan+Exec): 400.22 ms
+Planning time: 2.33 ms
+Data Load Time (Disk+Upload): 359.66 ms
+GPU kernels time: 6.34 ms
+CPU postprocess time: 28.20 ms
+Total Internal Pipeline time: 394.20 ms
+Total Host Execution time: 394.29 ms
+Total Wall time (Plan+Exec): 396.62 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.020 ms (0.304%) [3 calls]
-  filter         :    1.235 ms (19.117%) [3 calls]
-  gather         :    0.808 ms (12.507%) [4 calls]
-  groupby        :    0.907 ms (14.039%) [3 calls]
-  hash_join_probe_u32:    3.288 ms (50.902%) [4 calls]
-  sort           :    0.202 ms (3.131%) [2 calls]
+  cast           :    0.018 ms (0.279%) [3 calls]
+  filter         :    1.227 ms (19.360%) [3 calls]
+  gather         :    0.826 ms (13.039%) [4 calls]
+  groupby        :    0.872 ms (13.755%) [3 calls]
+  hash_join_probe_u32:    3.192 ms (50.357%) [4 calls]
+  sort           :    0.203 ms (3.210%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 6.460 ms
+  TOTAL GPU TIME: 6.338 ms
   Kernel invocations: 19
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.754             25          0.033
-hash_join_probe_write_multi          0.241          10000         41.465
-hash_join_probe_write_multi          1.399         800000        571.684
-ops::cast_u32_to_f32                 0.007          31680       4722.719
-ops::cast_u32_to_f32                 0.007          31680       4580.020
-ops::filter_string_eq                0.233             25          0.107
-hash_join_probe_write_multi          0.236          10000         42.433
-hash_join_probe_write_multi          1.412         800000        566.488
-ops::cast_u32_to_f32                 0.006          31680       5243.297
-ops::groupby_agg_multi_key_ty        0.411          31680         76.987
-ops::ht_mark_valid                   0.239          65536        273.780
-ops::ht_extract_compact              0.256          29818        116.439
-ops::filter_gt_f32                   0.248          29818        120.093
-ops::gather_col_u32                  0.204           1048          5.138
-ops::gather_col_u32                  0.188           1048          5.563
-ops::gather_col_f32                  0.207           1048          5.063
-ops::gather_col_f32                  0.209           1048          5.023
+ops::filter_string_eq                0.748             25          0.033
+hash_join_probe_write_multi          0.240          10000         41.674
+hash_join_probe_write_multi          1.371         800000        583.516
+ops::cast_u32_to_f32                 0.005          31680       6232.540
+ops::cast_u32_to_f32                 0.006          31680       5103.093
+ops::filter_string_eq                0.225             25          0.111
+hash_join_probe_write_multi          0.235          10000         42.463
+hash_join_probe_write_multi          1.345         800000        594.685
+ops::cast_u32_to_f32                 0.006          31680       4969.412
+ops::groupby_agg_multi_key_ty        0.409          31680         77.544
+ops::ht_mark_valid                   0.229          65536        286.340
+ops::ht_extract_compact              0.234          29818        127.201
+ops::filter_gt_f32                   0.254          29818        117.567
+ops::gather_col_u32                  0.211           1048          4.975
+ops::gather_col_u32                  0.197           1048          5.325
+ops::gather_col_f32                  0.213           1048          4.928
+ops::gather_col_f32                  0.206           1048          5.080
 radix_sort_u64                       0.000           1048          0.000
-orderby_gpu_gather                   0.202           2096         10.363
+orderby_gpu_gather                   0.203           2096         10.302
 ─────────────────────────────────────────────────────────────────
-TOTAL: 6.460 ms
+TOTAL: 6.338 ms

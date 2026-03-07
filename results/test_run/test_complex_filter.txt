@@ -1,18 +1,4 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
-[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
-[Planner] ChildProjs size: 5
-  #0: l_orderkey
-  #1: l_quantity
-  #2: l_extendedprice
-  #3: l_discount
-  #4: o_orderkey
-[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
@@ -42,37 +28,37 @@ l_orderkey|l_quantity|l_extendedprice|l_discount|
 5241317|50.00|102849.50|0.05|
 4648736|49.00|102752.51|0.06|
 ---------------------------------------------------
-Planning time: 0.84 ms
-Data Load Time (Disk+Upload): 3209.46 ms
-GPU kernels time: 12.94 ms
-CPU postprocess time: 37.95 ms
-Total Internal Pipeline time: 3260.35 ms
-Total Host Execution time: 3260.38 ms
-Total Wall time (Plan+Exec): 3261.22 ms
+Planning time: 0.81 ms
+Data Load Time (Disk+Upload): 3200.83 ms
+GPU kernels time: 13.36 ms
+CPU postprocess time: 37.39 ms
+Total Internal Pipeline time: 3251.58 ms
+Total Host Execution time: 3251.62 ms
+Total Wall time (Plan+Exec): 3252.43 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :   11.412 ms (88.201%) [3 calls]
-  gather         :    0.883 ms (6.828%) [5 calls]
-  hash_join_probe_u32:    0.270 ms (2.085%) [1 calls]
-  sort           :    0.373 ms (2.887%) [2 calls]
+  filter         :   11.805 ms (88.366%) [3 calls]
+  gather         :    0.916 ms (6.859%) [5 calls]
+  hash_join_probe_u32:    0.274 ms (2.053%) [1 calls]
+  sort           :    0.364 ms (2.723%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 12.939 ms
+  TOTAL GPU TIME: 13.359 ms
   Kernel invocations: 11
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                   9.927        6001215        604.527
-ops::filter_lt_u32_indexed           0.832        3426687       4120.060
-ops::filter_eq_u32_indexed           0.654         914963       1400.006
-hash_join_probe_write_multi          0.270         191218        708.871
+ops::filter_ge_u32                  10.153        6001215        591.061
+ops::filter_lt_u32_indexed           0.833        3426687       4111.819
+ops::filter_eq_u32_indexed           0.818         914963       1118.423
+hash_join_probe_write_multi          0.274         191218        697.240
 radix_sort_u64                       0.000         191218          0.000
-orderby_gpu_gather                   0.373         956090       2559.813
-ops::gather_col_u32                  0.175             20          0.114
-ops::gather_col_u32                  0.189             20          0.106
-ops::gather_col_f32                  0.178             20          0.112
-ops::gather_col_f32                  0.170             20          0.117
-ops::gather_col_f32                  0.171             20          0.117
+orderby_gpu_gather                   0.364         956090       2628.730
+ops::gather_col_u32                  0.181             20          0.110
+ops::gather_col_u32                  0.184             20          0.109
+ops::gather_col_f32                  0.210             20          0.095
+ops::gather_col_f32                  0.177             20          0.113
+ops::gather_col_f32                  0.164             20          0.122
 ─────────────────────────────────────────────────────────────────
-TOTAL: 12.939 ms
+TOTAL: 13.359 ms

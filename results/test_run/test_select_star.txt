@@ -1,6 +1,4 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'region'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
@@ -15,11 +13,11 @@ r_regionkey|r_comment|r_name|
 3|ly final courts cajole furiously final excuse|EUROPE|
 4|uickly special accounts cajole carefully blithely close requests. carefully final asymptotes haggle furiousl|MIDDLE EAST|
 ---------------------------------------------------
-Planning time: 0.31 ms
-Data Load Time (Disk+Upload): 22.50 ms
+Planning time: 0.29 ms
+Data Load Time (Disk+Upload): 22.36 ms
 GPU kernels time: 0.00 ms
 CPU postprocess time: 0.02 ms
-Total Internal Pipeline time: 22.52 ms
-Total Host Execution time: 22.54 ms
-Total Wall time (Plan+Exec): 22.85 ms
+Total Internal Pipeline time: 22.38 ms
+Total Host Execution time: 22.41 ms
+Total Wall time (Plan+Exec): 22.70 ms
 ---------------------------------------------------

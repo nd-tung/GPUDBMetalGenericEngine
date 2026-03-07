@@ -1,81 +1,53 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
-[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
-[Planner] ChildProjs size: 4
-  #0: l_orderkey
-  #1: l_shipmode
-  #2: l_extendedprice
-  #3: o_orderkey
-[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 228140
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=2 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=1 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 2 = 0.00
-[Exec] GroupBy VERIFY: GPU group key=4 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=0 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: 7 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 cnt|total_price|l_shipmode|
-32796.00|1255379200.00|FOB|
-32789.00|1255204608.00|SHIP|
-32661.00|1238079744.00|TRUCK|
-32639.00|1245425024.00|REG AIR|
-32468.00|1244478336.00|RAIL|
-32419.00|1236174592.00|AIR|
-32368.00|1238255616.00|MAIL|
+32796.00|1255382144.00|FOB|
+32789.00|1255207296.00|SHIP|
+32661.00|1238082816.00|TRUCK|
+32639.00|1245427072.00|REG AIR|
+32468.00|1244481920.00|RAIL|
+32419.00|1236172928.00|AIR|
+32368.00|1238253056.00|MAIL|
 ---------------------------------------------------
-Planning time: 1.02 ms
-Data Load Time (Disk+Upload): 3717.30 ms
-GPU kernels time: 14.65 ms
-CPU postprocess time: 82.55 ms
-Total Internal Pipeline time: 3814.50 ms
-Total Host Execution time: 3818.64 ms
-Total Wall time (Plan+Exec): 3819.66 ms
+Planning time: 0.98 ms
+Data Load Time (Disk+Upload): 3719.96 ms
+GPU kernels time: 17.04 ms
+CPU postprocess time: 80.66 ms
+Total Internal Pipeline time: 3817.66 ms
+Total Host Execution time: 3821.80 ms
+Total Wall time (Plan+Exec): 3822.78 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.178 ms (1.213%) [1 calls]
-  filter         :    3.919 ms (26.759%) [3 calls]
-  gather         :    0.185 ms (1.260%) [1 calls]
-  groupby        :    9.820 ms (67.043%) [3 calls]
-  hash_join_probe_u32:    0.340 ms (2.321%) [1 calls]
-  sort           :    0.205 ms (1.403%) [2 calls]
+  cast           :    0.179 ms (1.053%) [1 calls]
+  filter         :    3.786 ms (22.218%) [3 calls]
+  gather         :    0.190 ms (1.114%) [1 calls]
+  groupby        :   12.308 ms (72.228%) [3 calls]
+  hash_join_probe_u32:    0.363 ms (2.133%) [1 calls]
+  sort           :    0.214 ms (1.255%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 14.647 ms
+  TOTAL GPU TIME: 17.041 ms
   Kernel invocations: 11
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                2.541        6001215       2361.559
-ops::filter_ge_u32_indexed           0.830        1500048       1806.379
-ops::filter_lt_u32_indexed           0.548        1084502       1979.773
-hash_join_probe_write_multi          0.340         228140        671.000
-ops::groupby_agg_multi_key_ty        9.084         228140         25.114
-ops::ht_mark_valid                   0.517         524288       1014.507
-ops::ht_extract_compact              0.219              7          0.032
-ops::cast_u32_to_f32                 0.178              7          0.039
+ops::filter_string_eq                2.414        6001215       2485.662
+ops::filter_ge_u32_indexed           0.787        1500048       1906.438
+ops::filter_lt_u32_indexed           0.585        1084502       1854.246
+hash_join_probe_write_multi          0.363         228140        627.691
+ops::groupby_agg_multi_key_ty       11.761         228140         19.398
+ops::ht_mark_valid                   0.326         524288       1606.604
+ops::ht_extract_compact              0.220              7          0.032
+ops::cast_u32_to_f32                 0.179              7          0.039
 block_sort_kv_u64                    0.000              7          0.000
-orderby_gpu_gather                   0.205             14          0.068
-ops::gather_col_u32                  0.185              7          0.038
+orderby_gpu_gather                   0.214             14          0.065
+ops::gather_col_u32                  0.190              7          0.037
 ─────────────────────────────────────────────────────────────────
-TOTAL: 14.647 ms
+TOTAL: 17.041 ms

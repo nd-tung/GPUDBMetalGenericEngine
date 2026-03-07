@@ -12,11 +12,9 @@
 #include "Schema.hpp"
 #include "DuckDBAdapter.hpp"
 #include "KernelTimer.hpp"
-#include "GpuExecutorDetail.hpp"  // for env_truthy
+#include "EnvUtil.hpp"
 
-static std::string s_datasetPath = "data/SF-1/";
-
-static int executeQuery(const std::string& sql) {
+static int executeQuery(const std::string& sql, const std::string& datasetPath) {
     using namespace engine;
     std::cout << "--- Running (Engine Host) ---" << std::endl;
 
@@ -61,7 +59,7 @@ static int executeQuery(const std::string& sql) {
     // Execute with V2 executor (uses GPU Native Executor)
     std::cout << "[Main] Using GpuExecutor generic executor.\n";
     auto t_exec_start = std::chrono::high_resolution_clock::now();
-    auto result = GpuExecutor::execute(plan, s_datasetPath);
+    auto result = GpuExecutor::execute(plan, datasetPath);
     auto t_exec_end = std::chrono::high_resolution_clock::now();
     double exec_ms = std::chrono::duration<double, std::milli>(t_exec_end - t_exec_start).count();
     
@@ -80,6 +78,26 @@ static int executeQuery(const std::string& sql) {
                   << std::fixed << std::setprecision(2) << result.scalarValue << std::endl;
     } else {
         const auto& t = result.table;
+
+        // --- Value rendering helpers ---
+        auto printU32 = [&](const std::string& name, uint32_t v) {
+            if (t.singleCharCols.count(name)) {
+                std::cout << static_cast<char>(v) << "|";
+            } else if (name.find("date") != std::string::npos) {
+                char dateBuf[16];
+                std::snprintf(dateBuf, sizeof(dateBuf), "%04u-%02u-%02u",
+                              v / 10000, (v / 100) % 100, v % 100);
+                std::cout << dateBuf << "|";
+            } else {
+                std::cout << v << "|";
+            }
+        };
+        auto printF32 = [](float v) {
+            std::cout << std::fixed << std::setprecision(2) << v << "|";
+        };
+        auto printStr = [](const std::string& v) {
+            std::cout << v << "|";
+        };
         
         // Print header
         if (!t.order.empty()) {
@@ -92,62 +110,25 @@ static int executeQuery(const std::string& sql) {
         std::cout << std::endl;
         
         // Print rows
+        static const std::string emptyStr;
         for (size_t i = 0; i < t.rowCount; ++i) {
             if (!t.order.empty()) {
                 for (const auto& ref : t.order) {
                     if (ref.kind == TableResult::ColRef::Kind::U32) {
-                        const auto& col = t.u32Cols[ref.index];
-                        const uint32_t v = (i < col.size()) ? col[i] : 0;
-                        if (t.singleCharCols.count(ref.name)) {
-                            std::cout << static_cast<char>(v) << "|";
-                        } else if (ref.name.find("date") != std::string::npos) {
-                            uint32_t y = v / 10000;
-                            uint32_t m = (v / 100) % 100;
-                            uint32_t day = v % 100;
-                            char dateBuf[16];
-                            std::snprintf(dateBuf, sizeof(dateBuf), "%04u-%02u-%02u", y, m, day);
-                            std::cout << dateBuf << "|";
-                        } else {
-                            std::cout << v << "|";
-                        }
+                        printU32(ref.name, (i < t.u32Cols[ref.index].size()) ? t.u32Cols[ref.index][i] : 0);
                     } else if (ref.kind == TableResult::ColRef::Kind::F32) {
-                        const auto& col = t.f32Cols[ref.index];
-                        const float v = (i < col.size()) ? col[i] : 0.0f;
-                        std::cout << std::fixed << std::setprecision(2) << v << "|";
+                        printF32((i < t.f32Cols[ref.index].size()) ? t.f32Cols[ref.index][i] : 0.0f);
                     } else if (ref.kind == TableResult::ColRef::Kind::String) {
-                        const auto& col = t.stringCols[ref.index];
-                        const std::string& v = (i < col.size()) ? col[i] : "";
-                        std::cout << v << "|";
+                        printStr((i < t.stringCols[ref.index].size()) ? t.stringCols[ref.index][i] : emptyStr);
                     }
                 }
             } else {
-                for (size_t c = 0; c < t.u32Names.size(); ++c) {
-                    const auto& name = t.u32Names[c];
-                    const auto& col = t.u32Cols[c];
-                    const uint32_t v = (i < col.size()) ? col[i] : 0;
-                    if (t.singleCharCols.count(name)) {
-                        std::cout << static_cast<char>(v) << "|";
-                    } else if (name.find("date") != std::string::npos) {
-                        uint32_t y = v / 10000;
-                        uint32_t m = (v / 100) % 100;
-                        uint32_t day = v % 100;
-                        char dateBuf[16];
-                        std::snprintf(dateBuf, sizeof(dateBuf), "%04u-%02u-%02u", y, m, day);
-                        std::cout << dateBuf << "|";
-                    } else {
-                        std::cout << v << "|";
-                    }
-                }
-                for (size_t c = 0; c < t.f32Names.size(); ++c) {
-                    const auto& col = t.f32Cols[c];
-                    const float v = (i < col.size()) ? col[i] : 0.0f;
-                    std::cout << std::fixed << std::setprecision(2) << v << "|";
-                }
-                for (size_t c = 0; c < t.stringNames.size(); ++c) {
-                    const auto& col = t.stringCols[c];
-                    const std::string& v = (i < col.size()) ? col[i] : "";
-                    std::cout << v << "|";
-                }
+                for (size_t c = 0; c < t.u32Names.size(); ++c)
+                    printU32(t.u32Names[c], (i < t.u32Cols[c].size()) ? t.u32Cols[c][i] : 0);
+                for (size_t c = 0; c < t.f32Names.size(); ++c)
+                    printF32((i < t.f32Cols[c].size()) ? t.f32Cols[c][i] : 0.0f);
+                for (size_t c = 0; c < t.stringNames.size(); ++c)
+                    printStr((i < t.stringCols[c].size()) ? t.stringCols[c][i] : emptyStr);
             }
             std::cout << "\n";
         }
@@ -176,6 +157,7 @@ static int executeQuery(const std::string& sql) {
     return 0;
 }
 int main(int argc, const char* argv[]) {
+    std::string datasetPath = "data/SF-1/";
     std::string sql =
         "SELECT SUM(l_extendedprice * (1 - l_discount)) AS revenue\n"
         "FROM lineitem\n"
@@ -195,9 +177,9 @@ int main(int argc, const char* argv[]) {
     // Args: sf1|sf10|v1 and optional --sql "..." or .sql file or inline SQL
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "sf1") s_datasetPath = "data/SF-1/";
-        else if (arg == "sf10") s_datasetPath = "data/SF-10/";
-        else if (arg == "v1") setenv("GPUDB_V1", "1", 1);
+        if (arg == "sf1") datasetPath = "data/SF-1/";
+        else if (arg == "sf10") datasetPath = "data/SF-10/";
+        // "v1" flag removed — GPUDB_V1 was never read anywhere
         else if (arg == "--sql" && i+1 < argc) { sql = argv[++i]; }
         else if (arg == "help" || arg == "--help" || arg == "-h") {
             std::cout << "MetalGenericDBEngine" << std::endl;
@@ -217,12 +199,12 @@ int main(int argc, const char* argv[]) {
     }
 
     // Make sure DuckDB EXPLAIN reads the same dataset directory as execution.
-    setenv("GPUDB_DATASET_PATH", s_datasetPath.c_str(), 1);
+    setenv("GPUDB_DATASET_PATH", datasetPath.c_str(), 1);
 
     // Initialise embedded DuckDB once (persistent DB or in-memory views)
-    engine::DuckDBAdapter::init(s_datasetPath);
+    engine::DuckDBAdapter::init(datasetPath);
 
-    int rc = executeQuery(sql);
+    int rc = executeQuery(sql, datasetPath);
 
     engine::DuckDBAdapter::shutdown();
     return rc;

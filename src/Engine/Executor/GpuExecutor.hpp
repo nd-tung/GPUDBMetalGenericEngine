@@ -43,10 +43,9 @@ public:
     // Get list of unsupported features preventing GPU execution
     static std::vector<std::string> getUnsupportedFeatures(const Plan& plan);
 
-private:
-    // Execute individual operators
+    // Execute individual operators (public for use by extracted node-handler helpers)
     static bool executeFilter(const IRFilter& filter, EvalContext& ctx);
-    static bool executeJoin(const IRJoin& join, const std::string& datasetPath, 
+    static bool executeJoin(const IRJoin& join,
                             EvalContext& leftCtx, EvalContext& rightCtx, EvalContext& outCtx);
     static bool executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, TableResult& out);
     static bool executeAggregate(const IRAggregate& agg, EvalContext& ctx, 
@@ -67,7 +66,6 @@ private:
     // Execute full join pipeline: resolve tables, handle scalar subqueries, and dispatch join
     static bool executeJoinPipeline(
         const IRJoin& join,
-        const std::string& datasetPath,
         EvalContext& currentCtx,
         std::unordered_map<std::string, EvalContext>& tableContexts,
         std::vector<EvalContext>& savedPipelines,

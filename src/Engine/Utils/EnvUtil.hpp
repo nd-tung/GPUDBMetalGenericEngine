@@ -7,8 +7,9 @@
 /// Return true if the environment variable @p name is set to
 /// "1", "true", "on", or "yes" (case-insensitive).
 /// Results are cached on first lookup per variable name.
+/// Uses thread_local to avoid data races from concurrent callers.
 inline bool env_truthy(const char* name) {
-    static std::unordered_map<std::string, bool> cache;
+    static thread_local std::unordered_map<std::string, bool> cache;
     auto it = cache.find(name);
     if (it != cache.end()) return it->second;
     const char* v = std::getenv(name);

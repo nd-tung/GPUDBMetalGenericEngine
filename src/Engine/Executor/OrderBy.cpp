@@ -23,19 +23,19 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
         std::cerr << "[Exec] OrderBy: columns=[";
         for (size_t i = 0; i < order.columns.size(); ++i) {
             std::cerr << order.columns[i];
-            if (i < order.ascending.size()) std::cerr << (order.ascending[i] ? " ASC" : " DESC");
-            if (i + 1 < order.columns.size()) std::cerr << ", ";
+            if (debug) if (i < order.ascending.size()) std::cerr << (order.ascending[i] ? " ASC" : " DESC");
+            if (debug) if (i + 1 < order.columns.size()) std::cerr << ", ";
         }
-        std::cerr << "]\n";
-        std::cerr << "[Exec] OrderBy: table.u32Names=[";
-        for (const auto& n : table.u32Names) std::cerr << n << ", ";
-        std::cerr << "]\n";
-        std::cerr << "[Exec] OrderBy: table.f32Names=[";
-        for (const auto& n : table.f32Names) std::cerr << n << ", ";
-        std::cerr << "]\n";
-        std::cerr << "[Exec] OrderBy: table.stringNames=[";
-        for (const auto& n : table.stringNames) std::cerr << n << ", ";
-        std::cerr << "]\n";
+        if (debug) std::cerr << "]\n";
+        if (debug) std::cerr << "[Exec] OrderBy: table.u32Names=[";
+        if (debug) for (const auto& n : table.u32Names) std::cerr << n << ", ";
+        if (debug) std::cerr << "]\n";
+        if (debug) std::cerr << "[Exec] OrderBy: table.f32Names=[";
+        if (debug) for (const auto& n : table.f32Names) std::cerr << n << ", ";
+        if (debug) std::cerr << "]\n";
+        if (debug) std::cerr << "[Exec] OrderBy: table.stringNames=[";
+        if (debug) for (const auto& n : table.stringNames) std::cerr << n << ", ";
+        if (debug) std::cerr << "]\n";
     }
     
     if (table.rowCount == 0) return true;
@@ -270,11 +270,11 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             std::cerr << "[Exec] OrderBy: sortCols.size()=" << sortCols.size()
                       << " rankBufs.size()=" << rankBufs.size() << " n=" << n << "\n";
             for (size_t k = 0; k < rankBufs.size(); ++k) {
-                std::cerr << "[Exec] OrderBy: rankBufs[" << k << "] first few = [";
+                if (debug) std::cerr << "[Exec] OrderBy: rankBufs[" << k << "] first few = [";
                 auto* p = static_cast<const uint32_t*>(rankBufs[k]->contents());
                 for (uint32_t i = 0; i < std::min(n, 20u); ++i)
-                    std::cerr << p[i] << (i+1<n?",":"");
-                std::cerr << "]\n";
+                    if (debug) std::cerr << p[i] << (i+1<n?",":"");
+                if (debug) std::cerr << "]\n";
             }
         }
 
@@ -319,8 +319,8 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             std::memcpy(dbgIdx.data(), idxBuf->contents(), dbgIdx.size() * sizeof(uint32_t));
             std::cerr << "[Exec] OrderBy: sortedIdx = [";
             for (uint32_t i = 0; i < (uint32_t)dbgIdx.size(); ++i)
-                std::cerr << dbgIdx[i] << (i+1<n?",":"");
-            std::cerr << "]\n";
+                if (debug) std::cerr << dbgIdx[i] << (i+1<n?",":"");
+            if (debug) std::cerr << "]\n";
         }
 
         // --- GPU Gather: reorder u32 and f32 columns on GPU ---
@@ -396,10 +396,7 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
                 auto dictIt = dictCols.find(colName);
                 if (dictIt != dictCols.end() && dictIt->second.idsGPU && dictIt->second.rowCount == n) {
                     // GPU path: gather dict IDs by sorted index, then sequential dictionary lookup
-                    MTL::Buffer* gathered = GpuOps::gatherU32(dictIt->second.idsGPU, idxBuf, n);
-                    std::vector<uint32_t> gatheredIds(n);
-                    std::memcpy(gatheredIds.data(), gathered->contents(), n * sizeof(uint32_t));
-                    gathered->release();
+                    auto gatheredIds = gatherToVector<uint32_t>(dictIt->second.idsGPU, idxBuf, n);
                     const auto& dict = dictIt->second.dictionary;
                     auto& col = table.stringCols[ci];
                     for (uint32_t i = 0; i < n; ++i) {

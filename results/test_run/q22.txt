@@ -1,130 +1,87 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_7'
-[Planner] Pre-resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
-[Planner] ChildProjs size: 4
-  #0: c_phone
-  #1: c_acctbal
-  #2: c_custkey
-  #3: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END
-[Planner] Keeping SUBQUERY token (RHS is complex: 'CASE  WHEN ((count_star() > 1)) THEN ("e...')
-[Planner] Resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
-DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
-[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
-[Planner] ChildProjs size: 1
-  #0: o_custkey
-[Planner] Resolved Condition: 'o_custkey = c_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_14'
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_12'
-[Planner] Pre-resolved Condition: 'c_custkey IS NOT DISTINCT FROM c_custkey'
-[Planner] ChildProjs size: 1
-  #0: c_custkey
-[Planner] Resolved Condition: 'c_custkey IS NOT DISTINCT FROM c_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 6384
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=2280673654 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=334175660 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 2280673654 = 0.00
-[Exec] GroupBy VERIFY: GPU group key=2398264082 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2297451273 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2498929796 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=334175660 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=518729469 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=451618993 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2280673654 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: 7 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 totacctbal|numcust|cntrycode|
-6737714.00|888.00|13|
-6460572.00|861.00|17|
-7236686.00|964.00|18|
-6701458.00|892.00|23|
-7158868.00|948.00|29|
-6808435.00|909.00|30|
-6806668.00|922.00|31|
+6737712.50|888.00|13|
+6460574.00|861.00|17|
+7236685.50|964.00|18|
+6701460.00|892.00|23|
+7158869.50|948.00|29|
+6808434.00|909.00|30|
+6806669.00|922.00|31|
 ---------------------------------------------------
-Planning time: 2.12 ms
-Data Load Time (Disk+Upload): 581.37 ms
-GPU kernels time: 15.09 ms
-CPU postprocess time: 49.21 ms
-Total Internal Pipeline time: 645.67 ms
-Total Host Execution time: 646.70 ms
-Total Wall time (Plan+Exec): 648.81 ms
+Planning time: 2.01 ms
+Data Load Time (Disk+Upload): 584.45 ms
+GPU kernels time: 12.60 ms
+CPU postprocess time: 48.09 ms
+Total Internal Pipeline time: 645.14 ms
+Total Host Execution time: 646.16 ms
+Total Wall time (Plan+Exec): 648.17 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.165 ms (1.091%) [1 calls]
-  filter         :    5.133 ms (34.009%) [16 calls]
-  gather         :    5.746 ms (38.077%) [14 calls]
-  groupby        :    0.693 ms (4.591%) [3 calls]
-  hash_join_probe_u32:    3.147 ms (20.852%) [8 calls]
-  sort           :    0.208 ms (1.380%) [3 calls]
+  cast           :    0.165 ms (1.307%) [1 calls]
+  filter         :    4.735 ms (37.594%) [16 calls]
+  gather         :    4.913 ms (39.006%) [14 calls]
+  groupby        :    0.661 ms (5.251%) [3 calls]
+  hash_join_probe_u32:    1.910 ms (15.167%) [8 calls]
+  sort           :    0.211 ms (1.675%) [3 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 15.091 ms
+  TOTAL GPU TIME: 12.596 ms
   Kernel invocations: 45
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_f32                   0.878         150000        170.908
-ops::filter_string_eq                0.285         150000        526.778
-hash_join_probe_write_multi          1.012           6020          5.946
-ops::gather_col_u32                  0.667           5453          8.174
-ops::filter_string_eq                0.843         150000        178.015
-hash_join_probe_write_multi          0.845           6008          7.114
-ops::gather_col_u32                  0.732           5460          7.459
-ops::filter_string_eq                0.250         150000        600.199
-hash_join_probe_write_multi          0.189           6033         31.949
-ops::gather_col_u32                  0.211           5501         26.076
-ops::filter_string_eq                0.240         150000        625.326
-hash_join_probe_write_multi          0.188           6100         32.519
-ops::gather_col_u32                  0.203           5540         27.291
-ops::filter_string_eq                0.243         150000        618.450
-hash_join_probe_write_multi          0.194           5904         30.374
-ops::gather_col_u32                  0.204           5341         26.187
-ops::filter_string_eq                0.239         150000        627.505
-hash_join_probe_write_multi          0.194           6042         31.178
-ops::gather_col_u32                  0.199           5478         27.574
-ops::filter_string_eq                0.239         150000        628.272
-hash_join_probe_write_multi          0.186           5908         31.678
-ops::gather_col_u32                  0.201           5347         26.597
-ops::gather_col_f32                  0.213          38120        178.617
-ops::gather_col_f32                  0.209          38120        182.392
-ops::filter_string_eq                0.241         150000        623.485
-ops::filter_string_eq                0.228         150000        656.576
-ops::filter_string_eq                0.234         150000        642.398
-ops::filter_string_eq                0.234         150000        639.888
-ops::filter_string_eq                0.227         150000        661.521
-ops::filter_string_eq                0.317         150000        473.186
-ops::filter_string_eq                0.231         150000        650.759
-ops::filter_gt_f32_indexed           0.206          42015        203.833
-ops::gather_col_u32                  0.212          19000         89.587
-ops::gather_flat_string              1.201          19000         15.819
-ops::gather_col_u32                  0.182          19000        104.134
-ops::gather_flat_string              1.141          19000         16.658
-hash_join_probe_write_multi          0.339        1500000       4428.593
+ops::filter_gt_f32                   0.942         150000        159.172
+ops::filter_string_eq                0.290         150000        517.539
+hash_join_probe_write_multi          0.251           6020         23.956
+ops::gather_col_u32                  0.229           5453         23.817
+ops::filter_string_eq                0.291         150000        515.685
+hash_join_probe_write_multi          0.241           6008         24.904
+ops::gather_col_u32                  0.222           5460         24.632
+ops::filter_string_eq                0.284         150000        527.937
+hash_join_probe_write_multi          0.239           6033         25.269
+ops::gather_col_u32                  0.219           5501         25.128
+ops::filter_string_eq                0.281         150000        533.650
+hash_join_probe_write_multi          0.242           6100         25.228
+ops::gather_col_u32                  0.232           5540         23.897
+ops::filter_string_eq                0.278         150000        538.762
+hash_join_probe_write_multi          0.233           5904         25.335
+ops::gather_col_u32                  0.223           5341         23.924
+ops::filter_string_eq                0.279         150000        537.475
+hash_join_probe_write_multi          0.188           6042         32.188
+ops::gather_col_u32                  0.210           5478         26.086
+ops::filter_string_eq                0.238         150000        629.372
+hash_join_probe_write_multi          0.188           5908         31.474
+ops::gather_col_u32                  0.197           5347         27.125
+ops::gather_col_f32                  0.208          38120        183.232
+ops::gather_col_f32                  0.208          38120        183.675
+ops::filter_string_eq                0.231         150000        648.183
+ops::filter_string_eq                0.235         150000        638.073
+ops::filter_string_eq                0.239         150000        628.383
+ops::filter_string_eq                0.232         150000        645.970
+ops::filter_string_eq                0.234         150000        640.456
+ops::filter_string_eq                0.228         150000        657.295
+ops::filter_string_eq                0.235         150000        638.070
+ops::filter_gt_f32_indexed           0.216          42015        194.140
+ops::gather_col_u32                  0.217          19000         87.423
+ops::gather_flat_string              1.240          19000         15.319
+ops::gather_col_u32                  0.185          19000        102.726
+ops::gather_flat_string              1.148          19000         16.551
+hash_join_probe_write_multi          0.329        1500000       4560.435
 radix_sort_u32                       0.000          19000          0.000
-ops::groupby_agg_multi_key_ty        0.337           6384         18.955
-ops::ht_mark_valid                   0.184          16384         89.165
-ops::ht_extract_compact              0.172              7          0.041
-ops::cast_u32_to_f32                 0.165              7          0.042
+ops::groupby_agg_multi_key_ty        0.321           6384         19.870
+ops::ht_mark_valid                   0.171          16384         96.023
+ops::ht_extract_compact              0.170              7          0.041
+ops::cast_u32_to_f32                 0.165              7          0.043
 block_sort_kv_u64                    0.000              7          0.000
-orderby_gpu_gather                   0.208             21          0.101
-ops::gather_col_u32                  0.171              7          0.041
+orderby_gpu_gather                   0.211             21          0.100
+ops::gather_col_u32                  0.175              7          0.040
 ─────────────────────────────────────────────────────────────────
-TOTAL: 15.091 ms
+TOTAL: 12.596 ms

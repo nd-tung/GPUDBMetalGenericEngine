@@ -1,43 +1,33 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'part'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 200000
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=10 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=4 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 10 = 0.00
-[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 Scalar count_star(): 25.00
 ---------------------------------------------------
-Planning time: 0.45 ms
-Data Load Time (Disk+Upload): 93.84 ms
-GPU kernels time: 2.03 ms
-CPU postprocess time: 10.86 ms
-Total Internal Pipeline time: 106.73 ms
-Total Host Execution time: 106.89 ms
-Total Wall time (Plan+Exec): 107.34 ms
+Planning time: 0.42 ms
+Data Load Time (Disk+Upload): 93.64 ms
+GPU kernels time: 1.93 ms
+CPU postprocess time: 8.93 ms
+Total Internal Pipeline time: 104.51 ms
+Total Host Execution time: 104.67 ms
+Total Wall time (Plan+Exec): 105.09 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  groupby        :    2.033 ms (100.000%) [3 calls]
+  groupby        :    1.934 ms (100.000%) [3 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 2.033 ms
+  TOTAL GPU TIME: 1.934 ms
   Kernel invocations: 3
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty        1.431         200000        139.779
-ops::ht_mark_valid                   0.347         524288       1511.461
-ops::ht_extract_compact              0.255             25          0.098
+ops::groupby_agg_multi_key_ty        1.360         200000        147.023
+ops::ht_mark_valid                   0.322         524288       1627.380
+ops::ht_extract_compact              0.251             25          0.100
 ─────────────────────────────────────────────────────────────────
-TOTAL: 2.033 ms
+TOTAL: 1.934 ms

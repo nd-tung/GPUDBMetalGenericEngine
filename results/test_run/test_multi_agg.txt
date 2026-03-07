@@ -1,6 +1,4 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'part'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
@@ -10,13 +8,13 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
 ---------------------------------------------------
 Scalar max(p_size): 36893488147419103232.00
 ---------------------------------------------------
-Planning time: 0.54 ms
-Data Load Time (Disk+Upload): 85.91 ms
+Planning time: 0.53 ms
+Data Load Time (Disk+Upload): 86.11 ms
 GPU kernels time: 0.01 ms
-CPU postprocess time: 23.53 ms
-Total Internal Pipeline time: 109.46 ms
-Total Host Execution time: 109.48 ms
-Total Wall time (Plan+Exec): 110.01 ms
+CPU postprocess time: 17.57 ms
+Total Internal Pipeline time: 103.69 ms
+Total Host Execution time: 103.71 ms
+Total Wall time (Plan+Exec): 104.24 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
@@ -28,6 +26,6 @@ Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::cast_u32_to_f32                 0.008         200000      24743.288
+ops::cast_u32_to_f32                 0.008         200000      25396.825
 ─────────────────────────────────────────────────────────────────
 TOTAL: 0.008 ms

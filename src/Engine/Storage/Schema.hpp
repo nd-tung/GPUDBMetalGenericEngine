@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -74,7 +75,45 @@ public:
     bool isSingleCharColumn(const std::string& table, const std::string& column) const {
         return getColumnType(table, column) == ColumnType::StringChar;
     }
-    
+
+    // Determine which table a column belongs to using column-name prefix matching.
+    // Returns empty string if the column prefix is not recognized.
+    std::string tableForColumn(const std::string& col) const {
+        // Strip trailing suffix like "_1", "_2" for multi-instance columns
+        std::string c = col;
+        if (c.size() > 2 && c[c.size()-2] == '_' && c.back() >= '0' && c.back() <= '9')
+            c = c.substr(0, c.size()-2);
+
+        for (const auto& [tblName, tblSchema] : m_tables) {
+            for (const auto& cs : tblSchema.columns) {
+                if (cs.name == c) return tblName;
+            }
+        }
+        return "";
+    }
+
+    // GPU scan helpers: column type classification for numeric/date/char columns.
+    enum class GpuColKind { U32, F32, DateU32, StrCharU32 };
+    struct GpuColInfo { int index; GpuColKind kind; };
+
+    // Get GPU-compatible column info. Returns nullopt for StringHash columns
+    // (those are handled separately via raw-string loading).
+    std::optional<GpuColInfo> getGpuColInfo(const std::string& table,
+                                             const std::string& column) const {
+        const auto* t = getTable(table);
+        if (!t) return std::nullopt;
+        const auto* cs = t->getColumn(column);
+        if (!cs) return std::nullopt;
+        switch (cs->type) {
+            case ColumnType::Int32:      return GpuColInfo{cs->index, GpuColKind::U32};
+            case ColumnType::Float32:    return GpuColInfo{cs->index, GpuColKind::F32};
+            case ColumnType::Date:       return GpuColInfo{cs->index, GpuColKind::DateU32};
+            case ColumnType::StringChar: return GpuColInfo{cs->index, GpuColKind::StrCharU32};
+            case ColumnType::StringHash: return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
     // Initialize with TPC-H schema
     void initTPCH() {
         // lineitem

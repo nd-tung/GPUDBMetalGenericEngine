@@ -1,62 +1,40 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 4
-  #0: s_nationkey
-  #1: s_acctbal
-  #2: n_nationkey
-  #3: n_name
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 402
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=7 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=7 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 7 = 0.00
-[Exec] GroupBy VERIFY: GPU group key=7 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: 1 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 num_suppliers|total_bal|n_name|
-402.00|1853385.25|FRANCE|
+402.00|1853385.00|FRANCE|
 ---------------------------------------------------
-Planning time: 0.85 ms
-Data Load Time (Disk+Upload): 25.95 ms
-GPU kernels time: 4.89 ms
-CPU postprocess time: 11.85 ms
-Total Internal Pipeline time: 42.68 ms
-Total Host Execution time: 42.71 ms
-Total Wall time (Plan+Exec): 43.55 ms
+Planning time: 0.83 ms
+Data Load Time (Disk+Upload): 26.23 ms
+GPU kernels time: 1.92 ms
+CPU postprocess time: 3.88 ms
+Total Internal Pipeline time: 32.04 ms
+Total Host Execution time: 32.06 ms
+Total Wall time (Plan+Exec): 32.88 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.890 ms (18.214%) [1 calls]
-  filter         :    0.810 ms (16.584%) [1 calls]
-  groupby        :    2.425 ms (49.635%) [3 calls]
-  hash_join_probe_u32:    0.761 ms (15.567%) [1 calls]
+  cast           :    0.200 ms (10.404%) [1 calls]
+  filter         :    0.825 ms (42.869%) [1 calls]
+  groupby        :    0.668 ms (34.703%) [3 calls]
+  hash_join_probe_u32:    0.231 ms (12.024%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 4.886 ms
+  TOTAL GPU TIME: 1.924 ms
   Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.810             25          0.031
-hash_join_probe_write_multi          0.761          10000         13.149
-ops::groupby_agg_multi_key_ty        0.723            402          0.556
-ops::ht_mark_valid                   0.882           1024          1.161
-ops::ht_extract_compact              0.820              1          0.001
-ops::cast_u32_to_f32                 0.890              1          0.001
+ops::filter_string_eq                0.825             25          0.030
+hash_join_probe_write_multi          0.231          10000         43.220
+ops::groupby_agg_multi_key_ty        0.243            402          1.656
+ops::ht_mark_valid                   0.205           1024          5.006
+ops::ht_extract_compact              0.220              1          0.005
+ops::cast_u32_to_f32                 0.200              1          0.005
 ─────────────────────────────────────────────────────────────────
-TOTAL: 4.886 ms
+TOTAL: 1.924 ms

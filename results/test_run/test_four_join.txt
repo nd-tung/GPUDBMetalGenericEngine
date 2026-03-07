@@ -1,107 +1,52 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'region'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
-[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
-[Planner] ChildProjs size: 4
-  #0: n_regionkey
-  #1: n_nationkey
-  #2: r_regionkey
-  #3: r_name
-[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 6
-  #0: s_nationkey
-  #1: s_suppkey
-  #2: n_regionkey
-  #3: n_nationkey
-  #4: r_regionkey
-  #5: r_name
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_5'
-[Planner] Pre-resolved Condition: 'l_suppkey = s_suppkey'
-[Planner] ChildProjs size: 9
-  #0: l_suppkey
-  #1: l_extendedprice
-  #2: l_discount
-  #3: s_nationkey
-  #4: s_suppkey
-  #5: n_regionkey
-  #6: n_nationkey
-  #7: r_regionkey
-  #8: r_name
-[Planner] Resolved Condition: 'l_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_5'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 914963
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=3 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=1 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 3 = 0.00
-[Exec] GroupBy VERIFY: GPU group key=4 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=0 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: 5 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 order_count|revenue|
-186742.00|6798003712.00|
-184396.00|6711074304.00|
-183049.00|6631232000.00|
-182063.00|6605169152.00|
-178713.00|6515807232.00|
+186742.00|6798055936.00|
+184396.00|6711071232.00|
+183049.00|6631206400.00|
+182063.00|6605153280.00|
+178713.00|6515793408.00|
 ---------------------------------------------------
-Planning time: 1.42 ms
-Data Load Time (Disk+Upload): 2556.15 ms
-GPU kernels time: 30.20 ms
-CPU postprocess time: 58.44 ms
-Total Internal Pipeline time: 2644.79 ms
-Total Host Execution time: 2644.84 ms
-Total Wall time (Plan+Exec): 2646.26 ms
+Planning time: 1.30 ms
+Data Load Time (Disk+Upload): 2549.98 ms
+GPU kernels time: 35.66 ms
+CPU postprocess time: 49.12 ms
+Total Internal Pipeline time: 2634.77 ms
+Total Host Execution time: 2634.82 ms
+Total Wall time (Plan+Exec): 2636.12 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.187 ms (0.619%) [1 calls]
-  filter         :    3.335 ms (11.042%) [2 calls]
-  gather         :    0.186 ms (0.617%) [1 calls]
-  groupby        :   25.236 ms (83.572%) [3 calls]
-  hash_join_probe_u32:    1.043 ms (3.452%) [3 calls]
-  sort           :    0.211 ms (0.697%) [2 calls]
+  cast           :    0.186 ms (0.522%) [1 calls]
+  filter         :    3.189 ms (8.942%) [2 calls]
+  gather         :    0.194 ms (0.545%) [1 calls]
+  groupby        :   30.835 ms (86.467%) [3 calls]
+  hash_join_probe_u32:    1.048 ms (2.938%) [3 calls]
+  sort           :    0.209 ms (0.586%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 30.197 ms
+  TOTAL GPU TIME: 35.661 ms
   Kernel invocations: 12
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi          0.248             25          0.101
-hash_join_probe_write_multi          0.249          10000         40.107
-ops::filter_ge_u32                   2.175        6001215       2759.708
-ops::filter_lt_u32_indexed           1.160        3426687       2954.252
-hash_join_probe_write_multi          0.545         914963       1679.346
-ops::groupby_agg_multi_key_ty       24.074         914963         38.006
-ops::ht_mark_valid                   0.885        2097152       2370.333
-ops::ht_extract_compact              0.278              5          0.018
-ops::cast_u32_to_f32                 0.187              5          0.027
+hash_join_probe_write_multi          0.233             25          0.107
+hash_join_probe_write_multi          0.247          10000         40.472
+ops::filter_ge_u32                   2.112        6001215       2841.708
+ops::filter_lt_u32_indexed           1.077        3426687       3181.451
+hash_join_probe_write_multi          0.568         914963       1611.205
+ops::groupby_agg_multi_key_ty       29.986         914963         30.513
+ops::ht_mark_valid                   0.584        2097152       3593.321
+ops::ht_extract_compact              0.266              5          0.019
+ops::cast_u32_to_f32                 0.186              5          0.027
 block_sort_kv_u64                    0.000              5          0.000
-orderby_gpu_gather                   0.211             10          0.047
-ops::gather_col_u32                  0.186              5          0.027
+orderby_gpu_gather                   0.209             10          0.048
+ops::gather_col_u32                  0.194              5          0.026
 ─────────────────────────────────────────────────────────────────
-TOTAL: 30.197 ms
+TOTAL: 35.661 ms

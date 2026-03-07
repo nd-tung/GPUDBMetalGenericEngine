@@ -1,17 +1,4 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'region'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'region'
-[Planner] Pre-resolved Condition: 'n_regionkey = r_regionkey'
-[Planner] ChildProjs size: 4
-  #0: n_regionkey
-  #1: n_name
-  #2: r_regionkey
-  #3: r_name
-[Planner] Resolved Condition: 'n_regionkey = r_regionkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='region'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
@@ -46,30 +33,30 @@ UNITED KINGDOM|
 UNITED STATES|
 VIETNAM|
 ---------------------------------------------------
-Planning time: 0.64 ms
-Data Load Time (Disk+Upload): 22.90 ms
-GPU kernels time: 3.27 ms
-CPU postprocess time: 6.30 ms
-Total Internal Pipeline time: 32.47 ms
-Total Host Execution time: 32.49 ms
-Total Wall time (Plan+Exec): 33.13 ms
+Planning time: 0.61 ms
+Data Load Time (Disk+Upload): 22.66 ms
+GPU kernels time: 3.28 ms
+CPU postprocess time: 6.32 ms
+Total Internal Pipeline time: 32.27 ms
+Total Host Execution time: 32.29 ms
+Total Wall time (Plan+Exec): 32.90 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  gather         :    1.758 ms (53.723%) [2 calls]
-  hash_join_probe_u32:    0.742 ms (22.667%) [1 calls]
-  sort           :    0.772 ms (23.610%) [2 calls]
+  gather         :    1.807 ms (55.069%) [2 calls]
+  hash_join_probe_u32:    0.705 ms (21.479%) [1 calls]
+  sort           :    0.770 ms (23.452%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 3.272 ms
+  TOTAL GPU TIME: 3.282 ms
   Kernel invocations: 5
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi          0.742             25          0.034
+hash_join_probe_write_multi          0.705             25          0.035
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.772             50          0.065
-ops::gather_col_u32                  0.913             25          0.027
-ops::gather_col_u32                  0.844             25          0.030
+orderby_gpu_gather                   0.770             50          0.065
+ops::gather_col_u32                  0.967             25          0.026
+ops::gather_col_u32                  0.841             25          0.030
 ─────────────────────────────────────────────────────────────────
-TOTAL: 3.272 ms
+TOTAL: 3.282 ms

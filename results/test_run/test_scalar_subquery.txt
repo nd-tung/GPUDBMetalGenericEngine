@@ -1,77 +1,41 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 4
-  #0: s_nationkey
-  #1: s_suppkey
-  #2: n_nationkey
-  #3: n_name
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-DEBUG: Scan table determined as: 'partsupp'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=partsupp
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 'ps_suppkey = s_suppkey'
-[Planner] ChildProjs size: 7
-  #0: ps_suppkey
-  #1: ps_supplycost
-  #2: ps_availqty
-  #3: s_nationkey
-  #4: s_suppkey
-  #5: n_nationkey
-  #6: n_name
-[Planner] Resolved Condition: 'ps_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 31680
-[Exec] GroupBy VERIFY: agg mismatches = 0 / 31680
-[Exec] GroupBy VERIFY: CPU grand total = 78741031080.86
-[Exec] GroupBy VERIFY: GPU grand total = 78741110784.00
-[Exec] GroupBy VERIFY: difference = 79703.14
-[Exec] GroupBy VERIFY: CPU max key=8 val=78741031080.86
-[Exec] GroupBy VERIFY: GPU max key=8 val=78741110784.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 8 = 78741110784.00
-[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 n_name|
 GERMANY|
 ---------------------------------------------------
-Planning time: 1.05 ms
-Data Load Time (Disk+Upload): 350.28 ms
-GPU kernels time: 3.84 ms
-CPU postprocess time: 8.47 ms
-Total Internal Pipeline time: 362.60 ms
-Total Host Execution time: 362.63 ms
-Total Wall time (Plan+Exec): 363.68 ms
+Planning time: 0.98 ms
+Data Load Time (Disk+Upload): 348.03 ms
+GPU kernels time: 3.93 ms
+CPU postprocess time: 9.21 ms
+Total Internal Pipeline time: 361.17 ms
+Total Host Execution time: 361.20 ms
+Total Wall time (Plan+Exec): 362.18 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.005 ms (0.130%) [1 calls]
-  filter         :    0.796 ms (20.701%) [1 calls]
-  groupby        :    1.496 ms (38.903%) [3 calls]
-  hash_join_probe_u32:    1.548 ms (40.266%) [2 calls]
+  cast           :    0.007 ms (0.182%) [1 calls]
+  filter         :    0.725 ms (18.440%) [1 calls]
+  groupby        :    1.591 ms (40.484%) [3 calls]
+  hash_join_probe_u32:    1.607 ms (40.894%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 3.845 ms
+  TOTAL GPU TIME: 3.929 ms
   Kernel invocations: 7
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.796             25          0.031
-hash_join_probe_write_multi          0.221          10000         45.223
-hash_join_probe_write_multi          1.327         800000        602.864
-ops::cast_u32_to_f32                 0.005          31680       6336.000
-ops::groupby_agg_multi_key_ty        1.080          31680         29.333
-ops::ht_mark_valid                   0.228          65536        286.967
-ops::ht_extract_compact              0.187              1          0.005
+ops::filter_string_eq                0.725             25          0.035
+hash_join_probe_write_multi          0.252          10000         39.755
+hash_join_probe_write_multi          1.355         800000        590.243
+ops::cast_u32_to_f32                 0.007          31680       4420.876
+ops::groupby_agg_multi_key_ty        1.140          31680         27.778
+ops::ht_mark_valid                   0.236          65536        277.695
+ops::ht_extract_compact              0.214              1          0.005
 ─────────────────────────────────────────────────────────────────
-TOTAL: 3.845 ms
+TOTAL: 3.929 ms

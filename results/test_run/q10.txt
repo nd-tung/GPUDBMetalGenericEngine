@@ -1,74 +1,8 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 'c_nationkey = n_nationkey'
-[Planner] ChildProjs size: 9
-  #0: c_custkey
-  #1: c_nationkey
-  #2: c_name
-  #3: c_acctbal
-  #4: c_phone
-  #5: c_address
-  #6: c_comment
-  #7: n_nationkey
-  #8: n_name
-[Planner] Resolved Condition: 'c_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
-[Planner] Pre-resolved Condition: 'c_custkey = o_custkey'
-[Planner] ChildProjs size: 11
-  #0: c_custkey
-  #1: c_nationkey
-  #2: c_name
-  #3: c_acctbal
-  #4: c_phone
-  #5: c_address
-  #6: c_comment
-  #7: n_nationkey
-  #8: n_name
-  #9: o_custkey
-  #10: o_orderkey
-[Planner] Resolved Condition: 'c_custkey = o_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_3'
-[Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
-[Planner] ChildProjs size: 14
-  #0: l_orderkey
-  #1: l_extendedprice
-  #2: l_discount
-  #3: c_custkey
-  #4: c_nationkey
-  #5: c_name
-  #6: c_acctbal
-  #7: c_phone
-  #8: c_address
-  #9: c_comment
-  #10: n_nationkey
-  #11: n_name
-  #12: o_custkey
-  #13: o_orderkey
-[Planner] Resolved Condition: 'l_orderkey = o_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_3'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 114705
-[Exec] GroupBy VERIFY: agg mismatches = 0 / 114705
-[Exec] GroupBy VERIFY: CPU grand total = 4166400543.73
-[Exec] GroupBy VERIFY: GPU grand total = 4166400543.94
-[Exec] GroupBy VERIFY: difference = 0.21
-[Exec] GroupBy VERIFY: CPU max key=57040 val=734235.25
-[Exec] GroupBy VERIFY: GPU max key=57040 val=734235.25
-[Exec] GroupBy VERIFY: GPU value for CPU max key 57040 = 734235.25
-[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -76,17 +10,17 @@ c_custkey|revenue|c_acctbal|c_name|n_name|c_address|c_phone|c_comment|
 57040|734235.25|632.87|Customer#000057040|JAPAN|Eioyzjf4pp|22-895-641-3466|sits. slyly regular requests sleep alongside of the regular inst|
 143347|721002.69|2557.47|Customer#000143347|EGYPT|1aReFYv,Kw4|14-742-935-3718|ggle carefully enticing requests. final deposits use bold, bold pinto beans. ironic, idle re|
 60838|679127.31|2454.77|Customer#000060838|BRAZIL|64EaJ5vMAHWJlBOxJklpNc2RJiWE|12-913-494-9813|need to boost against the slyly regular account|
-101998|637029.56|3790.89|Customer#000101998|UNITED KINGDOM|01c9CILnNtfOQYmZj|33-593-865-6378|ress foxes wake slyly after the bold excuses. ironic platelets are furiously carefully bold theodolites|
-125341|633508.06|4983.51|Customer#000125341|GERMANY|S29ODD6bceU8QSuuEJznkNaK|17-582-695-5962|arefully even depths. blithely even excuses sleep furiously. foxes use except the dependencies. ca|
-25501|620269.81|7725.04|Customer#000025501|ETHIOPIA|W556MXuoiaYCCZamJI,Rn0B4ACUGdkQ8DZ|15-874-808-6793|he pending instructions wake carefully at the pinto beans. regular, final instructions along the slyly fina|
+101998|637029.50|3790.89|Customer#000101998|UNITED KINGDOM|01c9CILnNtfOQYmZj|33-593-865-6378|ress foxes wake slyly after the bold excuses. ironic platelets are furiously carefully bold theodolites|
+125341|633508.12|4983.51|Customer#000125341|GERMANY|S29ODD6bceU8QSuuEJznkNaK|17-582-695-5962|arefully even depths. blithely even excuses sleep furiously. foxes use except the dependencies. ca|
+25501|620269.75|7725.04|Customer#000025501|ETHIOPIA|W556MXuoiaYCCZamJI,Rn0B4ACUGdkQ8DZ|15-874-808-6793|he pending instructions wake carefully at the pinto beans. regular, final instructions along the slyly fina|
 115831|596423.88|5098.10|Customer#000115831|FRANCE|rFeBbEEyk dl ne7zV5fDrmiq1oK09wV7pxqCgIc|16-715-386-3788|l somas sleep. furiously final deposits wake blithely regular pinto b|
 84223|594998.00|528.65|Customer#000084223|UNITED KINGDOM|nAVZCs6BaWap rrM27N 2qBnzc5WBauxbA|33-442-824-8191|slyly final deposits haggle regular, pending dependencies. pending escapades wake|
 54289|585603.38|5583.02|Customer#000054289|IRAN|vXCxoCsU0Bad5JQI ,oobkZ|20-834-292-4707|ely special foxes are quickly finally ironic p|
 39922|584878.12|7321.11|Customer#000039922|GERMANY|Zgy4s50l2GKN4pLDPBU8m342gIw6R|17-147-757-8036|y final requests. furiously final foxes cajole blithely special platelets. f|
-6226|576783.75|2230.09|Customer#000006226|UNITED KINGDOM|8gPu8,NPGkfyQQ0hcIYUGPIBWc,ybP5g,|33-657-701-3391|ending platelets along the express deposits cajole carefully final|
-922|576767.50|3869.25|Customer#000000922|GERMANY|Az9RFaut7NkPnc5zSD2PwHgVwr4jRzq|17-945-916-9648|luffily fluffy deposits. packages c|
+6226|576783.81|2230.09|Customer#000006226|UNITED KINGDOM|8gPu8,NPGkfyQQ0hcIYUGPIBWc,ybP5g,|33-657-701-3391|ending platelets along the express deposits cajole carefully final|
+922|576767.56|3869.25|Customer#000000922|GERMANY|Az9RFaut7NkPnc5zSD2PwHgVwr4jRzq|17-945-916-9648|luffily fluffy deposits. packages c|
 147946|576455.12|2030.13|Customer#000147946|ALGERIA|iANyZHjqhyy7Ajah0pTrYyhJ|10-886-956-3143|ithely ironic deposits haggle blithely ironic requests. quickly regu|
-115640|569341.19|6436.10|Customer#000115640|ARGENTINA|Vtgfia9qI 7EpHgecU1X|11-411-543-4901|ost slyly along the patterns; pinto be|
+115640|569341.25|6436.10|Customer#000115640|ARGENTINA|Vtgfia9qI 7EpHgecU1X|11-411-543-4901|ost slyly along the patterns; pinto be|
 73606|568656.88|1785.67|Customer#000073606|JAPAN|xuR0Tro5yChDfOCrjkd2ol|22-437-653-6966|he furiously regular ideas. slowly|
 110246|566843.00|7763.35|Customer#000110246|VIETNAM|7KzflgX MDOq7sOkI|31-943-426-9837|egular deposits serve blithely above the fl|
 142549|563537.25|5085.99|Customer#000142549|INDONESIA|ChqEoK43OysjdHbtKCp6dKqjNyvvi9|19-955-562-2398|sleep pending courts. ironic deposits against the carefully unusual platelets cajole carefully express accounts.|
@@ -94,47 +28,47 @@ c_custkey|revenue|c_acctbal|c_name|n_name|c_address|c_phone|c_comment|
 52528|556397.38|551.79|Customer#000052528|ARGENTINA|NFztyTOR10UOJ|11-208-192-3205|deposits hinder. blithely pending asymptotes breach slyly regular re|
 23431|554269.56|3381.86|Customer#000023431|ROMANIA|HgiV0phqhaIa9aydNoIlb|29-915-458-2654|nusual, even instructions: furiously stealthy n|
 ---------------------------------------------------
-Planning time: 1.74 ms
-Data Load Time (Disk+Upload): 3141.00 ms
-GPU kernels time: 15.17 ms
-CPU postprocess time: 307.13 ms
-Total Internal Pipeline time: 3463.30 ms
-Total Host Execution time: 3487.55 ms
-Total Wall time (Plan+Exec): 3489.29 ms
+Planning time: 1.57 ms
+Data Load Time (Disk+Upload): 3142.37 ms
+GPU kernels time: 10.96 ms
+CPU postprocess time: 299.20 ms
+Total Internal Pipeline time: 3452.53 ms
+Total Host Execution time: 3476.87 ms
+Total Wall time (Plan+Exec): 3478.44 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    5.255 ms (34.653%) [4 calls]
-  gather         :    3.680 ms (24.265%) [8 calls]
-  groupby        :    2.782 ms (18.342%) [3 calls]
-  hash_join_probe_u32:    3.147 ms (20.754%) [3 calls]
-  sort           :    0.301 ms (1.986%) [2 calls]
+  filter         :    4.824 ms (44.008%) [4 calls]
+  gather         :    1.834 ms (16.734%) [8 calls]
+  groupby        :    2.183 ms (19.912%) [3 calls]
+  hash_join_probe_u32:    1.846 ms (16.839%) [3 calls]
+  sort           :    0.275 ms (2.507%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 15.166 ms
+  TOTAL GPU TIME: 10.962 ms
   Kernel invocations: 20
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_le_u32                   0.950         150000        157.909
-hash_join_probe_write_multi          0.988         149999        151.872
-ops::filter_ge_u32                   1.130        1500000       1327.727
-ops::filter_lt_u32_indexed           0.936        1103335       1179.040
-hash_join_probe_write_multi          0.896         149999        167.378
-ops::filter_eq_u32                   2.240        6001215       2679.363
-hash_join_probe_write_multi          1.264        1478870       1170.339
-ops::groupby_agg_multi_key_ty        1.138         114705        100.836
-ops::ht_mark_valid                   0.862         262144        304.229
-ops::ht_extract_compact              0.782          37967         48.520
+ops::filter_le_u32                   0.966         150000        155.306
+hash_join_probe_write_multi          0.870         149999        172.495
+ops::filter_ge_u32                   1.159        1500000       1293.801
+ops::filter_lt_u32_indexed           0.502        1103335       2198.794
+hash_join_probe_write_multi          0.268         149999        560.308
+ops::filter_eq_u32                   2.197        6001215       2731.084
+hash_join_probe_write_multi          0.709        1478870       2086.833
+ops::groupby_agg_multi_key_ty        1.113         114705        103.071
+ops::ht_mark_valid                   0.786         262144        333.393
+ops::ht_extract_compact              0.284          37967        133.863
 radix_sort_u64                       0.000          37967          0.000
-orderby_gpu_gather                   0.301         113901        378.199
-ops::gather_col_u32                  0.235          37967        161.591
-ops::gather_col_u32                  0.241          37967        157.594
-ops::gather_col_u32                  0.238          37967        159.358
-ops::gather_col_u32                  0.239          37967        158.941
-ops::gather_col_u32                  0.243          37967        156.002
-ops::gather_col_u32                  0.848             20          0.024
-ops::gather_col_f32                  0.758             20          0.026
-ops::gather_col_f32                  0.877             20          0.023
+orderby_gpu_gather                   0.275         113901        414.437
+ops::gather_col_u32                  0.230          37967        165.134
+ops::gather_col_u32                  0.227          37967        167.011
+ops::gather_col_u32                  0.230          37967        164.776
+ops::gather_col_u32                  0.241          37967        157.539
+ops::gather_col_u32                  0.250          37967        152.071
+ops::gather_col_u32                  0.242             20          0.083
+ops::gather_col_f32                  0.206             20          0.097
+ops::gather_col_f32                  0.208             20          0.096
 ─────────────────────────────────────────────────────────────────
-TOTAL: 15.166 ms
+TOTAL: 10.962 ms

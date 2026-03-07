@@ -30,9 +30,9 @@ DUCKDB_LIB     = -L$(DUCKDB_PREFIX)/lib -lduckdb
 INCLUDES = -I$(METAL_CPP_DIR) \
            -Ithird_party \
            -I$(SOURCE_DIR)/Engine/Executor \
+           -I$(SOURCE_DIR)/Engine/Executor/Operators \
            -I$(SOURCE_DIR)/Engine/Planner \
            -I$(SOURCE_DIR)/Engine/Storage \
-           -I$(SOURCE_DIR)/Engine/Storage/CPU \
            -I$(SOURCE_DIR)/Engine/Storage/GPU \
            -I$(SOURCE_DIR)/Engine/Utils \
            $(DUCKDB_INCLUDE)

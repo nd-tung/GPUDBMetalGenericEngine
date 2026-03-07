@@ -1,89 +1,8 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'customer'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'customer'
-[Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
-[Planner] ChildProjs size: 3
-  #0: o_custkey
-  #1: o_orderkey
-  #2: c_custkey
-[Planner] Resolved Condition: 'o_custkey = c_custkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='customer'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 1533923
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 0 GPU=1 CPU=12033
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 1 GPU=1 CPU=12034
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 2 GPU=1 CPU=12035
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 3 GPU=1 CPU=12036
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 4 GPU=1 CPU=12037
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 5 GPU=1 CPU=12038
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 6 GPU=1 CPU=12039
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 7 GPU=1 CPU=12064
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 8 GPU=1 CPU=12065
-[Exec] GroupBy VERIFY: AGG MISMATCH at row 9 GPU=1 CPU=12066
-[Exec] GroupBy VERIFY: agg mismatches = 1483917 / 1533923
-[Exec] GroupBy VERIFY: CPU grand total = 4452078961464.00
-[Exec] GroupBy VERIFY: GPU grand total = 1483918.00
-[Exec] GroupBy VERIFY: difference = -4452077477546.00
-[Exec] GroupBy VERIFY: CPU max key=122623 val=138470536.00
-[Exec] GroupBy VERIFY: GPU max key=102004 val=41.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 122623 = 40.00
-[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
-[Exec] GroupBy VERIFY: key mismatches = 0 / 150000
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=1108606976 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=0 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 1108606976 = 0.00
-[Exec] GroupBy VERIFY: GPU group key=1107558400 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1109131264 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1108082688 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1108606976 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1109655552 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1092616192 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=0 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1090519040 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1099431936 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1095761920 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1096810496 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1098907648 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1094713344 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1097859072 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1091567616 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1102577664 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1101529088 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1093664768 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1099956224 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1104150528 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1104674816 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1100480512 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1077936128 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1101004800 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1105199104 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1103101952 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1086324736 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1103626240 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1102053376 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1082130432 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1088421888 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1106247680 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1107296256 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1084227584 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1106771968 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1105723392 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1107820544 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1065353216 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1073741824 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1108344832 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1109393408 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1108869120 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: 42 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -131,39 +50,39 @@ custdist|c_count|
 2.00|41.00|
 1.00|39.00|
 ---------------------------------------------------
-Planning time: 0.84 ms
-Data Load Time (Disk+Upload): 1470.17 ms
-GPU kernels time: 17.04 ms
-CPU postprocess time: 475.74 ms
-Total Internal Pipeline time: 1962.95 ms
-Total Host Execution time: 2032.76 ms
-Total Wall time (Plan+Exec): 2033.60 ms
+Planning time: 0.81 ms
+Data Load Time (Disk+Upload): 1471.06 ms
+GPU kernels time: 15.82 ms
+CPU postprocess time: 414.00 ms
+Total Internal Pipeline time: 1900.87 ms
+Total Host Execution time: 1981.36 ms
+Total Wall time (Plan+Exec): 1982.17 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    1.504 ms (8.826%) [2 calls]
-  filter         :    1.996 ms (11.713%) [1 calls]
-  groupby        :   12.502 ms (73.382%) [6 calls]
-  hash_join_probe_u32:    0.757 ms (4.443%) [1 calls]
-  sort           :    0.279 ms (1.636%) [2 calls]
+  cast           :    1.432 ms (9.055%) [2 calls]
+  filter         :    2.095 ms (13.247%) [1 calls]
+  groupby        :   11.247 ms (71.108%) [6 calls]
+  hash_join_probe_u32:    0.767 ms (4.847%) [1 calls]
+  sort           :    0.276 ms (1.742%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 17.036 ms
+  TOTAL GPU TIME: 15.817 ms
   Kernel invocations: 12
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_multi_cont        1.996        1500000        751.676
-hash_join_probe_write_multi          0.757        1483918       1960.585
-ops::cast_u32_to_f32                 1.292        1533923       1187.438
-ops::groupby_agg_multi_key_ty        7.610        1533923        201.555
-ops::ht_mark_valid                   1.194        4194304       3512.450
-ops::ht_extract_compact              1.005         150000        149.291
-ops::groupby_agg_multi_key_ty        1.669         150000         89.850
-ops::ht_mark_valid                   0.790         524288        663.446
-ops::ht_extract_compact              0.233             42          0.181
-ops::cast_u32_to_f32                 0.212             42          0.198
+ops::filter_string_multi_cont        2.095        1500000        715.862
+hash_join_probe_write_multi          0.767        1483918       1935.547
+ops::cast_u32_to_f32                 1.240        1533923       1236.703
+ops::groupby_agg_multi_key_ty        6.422        1533923        238.857
+ops::ht_mark_valid                   1.370        4194304       3060.513
+ops::ht_extract_compact              0.550         150000        272.831
+ops::groupby_agg_multi_key_ty        2.338         150000         64.165
+ops::ht_mark_valid                   0.307         524288       1708.474
+ops::ht_extract_compact              0.261             42          0.161
+ops::cast_u32_to_f32                 0.192             42          0.219
 block_sort_kv_u64                    0.000             42          0.000
-orderby_gpu_gather                   0.279             84          0.301
+orderby_gpu_gather                   0.276             84          0.305
 ─────────────────────────────────────────────────────────────────
-TOTAL: 17.036 ms
+TOTAL: 15.817 ms

@@ -1,502 +1,8 @@
 --- Running (Engine Host) ---
-DEBUG: Scan table determined as: 'nation'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-DEBUG: Scan table determined as: 'supplier'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
-[Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
-[Planner] ChildProjs size: 4
-  #0: s_suppkey
-  #1: s_nationkey
-  #2: s_name
-  #3: n_nationkey
-[Planner] Resolved Condition: 's_nationkey = n_nationkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-Expression: (l_receiptdate > l_commitdate)
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_2'
-[Planner] Pre-resolved Condition: 'l_suppkey = s_suppkey'
-[Planner] ChildProjs size: 6
-  #0: l_suppkey
-  #1: l_orderkey
-  #2: s_suppkey
-  #3: s_nationkey
-  #4: s_name
-  #5: n_nationkey
-[Planner] Resolved Condition: 'l_suppkey = s_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_2'
-DEBUG: Scan table determined as: 'orders'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_7'
-[Planner] Pre-resolved Condition: 'o_orderkey = l_orderkey'
-[Planner] ChildProjs size: 7
-  #0: o_orderkey
-  #1: l_suppkey
-  #2: l_orderkey
-  #3: s_suppkey
-  #4: s_nationkey
-  #5: s_name
-  #6: n_nationkey
-[Planner] Resolved Condition: 'o_orderkey = l_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
-[Planner] Pre-resolved Condition: 'l_orderkey = l_orderkey AND l_suppkey != l_suppkey'
-[Planner] ChildProjs size: 2
-  #0: l_orderkey
-  #1: l_suppkey
-[Planner] Resolved Condition: 'l_orderkey = l_orderkey AND l_suppkey != l_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_14'
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_12'
-[Planner] Pre-resolved Condition: 'l_suppkey IS NOT DISTINCT FROM l_suppkey AND l_orderkey IS NOT DISTINCT FROM l_orderkey'
-[Planner] ChildProjs size: 2
-  #0: l_suppkey
-  #1: l_orderkey
-[Planner] Resolved Condition: 'l_suppkey IS NOT DISTINCT FROM l_suppkey AND l_orderkey IS NOT DISTINCT FROM l_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
-DEBUG: Scan table determined as: 'lineitem'
-DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-Expression: (l_receiptdate > l_commitdate)
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_24'
-[Planner] Pre-resolved Condition: 'l_orderkey = l_orderkey AND l_suppkey != l_suppkey'
-[Planner] ChildProjs size: 2
-  #0: l_orderkey
-  #1: l_suppkey
-[Planner] Resolved Condition: 'l_orderkey = l_orderkey AND l_suppkey != l_suppkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_24'
-DEBUG: COLUMN_DATA_SCAN extra_info keys: 
-[Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_30'
-[Planner] Pre-resolved Condition: 'l_suppkey IS NOT DISTINCT FROM l_suppkey AND l_orderkey IS NOT DISTINCT FROM l_orderkey'
-[Planner] ChildProjs size: 2
-  #0: l_suppkey
-  #1: l_orderkey
-[Planner] Resolved Condition: 'l_suppkey IS NOT DISTINCT FROM l_suppkey AND l_orderkey IS NOT DISTINCT FROM l_orderkey'
-DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_30'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
 [GPU] Runtime Metal shader compilation succeeded (131 KB source).
-[Exec] GroupBy VERIFY: key mismatches = 0 / 4141
-[Exec] GroupBy VERIFY: CPU grand total = 0.00
-[Exec] GroupBy VERIFY: GPU grand total = 0.00
-[Exec] GroupBy VERIFY: difference = 0.00
-[Exec] GroupBy VERIFY: CPU max key=9757 val=0.00
-[Exec] GroupBy VERIFY: GPU max key=2828 val=0.00
-[Exec] GroupBy VERIFY: GPU value for CPU max key 9757 = 0.00
-[Exec] GroupBy VERIFY: GPU group key=4008 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7115 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1455 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1061 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1943 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5895 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6756 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6086 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=426 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=166 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7914 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2890 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9890 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5235 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=471 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8330 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6393 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7386 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7260 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6755 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3219 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8694 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4828 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=787 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9726 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6536 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7661 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2489 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2977 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3261 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6704 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7522 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5041 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6891 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2224 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4476 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9860 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9854 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6452 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=435 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4830 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=647 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6623 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4111 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9720 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5996 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5720 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1057 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=824 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4302 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3167 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2948 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=564 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9814 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7655 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=261 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5773 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=113 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2004 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5468 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=601 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5192 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1151 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=73 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5719 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=398 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8146 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5807 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9178 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9052 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6666 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5382 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7618 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5234 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4162 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5060 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7531 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9140 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2989 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6799 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5684 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=485 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4872 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5997 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3582 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8389 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8375 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5193 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3833 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=919 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3266 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8912 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1906 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=659 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9895 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2322 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=708 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7667 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8526 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7879 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4471 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6595 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9849 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7440 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3265 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5375 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6496 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7493 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5243 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7126 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2321 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=707 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9646 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8300 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6938 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2409 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9897 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=356 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8104 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4924 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5905 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2369 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9136 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6766 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6597 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1600 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6449 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1594 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8701 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=444 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9189 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1915 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6127 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2055 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2813 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8875 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2545 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1160 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1924 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7490 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7846 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6546 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4168 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3805 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=609 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7578 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6325 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=658 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3617 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1336 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=845 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9642 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8395 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1389 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5642 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1438 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6995 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1335 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6280 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1250 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5612 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3100 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8738 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2595 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3547 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3413 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=928 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=668 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5389 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7625 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6998 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2683 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8397 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4785 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7888 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2992 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7311 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9563 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1788 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8209 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=976 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1959 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8668 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6282 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8029 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1614 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6683 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6504 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2646 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1346 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7227 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1018 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4488 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2868 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1434 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=669 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7496 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2828 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8670 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8528 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6908 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3726 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9560 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2916 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6380 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=717 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3948 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8393 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5648 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1119 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3371 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6012 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1355 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5567 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5435 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9647 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4792 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8309 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5696 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=499 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6240 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7130 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3334 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=577 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=414 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3674 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1121 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4500 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3373 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=888 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=459 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9435 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=502 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8491 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9336 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1571 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1392 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6341 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4839 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6681 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1352 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1533 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3233 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=187 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7949 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1046 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6692 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3282 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7510 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4887 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5919 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7895 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3013 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5346 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4099 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2300 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1045 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2914 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6378 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=495 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6252 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5582 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3204 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5434 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7053 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9163 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8881 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3991 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7809 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3047 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6377 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7370 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7141 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8353 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6560 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5661 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3734 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9434 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4538 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=672 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7369 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8133 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4624 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1082 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5798 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7908 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2159 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7685 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1664 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7380 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8489 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7001 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8717 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5315 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=143 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6924 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3516 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5618 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1451 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9199 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3293 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8626 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6736 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8712 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5318 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8899 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6610 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6966 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6824 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1052 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2925 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7516 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3776 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3644 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9216 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5577 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4320 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5303 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7060 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3518 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2255 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=761 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6823 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=810 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3062 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9786 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7381 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2343 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7416 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8753 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4108 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2614 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4273 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6383 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9834 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8550 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8179 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2024 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6209 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1053 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=820 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=686 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4284 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3645 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9542 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2268 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=632 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5841 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8093 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5276 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2795 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2482 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2356 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3211 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6568 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4198 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3520 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9267 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7600 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=379 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9629 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6616 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8332 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5412 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9803 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6026 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1497 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7254 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5626 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9757 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=4993 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8135 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7020 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3074 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2845 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8907 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=3247 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7601 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2451 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1950 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8950 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1808 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5754 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1006 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8995 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2706 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5177 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2539 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=917 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2038 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5003 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6258 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1510 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=9223 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1273 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8054 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1895 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6628 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=5847 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2311 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8810 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=378 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8233 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2094 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=1723 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=2716 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7295 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=7289 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=8282 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=6794 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: GPU group key=777 val=0.00 EXCEEDS CPU max!
-[Exec] GroupBy VERIFY: 411 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -602,151 +108,151 @@ numwait|s_name|
 12.00|Supplier#000002357|
 12.00|Supplier#000002483|
 ---------------------------------------------------
-Planning time: 2.46 ms
-Data Load Time (Disk+Upload): 2895.70 ms
-GPU kernels time: 36.76 ms
-CPU postprocess time: 195.52 ms
-Total Internal Pipeline time: 3127.98 ms
-Total Host Execution time: 3129.31 ms
-Total Wall time (Plan+Exec): 3131.77 ms
+Planning time: 2.24 ms
+Data Load Time (Disk+Upload): 2897.94 ms
+GPU kernels time: 36.95 ms
+CPU postprocess time: 191.08 ms
+Total Internal Pipeline time: 3125.98 ms
+Total Host Execution time: 3127.28 ms
+Total Wall time (Plan+Exec): 3129.52 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.174 ms (0.474%) [1 calls]
-  filter         :    0.910 ms (2.477%) [2 calls]
-  gather         :   27.701 ms (75.356%) [97 calls]
-  groupby        :    0.636 ms (1.729%) [3 calls]
-  hash_join_probe_u32:    6.118 ms (16.642%) [5 calls]
-  hash_join_probe_u64:    1.022 ms (2.781%) [4 calls]
-  sort           :    0.199 ms (0.540%) [10 calls]
+  cast           :    0.177 ms (0.480%) [1 calls]
+  filter         :    0.788 ms (2.134%) [2 calls]
+  gather         :   28.006 ms (75.786%) [97 calls]
+  groupby        :    0.638 ms (1.726%) [3 calls]
+  hash_join_probe_u32:    6.133 ms (16.597%) [5 calls]
+  hash_join_probe_u64:    1.015 ms (2.746%) [4 calls]
+  sort           :    0.196 ms (0.531%) [10 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 36.760 ms
+  TOTAL GPU TIME: 36.953 ms
   Kernel invocations: 122
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.266             25          0.094
-hash_join_probe_write_multi          0.248          10000         40.248
-ops::gather_col_u32                  1.817        3793296       2087.766
-ops::gather_col_u32                  0.780        3793296       4860.085
-ops::gather_col_u32                  0.738        3793296       5141.131
-ops::gather_col_u32                  0.743        3793296       5102.226
-ops::gather_col_u32                  0.973        3793296       3896.719
-ops::gather_col_u32                  0.738        3793296       5138.227
-ops::gather_col_u32                  0.696        3793296       5452.747
-ops::gather_col_u32                  0.700        3793296       5418.994
-hash_join_probe_write_multi          4.416        3793296        859.046
-ops::filter_eq_u32                   0.644        1500000       2327.989
-hash_join_probe_write_multi          0.331         729413       2204.217
+ops::filter_string_eq                0.269             25          0.093
+hash_join_probe_write_multi          0.248          10000         40.323
+ops::gather_col_u32                  1.823        3793296       2080.704
+ops::gather_col_u32                  0.775        3793296       4895.889
+ops::gather_col_u32                  0.742        3793296       5111.969
+ops::gather_col_u32                  0.748        3793296       5072.669
+ops::gather_col_u32                  0.933        3793296       4066.971
+ops::gather_col_u32                  0.696        3793296       5450.138
+ops::gather_col_u32                  0.810        3793296       4685.251
+ops::gather_col_u32                  0.820        3793296       4628.319
+hash_join_probe_write_multi          4.506        3793296        841.871
+ops::filter_eq_u32                   0.519        1500000       2890.173
+hash_join_probe_write_multi          0.287         729413       2540.031
 radix_sort_u64                       0.000          75871          0.000
-ops::gather_col_u32                  0.226          75864        335.557
-ops::gather_col_u32                  0.216          75864        351.902
-ops::gather_col_u32                  0.198          75864        382.267
+ops::gather_col_u32                  0.205          75864        369.917
+ops::gather_col_u32                  0.213          75864        355.960
+ops::gather_col_u32                  0.211          75864        359.758
+ops::gather_col_u32                  0.201          75864        377.120
+ops::gather_col_u32                  0.199          75864        380.429
+ops::gather_col_u32                  0.432          75864        175.713
 ops::gather_col_u32                  0.201          75864        376.573
-ops::gather_col_u32                  0.207          75864        366.420
-ops::gather_col_u32                  0.199          75864        381.784
-ops::gather_col_u32                  0.208          75864        364.512
-ops::gather_col_u32                  0.205          75864        370.220
-ops::gather_col_u32                  0.207          75864        366.714
-ops::gather_col_u32                  0.198          75864        382.668
-ops::gather_col_u32                  0.198          75864        383.797
-hash_join_probe_write_multi          0.591        6001215      10158.637
-ops::gather_col_u32                  0.249         302356       1214.891
-ops::gather_col_u32                  0.255         302356       1187.260
+ops::gather_col_u32                  0.226          75864        335.805
+ops::gather_col_u32                  0.200          75864        379.004
+ops::gather_col_u32                  0.207          75864        367.233
+ops::gather_col_u32                  0.203          75864        373.409
+hash_join_probe_write_multi          0.576        6001215      10420.278
+ops::gather_col_u32                  0.254         302356       1191.941
+ops::gather_col_u32                  0.233         302356       1297.431
 radix_sort_u64                       0.000          75871          0.000
-ops::gather_col_u32                  0.204          75864        371.049
-ops::gather_col_u32                  0.208          75864        364.803
-ops::gather_col_u32                  0.198          75864        382.427
-ops::gather_col_u32                  0.207          75864        367.158
-ops::gather_col_u32                  0.199          75864        380.589
-ops::gather_col_u32                  0.205          75864        370.899
-ops::gather_col_u32                  0.202          75864        376.106
-ops::gather_col_u32                  0.210          75864        360.685
-ops::gather_col_u32                  0.196          75864        386.322
-ops::gather_col_u32                  0.199          75864        382.027
-ops::gather_col_u32                  0.347         302356        871.866
-ops::gather_col_u32                  0.361         302356        837.746
-ops::join_probe_u64                  0.296         302356       1019.750
+ops::gather_col_u32                  0.204          75864        372.492
+ops::gather_col_u32                  0.213          75864        356.378
+ops::gather_col_u32                  0.206          75864        369.092
+ops::gather_col_u32                  0.207          75864        367.231
+ops::gather_col_u32                  0.201          75864        377.198
+ops::gather_col_u32                  0.199          75864        381.867
+ops::gather_col_u32                  0.198          75864        383.636
+ops::gather_col_u32                  0.199          75864        381.305
+ops::gather_col_u32                  0.199          75864        381.625
+ops::gather_col_u32                  0.199          75864        381.387
+ops::gather_col_u32                  0.338         302356        895.095
+ops::gather_col_u32                  0.331         302356        913.002
+ops::join_probe_u64                  0.289         302356       1044.408
 radix_sort_u32                       0.000         302356          0.000
 radix_sort_u64                       0.000         302356          0.000
-ops::gather_col_u32                  0.212          73082        344.998
-ops::gather_col_u32                  0.222          73082        329.075
-ops::gather_col_u32                  0.217          73082        336.461
-ops::gather_col_u32                  0.223          73082        327.293
-ops::gather_col_u32                  0.208          73082        350.934
-ops::gather_col_u32                  0.215          73082        339.850
-ops::gather_col_u32                  0.213          73082        342.638
-ops::gather_col_u32                  0.202          73082        361.792
-ops::gather_col_u32                  0.206          73082        354.552
-ops::gather_col_u32                  0.197          73082        370.660
-ops::gather_col_u32                  0.197          73082        370.114
-ops::gather_col_u32                  0.210          73082        347.459
-ops::gather_col_u32                  0.209          73082        350.093
-ops::gather_col_u32                  0.212          73082        344.930
-ops::gather_col_u32                  0.198          73082        369.880
-ops::gather_col_u32                  0.196          73082        372.470
-ops::gather_col_u32                  0.197          73082        370.270
-ops::gather_col_u32                  0.213          73082        342.974
-ops::join_probe_u64                  0.243          75871        311.745
+ops::gather_col_u32                  0.218          73082        335.560
+ops::gather_col_u32                  0.224          73082        326.502
+ops::gather_col_u32                  0.217          73082        337.041
+ops::gather_col_u32                  0.220          73082        332.884
+ops::gather_col_u32                  0.212          73082        343.915
+ops::gather_col_u32                  0.205          73082        356.280
+ops::gather_col_u32                  0.204          73082        357.954
+ops::gather_col_u32                  0.212          73082        344.457
+ops::gather_col_u32                  0.210          73082        348.079
+ops::gather_col_u32                  0.198          73082        369.256
+ops::gather_col_u32                  0.198          73082        369.413
+ops::gather_col_u32                  0.210          73082        348.494
+ops::gather_col_u32                  0.196          73082        373.105
+ops::gather_col_u32                  0.213          73082        343.443
+ops::gather_col_u32                  0.193          73082        378.663
+ops::gather_col_u32                  0.202          73082        361.493
+ops::gather_col_u32                  0.199          73082        367.940
+ops::gather_col_u32                  0.212          73082        345.473
+ops::join_probe_u64                  0.249          75871        304.703
 radix_sort_u32                       0.000          73089          0.000
 radix_sort_u64                       0.000          73089          0.000
-ops::gather_col_u32                  0.206          73082        354.409
-ops::gather_col_u32                  0.208          73082        351.921
-ops::gather_col_u32                  0.204          73082        358.831
-ops::gather_col_u32                  0.194          73082        376.469
-ops::gather_col_u32                  0.205          73082        356.134
-ops::gather_col_u32                  0.205          73082        355.630
-ops::gather_col_u32                  0.213          73082        343.849
-ops::gather_col_u32                  0.202          73082        362.165
-ops::gather_col_u32                  0.200          73082        365.562
-ops::gather_col_u32                  0.199          73082        366.478
-ops::gather_col_u32                  0.194          73082        377.034
-ops::gather_col_u32                  0.209          73082        349.187
+ops::gather_col_u32                  0.212          73082        345.133
+ops::gather_col_u32                  0.214          73082        341.438
+ops::gather_col_u32                  0.210          73082        348.562
+ops::gather_col_u32                  0.203          73082        360.899
+ops::gather_col_u32                  0.207          73082        352.769
+ops::gather_col_u32                  0.201          73082        364.348
 ops::gather_col_u32                  0.197          73082        370.581
-ops::gather_col_u32                  0.207          73082        352.274
-ops::gather_col_u32                  0.195          73082        373.980
-ops::gather_col_u32                  0.194          73082        376.469
-ops::gather_col_u32                  0.694        3793296       5465.844
-ops::gather_col_u32                  0.649        3793296       5842.959
-ops::gather_col_u32                  0.632        3793296       5997.306
-ops::gather_col_u32                  0.629        3793296       6028.281
-hash_join_probe_write_multi          0.532        3793296       7131.368
-ops::gather_col_u32                  0.314         190909        608.960
-ops::gather_col_u32                  0.211         190909        906.569
-ops::gather_col_u32                  0.229         190909        835.334
-ops::gather_col_u32                  0.211         190909        905.499
-ops::gather_col_u32                  0.219         190909        870.903
-ops::gather_col_u32                  0.211         190909        906.393
-ops::gather_col_u32                  0.215         190909        887.260
-ops::gather_col_u32                  0.209         190909        912.532
-ops::gather_col_u32                  0.212         190909        898.569
-ops::gather_col_u32                  0.216         190909        885.034
-ops::gather_col_u32                  0.211         190909        902.643
-ops::gather_col_u32                  0.212         190909        901.577
+ops::gather_col_u32                  0.199          73082        368.016
+ops::gather_col_u32                  0.210          73082        348.010
+ops::gather_col_u32                  0.203          73082        359.272
+ops::gather_col_u32                  0.201          73082        363.366
+ops::gather_col_u32                  0.198          73082        368.403
+ops::gather_col_u32                  0.213          73082        342.841
+ops::gather_col_u32                  0.208          73082        352.062
+ops::gather_col_u32                  0.211          73082        346.840
+ops::gather_col_u32                  0.202          73082        362.240
+ops::gather_col_u32                  0.671        3793296       5656.005
+ops::gather_col_u32                  0.634        3793296       5979.976
+ops::gather_col_u32                  0.640        3793296       5925.090
+ops::gather_col_u32                  0.632        3793296       6003.238
+hash_join_probe_write_multi          0.516        3793296       7345.413
+ops::gather_col_u32                  0.306         190909        623.714
+ops::gather_col_u32                  0.204         190909        936.977
+ops::gather_col_u32                  0.240         190909        795.040
+ops::gather_col_u32                  0.210         190909        909.992
+ops::gather_col_u32                  0.213         190909        896.459
+ops::gather_col_u32                  0.214         190909        892.444
+ops::gather_col_u32                  0.214         190909        891.403
+ops::gather_col_u32                  0.217         190909        880.780
+ops::gather_col_u32                  0.211         190909        904.782
+ops::gather_col_u32                  0.212         190909        901.224
+ops::gather_col_u32                  0.212         190909        902.464
+ops::gather_col_u32                  0.210         190909        907.651
 radix_sort_u64                       0.000         190909          0.000
-ops::gather_col_u32                  0.197          68941        349.511
-ops::gather_col_u32                  0.198          68941        347.601
-ops::gather_col_u32                  0.202          68941        340.870
-ops::gather_col_u32                  0.211          68941        326.992
-ops::gather_col_u32                  0.190          68941        362.292
-ops::gather_col_u32                  0.208          68941        330.652
-ops::gather_col_u32                  0.202          68941        341.784
-ops::gather_col_u32                  0.200          68941        344.777
-ops::gather_col_u32                  0.213          68941        323.983
-ops::gather_col_u32                  0.213          68941        323.034
-ops::gather_col_u32                  0.206          68941        333.921
-ops::join_probe_u64                  0.244          73089        299.340
-ops::join_probe_u64                  0.238          73089        306.560
+ops::gather_col_u32                  0.202          68941        341.363
+ops::gather_col_u32                  0.201          68941        342.990
+ops::gather_col_u32                  0.200          68941        344.347
+ops::gather_col_u32                  0.199          68941        346.510
+ops::gather_col_u32                  0.203          68941        340.379
+ops::gather_col_u32                  0.204          68941        338.429
+ops::gather_col_u32                  0.201          68941        342.990
+ops::gather_col_u32                  0.194          68941        355.672
+ops::gather_col_u32                  0.196          68941        352.338
+ops::gather_col_u32                  0.204          68941        337.946
+ops::gather_col_u32                  0.206          68941        334.800
+ops::join_probe_u64                  0.241          73089        302.750
+ops::join_probe_u64                  0.235          73089        311.348
 radix_sort_u32                       0.000           4141          0.000
-ops::groupby_agg_multi_key_ty        0.268           4141         15.432
-ops::ht_mark_valid                   0.197          16384         83.062
-ops::ht_extract_compact              0.170            411          2.418
-ops::cast_u32_to_f32                 0.174            411          2.359
+ops::groupby_agg_multi_key_ty        0.268           4141         15.430
+ops::ht_mark_valid                   0.186          16384         88.205
+ops::ht_extract_compact              0.184            411          2.238
+ops::cast_u32_to_f32                 0.177            411          2.319
 block_sort_kv_u64                    0.000            411          0.000
-orderby_gpu_gather                   0.199            822          4.138
-ops::gather_col_u32                  0.178            411          2.313
-ops::gather_col_u32                  0.167            100          0.598
-ops::gather_col_f32                  0.169            100          0.591
+orderby_gpu_gather                   0.196            822          4.188
+ops::gather_col_u32                  0.168            411          2.446
+ops::gather_col_u32                  0.173            100          0.577
+ops::gather_col_f32                  0.164            100          0.609
 ─────────────────────────────────────────────────────────────────
-TOTAL: 36.760 ms
+TOTAL: 36.953 ms

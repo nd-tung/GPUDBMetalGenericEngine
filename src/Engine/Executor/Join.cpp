@@ -52,7 +52,1047 @@ static void extractJoinKeyPairs(const TypedExprPtr& expr,
     }
 }
 
-bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPath*/,
+
+// ============================================================================
+// Extracted helpers for executeJoin()
+// ============================================================================
+
+static void materializeJoinContext(EvalContext& ctx, const char* label, bool debug) {
+    if (!ctx.activeRowsGPU) return;  // No filter applied — nothing to materialize
+    uint32_t count = ctx.activeRowsCountGPU;
+    if (debug) std::cerr << "[Exec] Join: materializing " << label 
+                         << " ctx (" << count << " active rows from " << ctx.rowCount << ")\n";
+    // If the filter matched 0 rows, clear everything and set rowCount=0
+    if (count == 0) {
+        for (auto& [name, vec] : ctx.u32Cols) vec.clear();
+        for (auto& [name, vec] : ctx.f32Cols) vec.clear();
+        for (auto& [name, vec] : ctx.stringCols) vec.clear();
+        ctx.u32ColsGPU.clear();
+        ctx.f32ColsGPU.clear();
+        ctx.activeRowsGPU = nullptr;
+        ctx.activeRowsCountGPU = 0;
+        ctx.activeRows.clear();
+        ctx.rowCount = 0;
+        return;
+    }
+
+    // Compact GPU u32 columns (async — no per-column sync)
+    for (auto& [name, buf] : ctx.u32ColsGPU) {
+        if (!buf) continue;
+        uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
+        if (bufRows > count) {
+            MTL::Buffer* compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count, false);
+            if (compacted) {
+                buf.reset(compacted);
+            }
+        }
+    }
+    // Compact GPU f32 columns (async — no per-column sync)
+    for (auto& [name, buf] : ctx.f32ColsGPU) {
+        if (!buf) continue;
+        uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
+        if (bufRows > count) {
+            MTL::Buffer* compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, count, false);
+            if (compacted) {
+                buf.reset(compacted);
+            }
+        }
+    }
+    // GPU-native dict compaction: gather dict IDs on GPU (async)
+    for (auto& [name, dict] : ctx.dictCols) {
+        if (dict.idsGPU) {
+            uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
+            if (bufRows > count) {
+                MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, false);
+                if (compacted) {
+                    dict.idsGPU.reset(compacted);
+                    dict.rowCount = count;
+                    dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
+                }
+            }
+        } else if (dict.ids.size() > count) {
+            // CPU-only fallback (no GPU buffer) — needs sync first
+            GpuOps::sync();
+            uint32_t* indices2 = (uint32_t*)ctx.activeRowsGPU->contents();
+            std::vector<uint32_t> c;
+            c.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
+                c.push_back(indices2[i] < (uint32_t)dict.ids.size() ? dict.ids[indices2[i]] : 0u);
+            dict.ids = std::move(c);
+            dict.rowCount = count;
+        }
+    }
+    // Sync all async GPU gathers before reading results on CPU
+    GpuOps::sync();
+    {
+        auto& s = GpuColumnStore::instance();
+        for (auto& [name, vec] : ctx.u32Cols) {
+            if (vec.size() > count) {
+                auto itGpu = ctx.u32ColsGPU.find(name);
+                if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
+                    // GPU buffer already compacted above — sync CPU from it (zero-cost on unified mem)
+                    vec.resize(count);
+                    std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(uint32_t));
+                } else {
+                    MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
+                    vec.resize(count);
+                    std::memcpy(vec.data(), dst->contents(), count * sizeof(uint32_t));
+                    src->release(); dst->release();
+                }
+            }
+        }
+        // Compact CPU f32 columns via GPU gather
+        for (auto& [name, vec] : ctx.f32Cols) {
+            if (vec.size() > count) {
+                auto itGpu = ctx.f32ColsGPU.find(name);
+                if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
+                    vec.resize(count);
+                    std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(float));
+                } else {
+                    MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
+                    vec.resize(count);
+                    std::memcpy(vec.data(), dst->contents(), count * sizeof(float));
+                    src->release(); dst->release();
+                }
+            }
+        }
+    }
+    // Compact CPU string columns: prefer invalidation if dictCol exists, else GPU/CPU gather
+    {
+        for (auto& [name, vec] : ctx.stringCols) {
+            if (ctx.dictCols.count(name) && ctx.dictCols[name].valid()) {
+                vec.clear();  // Will be rebuilt from dict on demand
+            } else if (vec.size() > count) {
+                // Try GPU gather via flatStringCols
+                auto fit = ctx.flatStringCols.find(name);
+                if (fit != ctx.flatStringCols.end() && fit->second.chars && ctx.activeRowsGPU) {
+                    auto r = GpuOps::gatherFlatString(
+                        fit->second.chars, fit->second.offsets, fit->second.lengths,
+                        ctx.activeRowsGPU, count, true);
+                    if (r.chars) {
+                        const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                        const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                        const char* ch = static_cast<const char*>(r.chars->contents());
+                        vec.resize(count);
+                        for (uint32_t i = 0; i < count; ++i) vec[i].assign(ch + offs[i], lens[i]);
+                        // Update flatStringCols to compacted version
+                        fit->second.takeFrom(r.chars, r.offsets, r.lengths,
+                                             r.rowCount, r.totalBytes);
+                        continue;
+                    }
+                }
+                // CPU fallback
+                uint32_t* indices = (uint32_t*)ctx.activeRowsGPU->contents();
+                std::vector<std::string> c;
+                c.reserve(count);
+                for (uint32_t i = 0; i < count; ++i)
+                    c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : std::string());
+                vec = std::move(c);
+            }
+        }
+    }
+    // Compact flatStringCols that don't have matching stringCols (handled above)
+    if (ctx.activeRowsGPU) {
+        for (auto& [name, flat] : ctx.flatStringCols) {
+            if (!ctx.stringCols.count(name) && flat.chars && flat.rowCount > count) {
+                auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
+                                                   ctx.activeRowsGPU, count, true);
+                if (r.chars) {
+                    flat.takeFrom(r.chars, r.offsets, r.lengths,
+                                  r.rowCount, r.totalBytes);
+                }
+            }
+        }
+    }
+    // Clear selection vector — data is now dense
+    ctx.activeRowsGPU = nullptr;
+    ctx.activeRowsCountGPU = 0;
+    ctx.activeRows.clear();
+    ctx.rowCount = count;
+}
+
+static void appendUnmatchedLeftRows(
+    EvalContext& leftCtx, EvalContext& outCtx,
+    const JoinResult& jRes, uint32_t& resCount, uint32_t lCount,
+    const std::unordered_map<std::string, std::string>& rightColumnMapping,
+    bool debug
+) {
+    auto& store = GpuColumnStore::instance();
+    (void)rightColumnMapping; // reserved for future use
+    // Use GpuOps to find unmatched left (probe) indices via scatter→flip→compact
+    auto unmatched = GpuOps::findUnmatchedIndices(jRes.probeIndices, resCount, lCount);
+    uint32_t unmatchedCount = unmatched.count;
+
+    // Download unmatched indices for string gather (CPU)
+    std::vector<uint32_t> unmatchedIndices(unmatchedCount);
+    if (unmatchedCount > 0) {
+        std::memcpy(unmatchedIndices.data(), unmatched.indices->contents(),
+                    unmatchedCount * sizeof(uint32_t));
+    }
+    MTL::Buffer* unmatchedBuf = unmatched.indices; // reuse for GPU gather
+
+    if (debug) std::cerr << "[Exec] Left Join: " << unmatchedCount << " unmatched left rows to append\n";
+
+    if (unmatchedCount > 0) {
+        uint32_t totalCount = resCount + unmatchedCount;
+
+        // Append left columns: gather unmatched rows and concatenate with matched
+        for (auto& [name, buf] : outCtx.u32ColsGPU) {
+            if (leftCtx.u32Cols.count(name) || leftCtx.u32ColsGPU.count(name)) {
+                MTL::Buffer* leftSrc = nullptr;
+                bool leftSrcAllocated = false;
+                if (leftCtx.u32ColsGPU.count(name)) leftSrc = leftCtx.u32ColsGPU.at(name);
+                else if (leftCtx.u32Cols.count(name) && !leftCtx.u32Cols.at(name).empty()) {
+                    const auto& vec = leftCtx.u32Cols.at(name);
+                    leftSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    leftSrcAllocated = true;
+                }
+                if (leftSrc) {
+                    MTL::Buffer* g = GpuOps::gatherU32(leftSrc, unmatchedBuf, unmatchedCount, false);
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
+                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
+                                g->contents(), unmatchedCount * sizeof(uint32_t));
+                    if (leftSrcAllocated) leftSrc->release();
+                    buf.reset(combined); g->release();
+                }
+            } else {
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
+                std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                buf.reset(combined);
+            }
+        }
+        for (auto& [name, buf] : outCtx.f32ColsGPU) {
+            if (leftCtx.f32Cols.count(name) || leftCtx.f32ColsGPU.count(name)) {
+                MTL::Buffer* leftSrc = nullptr;
+                bool leftSrcAllocated = false;
+                if (leftCtx.f32ColsGPU.count(name)) leftSrc = leftCtx.f32ColsGPU.at(name);
+                else if (leftCtx.f32Cols.count(name) && !leftCtx.f32Cols.at(name).empty()) {
+                    const auto& vec = leftCtx.f32Cols.at(name);
+                    leftSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                    leftSrcAllocated = true;
+                }
+                if (leftSrc) {
+                    MTL::Buffer* g = GpuOps::gatherF32(leftSrc, unmatchedBuf, unmatchedCount, false);
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
+                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
+                                g->contents(), unmatchedCount * sizeof(float));
+                    if (leftSrcAllocated) leftSrc->release();
+                    g->release(); buf.reset(combined);
+                }
+            } else {
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
+                std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
+                buf.reset(combined);
+            }
+        }
+
+        // String columns: append unmatched left values + empty for right
+        for (auto& [name, vec] : outCtx.stringCols) {
+            if (leftCtx.stringCols.count(name)) {
+                const auto& leftVec = leftCtx.stringCols.at(name);
+                for (uint32_t idx : unmatchedIndices) {
+                    vec.push_back(idx < leftVec.size() ? leftVec[idx] : "");
+                }
+            } else {
+                for (uint32_t i = 0; i < unmatchedCount; ++i) vec.push_back("");
+            }
+        }
+
+        // Dict columns: GPU gather unmatched left dict IDs + append zeros for right
+        for (auto& [name, dc] : outCtx.dictCols) {
+            if (!dc.idsGPU) continue;
+            // Check if this is a left-side column
+            auto leftDictIt = leftCtx.dictCols.find(name);
+            if (leftDictIt != leftCtx.dictCols.end() && leftDictIt->second.idsGPU) {
+                // GPU gather unmatched left dict IDs
+                MTL::Buffer* g = GpuOps::gatherU32(leftDictIt->second.idsGPU, unmatchedBuf, unmatchedCount, false);
+                // Concatenate matched + unmatched
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
+                            g->contents(), unmatchedCount * sizeof(uint32_t));
+                g->release();
+                dc.idsGPU.reset(combined);
+            } else {
+                // Right-side column: pad with sentinel (0) for unmatched left rows
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                dc.idsGPU.reset(combined);
+            }
+            dc.ids.clear(); // invalidate CPU mirror
+            dc.rowCount = totalCount;
+            // Invalidate stale stringCols for this column
+            outCtx.stringCols.erase(name);
+            outCtx.flatStringCols.erase(name);
+        }
+
+        // Sync CPU-side u32/f32 cols via GPU gather or GPU buffer download
+        for (auto& [name, vec] : outCtx.u32Cols) {
+            if (!vec.empty()) {
+                if (outCtx.u32ColsGPU.count(name)) {
+                    // GPU buffer already has combined data — sync from it
+                    vec.resize(totalCount);
+                    std::memcpy(vec.data(), outCtx.u32ColsGPU.at(name)->contents(), totalCount * sizeof(uint32_t));
+                } else if (leftCtx.u32ColsGPU.count(name) && leftCtx.u32ColsGPU.at(name)) {
+                    // Prefer existing GPU buffer from left context
+                    MTL::Buffer* g = GpuOps::gatherU32(leftCtx.u32ColsGPU.at(name), unmatchedBuf, unmatchedCount, false);
+                    size_t oldSz = vec.size();
+                    vec.resize(oldSz + unmatchedCount);
+                    std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
+                    g->release();
+                } else if (leftCtx.u32Cols.count(name)) {
+                    const auto& leftVec = leftCtx.u32Cols.at(name);
+                    MTL::Buffer* src = store.device()->newBuffer(leftVec.data(), leftVec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* g = GpuOps::gatherU32(src, unmatchedBuf, unmatchedCount, false);
+                    size_t oldSz = vec.size();
+                    vec.resize(oldSz + unmatchedCount);
+                    std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
+                    src->release(); g->release();
+                } else {
+                    vec.resize(vec.size() + unmatchedCount, 0);
+                }
+            }
+        }
+        for (auto& [name, vec] : outCtx.f32Cols) {
+            if (!vec.empty()) {
+                if (outCtx.f32ColsGPU.count(name)) {
+                    vec.resize(totalCount);
+                    std::memcpy(vec.data(), outCtx.f32ColsGPU.at(name)->contents(), totalCount * sizeof(float));
+                } else if (leftCtx.f32ColsGPU.count(name) && leftCtx.f32ColsGPU.at(name)) {
+                    MTL::Buffer* g = GpuOps::gatherF32(leftCtx.f32ColsGPU.at(name), unmatchedBuf, unmatchedCount, false);
+                    size_t oldSz = vec.size();
+                    vec.resize(oldSz + unmatchedCount);
+                    std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
+                    g->release();
+                } else if (leftCtx.f32Cols.count(name)) {
+                    const auto& leftVec = leftCtx.f32Cols.at(name);
+                    MTL::Buffer* src = store.device()->newBuffer(leftVec.data(), leftVec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* g = GpuOps::gatherF32(src, unmatchedBuf, unmatchedCount, false);
+                    size_t oldSz = vec.size();
+                    vec.resize(oldSz + unmatchedCount);
+                    std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
+                    src->release(); g->release();
+                } else {
+                    vec.resize(vec.size() + unmatchedCount, 0.0f);
+                }
+            }
+        }
+
+        outCtx.rowCount = totalCount;
+        resCount = totalCount;
+        // Dict IDs already updated with unmatched rows above
+        if (debug) std::cerr << "[Exec] Left Join: total output rows = " << totalCount << "\n";
+    }
+}
+
+static void appendUnmatchedRightRows(
+    EvalContext& rightCtx, EvalContext& outCtx,
+    const JoinResult& jRes, uint32_t& resCount, uint32_t rCount,
+    const std::unordered_map<std::string, std::string>& rightColumnMapping,
+    bool debug
+) {
+    auto& store = GpuColumnStore::instance();
+    auto getRightColumnName = [&](const std::string& name) -> std::string {
+        auto it = rightColumnMapping.find(name);
+        if (it != rightColumnMapping.end()) return it->second;
+        return name;
+    };
+    uint32_t matchedCount = jRes.count;
+    // Use GpuOps to find unmatched right (build) indices via scatter→flip→compact
+    auto unmatched = GpuOps::findUnmatchedIndices(jRes.buildIndices, matchedCount, rCount);
+    uint32_t unmatchedCount = unmatched.count;
+
+    // Download unmatched indices for string gather (CPU)
+    std::vector<uint32_t> unmatchedIndices(unmatchedCount);
+    if (unmatchedCount > 0) {
+        std::memcpy(unmatchedIndices.data(), unmatched.indices->contents(),
+                    unmatchedCount * sizeof(uint32_t));
+    }
+    MTL::Buffer* unmatchedBuf = unmatched.indices;
+
+    if (debug) std::cerr << "[Exec] Right Join: " << unmatchedCount << " unmatched right rows to append\n";
+
+    if (unmatchedCount > 0) {
+        uint32_t totalCount = resCount + unmatchedCount;
+
+        // For RIGHT columns: gather unmatched rows and append
+        // For LEFT columns: extend with zeros (NULL)
+        for (auto& [name, buf] : outCtx.u32ColsGPU) {
+            if (rightCtx.u32Cols.count(name) || rightCtx.u32ColsGPU.count(name) ||
+                rightCtx.u32Cols.count(getRightColumnName(name)) || rightCtx.u32ColsGPU.count(getRightColumnName(name))) {
+                std::string srcName = name;
+                for (const auto& [origName, mappedName] : rightColumnMapping) {
+                    if (mappedName == name) { srcName = origName; break; }
+                }
+                MTL::Buffer* rightSrc = nullptr;
+                bool rightSrcAllocated = false;
+                if (rightCtx.u32ColsGPU.count(srcName)) rightSrc = rightCtx.u32ColsGPU.at(srcName);
+                else if (rightCtx.u32Cols.count(srcName) && !rightCtx.u32Cols.at(srcName).empty()) {
+                    const auto& vec = rightCtx.u32Cols.at(srcName);
+                    rightSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    rightSrcAllocated = true;
+                }
+                if (rightSrc) {
+                    MTL::Buffer* g = GpuOps::gatherU32(rightSrc, unmatchedBuf, unmatchedCount, false);
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
+                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
+                                g->contents(), unmatchedCount * sizeof(uint32_t));
+                    if (rightSrcAllocated) rightSrc->release();
+                    buf.reset(combined); g->release();
+                } else {
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
+                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                    buf.reset(combined);
+                }
+            } else {
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
+                std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                buf.reset(combined);
+            }
+        }
+        for (auto& [name, buf] : outCtx.f32ColsGPU) {
+            if (rightCtx.f32Cols.count(name) || rightCtx.f32ColsGPU.count(name)) {
+                MTL::Buffer* rightSrc = nullptr;
+                bool rightSrcAllocated = false;
+                std::string srcName = name;
+                for (const auto& [origName, mappedName] : rightColumnMapping) {
+                    if (mappedName == name) { srcName = origName; break; }
+                }
+                if (rightCtx.f32ColsGPU.count(srcName)) rightSrc = rightCtx.f32ColsGPU.at(srcName);
+                else if (rightCtx.f32Cols.count(srcName) && !rightCtx.f32Cols.at(srcName).empty()) {
+                    const auto& vec = rightCtx.f32Cols.at(srcName);
+                    rightSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                    rightSrcAllocated = true;
+                }
+                if (rightSrc) {
+                    MTL::Buffer* g = GpuOps::gatherF32(rightSrc, unmatchedBuf, unmatchedCount, false);
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
+                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
+                                g->contents(), unmatchedCount * sizeof(float));
+                    if (rightSrcAllocated) rightSrc->release();
+                    g->release(); buf.reset(combined);
+                } else {
+                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
+                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
+                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
+                    buf.reset(combined);
+                }
+            } else {
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
+                std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
+                buf.reset(combined);
+            }
+        }
+
+        // String columns
+        for (auto& [name, vec] : outCtx.stringCols) {
+            std::string srcName = name;
+            for (const auto& [origName, mappedName] : rightColumnMapping) {
+                if (mappedName == name) { srcName = origName; break; }
+            }
+            if (rightCtx.stringCols.count(srcName)) {
+                const auto& rightVec = rightCtx.stringCols.at(srcName);
+                for (uint32_t idx : unmatchedIndices) {
+                    vec.push_back(idx < rightVec.size() ? rightVec[idx] : "");
+                }
+            } else {
+                for (uint32_t i = 0; i < unmatchedCount; ++i) vec.push_back("");
+            }
+        }
+
+        // Dict columns: GPU gather unmatched right dict IDs + append zeros for left
+        for (auto& [name, dc] : outCtx.dictCols) {
+            if (!dc.idsGPU) continue;
+            std::string srcName = name;
+            for (const auto& [origName, mappedName] : rightColumnMapping) {
+                if (mappedName == name) { srcName = origName; break; }
+            }
+            auto rightDictIt = rightCtx.dictCols.find(srcName);
+            if (rightDictIt != rightCtx.dictCols.end() && rightDictIt->second.idsGPU) {
+                // GPU gather unmatched right dict IDs
+                MTL::Buffer* g = GpuOps::gatherU32(rightDictIt->second.idsGPU, unmatchedBuf, unmatchedCount, false);
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
+                            g->contents(), unmatchedCount * sizeof(uint32_t));
+                g->release();
+                dc.idsGPU.reset(combined);
+            } else {
+                // Left-side column: pad with sentinel (0) for unmatched right rows
+                MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
+                std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
+                dc.idsGPU.reset(combined);
+            }
+            dc.ids.clear();
+            dc.rowCount = totalCount;
+            outCtx.stringCols.erase(name);
+            outCtx.flatStringCols.erase(name);
+        }
+
+        // Sync CPU-side u32/f32 cols via GPU gather or GPU buffer download
+        for (auto& [name, vec] : outCtx.u32Cols) {
+            if (!vec.empty()) {
+                if (outCtx.u32ColsGPU.count(name)) {
+                    vec.resize(totalCount);
+                    std::memcpy(vec.data(), outCtx.u32ColsGPU.at(name)->contents(), totalCount * sizeof(uint32_t));
+                } else {
+                    std::string srcName = name;
+                    for (const auto& [origName, mappedName] : rightColumnMapping) {
+                        if (mappedName == name) { srcName = origName; break; }
+                    }
+                    // Prefer existing GPU buffer from right context
+                    MTL::Buffer* rightGpu = nullptr;
+                    if (rightCtx.u32ColsGPU.count(srcName)) rightGpu = rightCtx.u32ColsGPU.at(srcName);
+                    if (rightGpu) {
+                        MTL::Buffer* g = GpuOps::gatherU32(rightGpu, unmatchedBuf, unmatchedCount, false);
+                        size_t oldSz = vec.size();
+                        vec.resize(oldSz + unmatchedCount);
+                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
+                        g->release();
+                    } else if (rightCtx.u32Cols.count(srcName)) {
+                        const auto& rightVec = rightCtx.u32Cols.at(srcName);
+                        MTL::Buffer* src = store.device()->newBuffer(rightVec.data(), rightVec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                        MTL::Buffer* g = GpuOps::gatherU32(src, unmatchedBuf, unmatchedCount, false);
+                        size_t oldSz = vec.size();
+                        vec.resize(oldSz + unmatchedCount);
+                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
+                        src->release(); g->release();
+                    } else {
+                        vec.resize(vec.size() + unmatchedCount, 0);
+                    }
+                }
+            }
+        }
+        for (auto& [name, vec] : outCtx.f32Cols) {
+            if (!vec.empty()) {
+                if (outCtx.f32ColsGPU.count(name)) {
+                    vec.resize(totalCount);
+                    std::memcpy(vec.data(), outCtx.f32ColsGPU.at(name)->contents(), totalCount * sizeof(float));
+                } else {
+                    std::string srcName = name;
+                    for (const auto& [origName, mappedName] : rightColumnMapping) {
+                        if (mappedName == name) { srcName = origName; break; }
+                    }
+                    MTL::Buffer* rightGpu = nullptr;
+                    if (rightCtx.f32ColsGPU.count(srcName)) rightGpu = rightCtx.f32ColsGPU.at(srcName);
+                    if (rightGpu) {
+                        MTL::Buffer* g = GpuOps::gatherF32(rightGpu, unmatchedBuf, unmatchedCount, false);
+                        size_t oldSz = vec.size();
+                        vec.resize(oldSz + unmatchedCount);
+                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
+                        g->release();
+                    } else if (rightCtx.f32Cols.count(srcName)) {
+                        const auto& rightVec = rightCtx.f32Cols.at(srcName);
+                        MTL::Buffer* src = store.device()->newBuffer(rightVec.data(), rightVec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                        MTL::Buffer* g = GpuOps::gatherF32(src, unmatchedBuf, unmatchedCount, false);
+                        size_t oldSz = vec.size();
+                        vec.resize(oldSz + unmatchedCount);
+                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
+                        src->release(); g->release();
+                    } else {
+                        vec.resize(vec.size() + unmatchedCount, 0.0f);
+                    }
+                }
+            }
+        }
+
+        outCtx.rowCount = totalCount;
+        resCount = totalCount;
+        // Dict IDs already updated with unmatched rows above
+        if (debug) std::cerr << "[Exec] Right Join: total output rows = " << totalCount << "\n";
+    }
+}
+
+static void applyPostJoinFilter(
+    const TypedExprPtr& postJoinFilter,
+    const EvalContext& leftCtx, const EvalContext& rightCtx,
+    const std::unordered_map<std::string, std::string>& rightColumnMapping,
+    EvalContext& outCtx, bool debug
+) {
+    if (debug) {
+        std::cerr << "[Exec] Join: applying post-join filter, current rows=" << outCtx.rowCount << "\n";
+    }
+
+    // Rewrite column references in the residual filter to resolve to actual outCtx columns.
+    // When a condition like "l_suppkey != l_suppkey" appears, both sides have the same name
+    // but refer to columns from different contexts (left vs right).
+    // After join, outCtx may have e.g. l_suppkey_2 (from left) and l_suppkey (from right).
+    // We resolve by finding which actual column in leftCtx/rightCtx matches the base name.
+
+    // Helper: find a column in a context matching a base name (with possible instance suffix)
+    auto findColInCtx = [](const EvalContext& ctx, const std::string& baseName) -> std::string {
+        // Exact match first
+        if (ctx.u32Cols.count(baseName) || ctx.f32Cols.count(baseName)) return baseName;
+        if (ctx.stringCols.count(baseName)) return baseName;
+        // Try instance-suffixed versions (e.g., l_suppkey_1, l_suppkey_2, ...)
+        for (const auto& [name, _] : ctx.u32Cols) {
+            auto pos = name.rfind('_');
+            if (pos != std::string::npos) {
+                std::string suffix = name.substr(pos + 1);
+                bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
+                if (allDigits && name.substr(0, pos) == baseName) return name;
+            }
+        }
+        for (const auto& [name, _] : ctx.f32Cols) {
+            auto pos = name.rfind('_');
+            if (pos != std::string::npos) {
+                std::string suffix = name.substr(pos + 1);
+                bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
+                if (allDigits && name.substr(0, pos) == baseName) return name;
+            }
+        }
+        return "";
+    };
+
+    std::function<TypedExprPtr(const TypedExprPtr&)> rewriteResidualCols;
+    rewriteResidualCols = [&](const TypedExprPtr& expr) -> TypedExprPtr {
+        if (!expr) return expr;
+        if (expr->kind == TypedExpr::Kind::Compare) {
+            auto& cmp = expr->asCompare();
+            bool bothCols = (cmp.left && cmp.right &&
+                             cmp.left->kind == TypedExpr::Kind::Column &&
+                             cmp.right->kind == TypedExpr::Kind::Column);
+            if (bothCols) {
+                const std::string& lName = cmp.left->asColumn().column;
+                const std::string& rName = cmp.right->asColumn().column;
+
+                // Find actual column names in left/right contexts
+                std::string leftActual = findColInCtx(leftCtx, lName);
+                std::string rightActual = findColInCtx(rightCtx, rName);
+
+                // Map right-side column through rightColumnMapping (rename after join)
+                std::string rightInOut = rightActual;
+                if (!rightActual.empty() && rightColumnMapping.count(rightActual)) {
+                    rightInOut = rightColumnMapping.at(rightActual);
+                }
+
+                // Use the actual names if we found them
+                std::string newLName = !leftActual.empty() ? leftActual : lName;
+                std::string newRName = !rightInOut.empty() ? rightInOut : rName;
+
+                if (newLName != lName || newRName != rName) {
+                    if (debug) {
+                        std::cerr << "[Exec] Join: rewrote residual col: " 
+                                  << lName << " -> " << newLName << ", "
+                                  << rName << " -> " << newRName << "\n";
+                    }
+                    return TypedExpr::compare(cmp.op, 
+                                              TypedExpr::column(newLName), 
+                                              TypedExpr::column(newRName));
+                }
+            }
+            return expr;
+        }
+        if (expr->kind == TypedExpr::Kind::Binary) {
+            auto& bin = expr->asBinary();
+            auto newLeft = rewriteResidualCols(bin.left);
+            auto newRight = rewriteResidualCols(bin.right);
+            if (newLeft != bin.left || newRight != bin.right) {
+                return TypedExpr::binary(bin.op, newLeft, newRight);
+            }
+            return expr;
+        }
+        return expr;
+    };
+
+    TypedExprPtr rewrittenFilter = rewriteResidualCols(postJoinFilter);
+    if (debug && rewrittenFilter != postJoinFilter) {
+        std::cerr << "[Exec] Join: rewrote post-join filter column references\n";
+    }
+
+    // Upload CPU columns to GPU for filtering (they were gathered from join)
+    for (const auto& [name, vec] : outCtx.u32Cols) {
+        if (!vec.empty() && outCtx.u32ColsGPU.find(name) == outCtx.u32ColsGPU.end()) {
+            MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
+            if (buf) outCtx.u32ColsGPU[name].reset(buf);
+        }
+    }
+    for (const auto& [name, vec] : outCtx.f32Cols) {
+        if (!vec.empty() && outCtx.f32ColsGPU.find(name) == outCtx.f32ColsGPU.end()) {
+            MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
+            if (buf) outCtx.f32ColsGPU[name].reset(buf);
+        }
+    }
+
+    // Use the regular filter infrastructure
+    IRFilter postFilter{rewrittenFilter, ""};
+    bool filterOk = GpuExecutor::executeFilter(postFilter, outCtx);
+    if (debug) {
+        std::cerr << "[Exec] Join: post-join filter " << (filterOk?"ok":"failed") 
+                  << ", rows after=" << outCtx.rowCount << "\n";
+    }
+}
+
+// -- Extracted: ensureColumnOnGPU --
+// Uploads a u32 column to GPU, compacting via activeRows gather if needed.
+static MTL::Buffer* ensureColumnOnGPU(EvalContext& ctx, const std::string& col, bool debug) {
+    auto& store = GpuColumnStore::instance();
+    uint32_t expectedSize = ctx.activeRowsGPU ? ctx.activeRowsCountGPU : (uint32_t)ctx.rowCount;
+    if (ctx.u32ColsGPU.count(col)) {
+        MTL::Buffer* existing = ctx.u32ColsGPU.at(col);
+        if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 &&
+            existing->length() / sizeof(uint32_t) > expectedSize) {
+            if (debug) std::cerr << "[Exec] ensureGPU: compacting GPU buf " << col << " from " << (existing->length()/sizeof(uint32_t)) << " to " << expectedSize << "\n";
+            auto compactedBuf = GpuOps::gatherU32(existing, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
+            if (compactedBuf) {
+                if (debug) {
+                    uint32_t* p = (uint32_t*)compactedBuf->contents();
+                    std::cerr << "[Exec] ensureGPU: compacted " << col << " first 5:";
+                    for (uint32_t i = 0; i < std::min(expectedSize, 5u); i++) std::cerr << " " << p[i];
+                    if (debug) std::cerr << "\n";
+                }
+                ctx.u32ColsGPU[col].reset(compactedBuf);
+                return compactedBuf;
+            }
+        }
+        return existing;
+    }
+    if (ctx.u32Cols.count(col)) {
+         const auto& vec = ctx.u32Cols.at(col);
+         if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && vec.size() > expectedSize) {
+             auto fullBuf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+             if (fullBuf) {
+                 auto compactedBuf = GpuOps::gatherU32(fullBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
+                 fullBuf->release();
+                 if (compactedBuf) {
+                     ctx.u32ColsGPU[col].reset(compactedBuf);
+                     return compactedBuf;
+                 }
+             }
+         }
+         auto buf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+         ctx.u32ColsGPU[col].reset(buf);
+         return buf;
+    }
+    return nullptr;
+}
+
+// -- Extracted: scatterJoinOutputColumns --
+// Gathers/scatters columns from left and right join contexts into the output context
+// using the probe/build index arrays from the join result.
+// Returns true on success (including the resCount==0 fast-path).
+static bool scatterJoinOutputColumns(
+    EvalContext&       leftCtx,
+    EvalContext&       rightCtx,
+    EvalContext&       outCtx,
+    const JoinResult&  jRes,
+    uint32_t           resCount,
+    uint32_t           lCount,
+    uint32_t           rCount,
+    bool               isAntiJoin,
+    bool               isSemiJoin,
+    bool               rightAntiGather,
+    std::unordered_map<std::string, std::string>& rightColumnMappingOut,
+    bool               debug)
+{
+    auto& store = GpuColumnStore::instance();
+    
+    outCtx.rowCount = resCount;
+    outCtx.activeRowsGPU = nullptr;
+    outCtx.activeRowsCountGPU = 0; // Materialized
+
+    // Collect LEFT column names (these are the "primary" names in the output)
+    std::unordered_set<std::string> leftColumnNames;
+    if (!rightAntiGather) {
+        for (const auto& [name, _] : leftCtx.u32Cols) leftColumnNames.insert(name);
+        for (const auto& [name, _] : leftCtx.f32Cols) leftColumnNames.insert(name);
+        for (const auto& [name, _] : leftCtx.stringCols) leftColumnNames.insert(name);
+        for (const auto& [name, _] : leftCtx.dictCols) leftColumnNames.insert(name);
+    }
+    
+    // Pre-compute the rename mapping for ALL right column names
+    std::unordered_set<std::string> rightColumnNames;
+    for (const auto& [name, _] : rightCtx.u32Cols) rightColumnNames.insert(name);
+    for (const auto& [name, _] : rightCtx.f32Cols) rightColumnNames.insert(name);
+    for (const auto& [name, _] : rightCtx.stringCols) rightColumnNames.insert(name);
+    for (const auto& [name, _] : rightCtx.dictCols) rightColumnNames.insert(name);
+    
+    // Map from original right column name to output column name
+    auto& rightColumnMapping = rightColumnMappingOut;
+    rightColumnMapping.clear();
+    std::unordered_set<std::string> usedNames;
+    for (const auto& name : leftColumnNames) usedNames.insert(name);
+    
+    for (const auto& name : rightColumnNames) {
+        if (leftColumnNames.count(name) == 0) {
+            rightColumnMapping[name] = name;
+            usedNames.insert(name);
+        } else {
+            for (int suffix = 1; suffix <= 10; ++suffix) {
+                std::string newName = name + "_" + std::to_string(suffix);
+                if (usedNames.count(newName) == 0) {
+                    rightColumnMapping[name] = newName;
+                    usedNames.insert(newName);
+                    if (debug) {
+                        std::cerr << "[Exec] Join: Renaming duplicate column " << name << " -> " << newName << "\n";
+                    }
+                    break;
+                }
+            }
+            if (rightColumnMapping.count(name) == 0) {
+                std::string fallback = name + "_r";
+                rightColumnMapping[name] = fallback;
+                usedNames.insert(fallback);
+            }
+        }
+    }
+    
+    auto getRightColumnName = [&](const std::string& name) -> std::string {
+        auto it = rightColumnMapping.find(name);
+        if (it != rightColumnMapping.end()) return it->second;
+        return name;
+    };
+
+    if (resCount == 0) {
+        for (const auto& [name, _] : leftCtx.u32Cols) { 
+            outCtx.u32Cols[name] = {};
+        }
+        for (const auto& [name, _] : leftCtx.f32Cols) {
+            outCtx.f32Cols[name] = {};
+        }
+        for (const auto& [name, _] : leftCtx.stringCols) {
+            outCtx.stringCols[name] = {};
+        }
+        for (const auto& [name, dict] : leftCtx.dictCols) {
+            DictEncoded emptyDict;
+            emptyDict.dictionary = dict.dictionary;
+            emptyDict.rowCount = 0;
+            outCtx.dictCols[name] = std::move(emptyDict);
+        }
+        for (const auto& [name, _] : rightCtx.u32Cols) {
+            std::string outName = getRightColumnName(name);
+            outCtx.u32Cols[outName] = {};
+        }
+        for (const auto& [name, _] : rightCtx.f32Cols) {
+            std::string outName = getRightColumnName(name);
+            outCtx.f32Cols[outName] = {};
+        }
+        for (const auto& [name, _] : rightCtx.stringCols) {
+            std::string outName = getRightColumnName(name);
+            outCtx.stringCols[outName] = {};
+        }
+        for (const auto& [name, dict] : rightCtx.dictCols) {
+            std::string outName = getRightColumnName(name);
+            DictEncoded emptyDict;
+            emptyDict.dictionary = dict.dictionary;
+            emptyDict.rowCount = 0;
+            outCtx.dictCols[outName] = std::move(emptyDict);
+        }
+        return true;
+    }
+
+    // Gather Left Columns
+    if (!rightAntiGather) {
+    if (debug && jRes.probeIndices) {
+        uint32_t* probePtr = (uint32_t*)jRes.probeIndices->contents();
+        std::cerr << "[Exec] Join: probeIndices first 5: ";
+        for (uint32_t i = 0; i < std::min(5u, resCount); ++i) std::cerr << probePtr[i] << " ";
+        if (debug) std::cerr << "\n";
+    }
+    for (const auto& [name, valid] : leftCtx.u32Cols) {
+        if (debug) std::cerr << "[Exec] Join: gathering L_U32 " << name << " srcSize=" << valid.size() << "\n";
+        MTL::Buffer* src = ensureColumnOnGPU(leftCtx, name, debug);
+        if (src) {
+             MTL::Buffer* gathered = GpuOps::gatherU32(src, jRes.probeIndices, resCount, false);
+             outCtx.u32ColsGPU[name].reset(gathered);
+             outCtx.u32Cols[name].clear();
+        }
+    }
+    for (const auto& [name, valid] : leftCtx.f32Cols) {
+        if (debug) std::cerr << "[Exec] Join: gathering L_F32 " << name << " srcSize=" << valid.size() << "\n";
+        MTL::Buffer* src = nullptr;
+        if (leftCtx.f32ColsGPU.count(name)) src = leftCtx.f32ColsGPU.at(name);
+        else if (leftCtx.f32Cols.count(name)) {
+             const auto& vec = leftCtx.f32Cols.at(name);
+             src = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+             leftCtx.f32ColsGPU[name].reset(src);
+        }
+        
+        if (src) {
+             MTL::Buffer* gathered = GpuOps::gatherF32(src, jRes.probeIndices, resCount, false);
+             outCtx.f32ColsGPU[name].reset(gathered);
+             outCtx.f32Cols[name].clear();
+        }
+    }
+    } // end if (!rightAntiGather)
+    
+    // Gather Right Columns
+    if (rCount > 0 && !isSemiJoin && (!isAntiJoin || rightAntiGather)) {
+        for (const auto& [name, valid] : rightCtx.u32Cols) {
+            std::string outName = getRightColumnName(name);
+            if (debug) std::cerr << "[Exec] Join: gathering R_U32 " << name << " -> " << outName << "\n";
+            MTL::Buffer* src = ensureColumnOnGPU(rightCtx, name, debug);
+            if (src) {
+                 MTL::Buffer* gathered = GpuOps::gatherU32(src, jRes.buildIndices, resCount, false);
+                 outCtx.u32ColsGPU[outName].reset(gathered);
+                 outCtx.u32Cols[outName].clear();
+            }
+        }
+        for (const auto& [name, valid] : rightCtx.f32Cols) {
+            std::string outName = getRightColumnName(name);
+            if (debug) std::cerr << "[Exec] Join: gathering R_F32 " << name << " -> " << outName << "\n";
+            MTL::Buffer* src = nullptr;
+            if (rightCtx.f32ColsGPU.count(name)) src = rightCtx.f32ColsGPU.at(name);
+            else if (rightCtx.f32Cols.count(name)) {
+                 const auto& vec = rightCtx.f32Cols.at(name);
+                 src = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                 rightCtx.f32ColsGPU[name].reset(src);
+            }
+    
+            if (src) {
+                 MTL::Buffer* gathered = GpuOps::gatherF32(src, jRes.buildIndices, resCount, false);
+                 outCtx.f32ColsGPU[outName].reset(gathered);
+                 outCtx.f32Cols[outName].clear();
+            }
+        }
+    } else if (resCount > 0) {
+         for (const auto& [name, valid] : rightCtx.u32Cols) {
+             std::string outName = getRightColumnName(name);
+             MTL::Buffer* buf = store.device()->newBuffer(resCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+             std::memset(buf->contents(), 0, resCount * sizeof(uint32_t));
+             outCtx.u32ColsGPU[outName].reset(buf);
+             std::vector<uint32_t> cpuVec(resCount, 0);
+             outCtx.u32Cols[outName] = std::move(cpuVec);
+        }
+         for (const auto& [name, valid] : rightCtx.f32Cols) {
+             std::string outName = getRightColumnName(name);
+             MTL::Buffer* buf = store.device()->newBuffer(resCount * sizeof(float), MTL::ResourceStorageModeShared);
+             std::memset(buf->contents(), 0, resCount * sizeof(float));
+             outCtx.f32ColsGPU[outName].reset(buf);
+             std::vector<float> cpuVec(resCount, 0.0f);
+             outCtx.f32Cols[outName] = std::move(cpuVec);
+        }
+    }
+
+    // CPU Gather for String Columns (or GPU dict-id gather when available)
+    if (!leftCtx.stringCols.empty() || !rightCtx.stringCols.empty() ||
+        !leftCtx.dictCols.empty() || !rightCtx.dictCols.empty()) {
+        std::vector<uint32_t> cpuProbeIndices(resCount);
+        std::vector<uint32_t> cpuBuildIndices(resCount);
+        std::memcpy(cpuProbeIndices.data(), jRes.probeIndices->contents(), resCount * sizeof(uint32_t));
+        std::memcpy(cpuBuildIndices.data(), jRes.buildIndices->contents(), resCount * sizeof(uint32_t));
+        
+        auto parallelGather = [&](const std::vector<uint32_t>& indices, const std::vector<std::string>& srcVec, std::vector<std::string>& dstVec) {
+             dstVec.resize(resCount);
+             size_t numThreads = std::thread::hardware_concurrency();
+             if (numThreads == 0) numThreads = 4;
+             if (resCount < 10000) numThreads = 1;
+             size_t chunkSize = (resCount + numThreads - 1) / numThreads;
+             std::vector<std::future<void>> futures;
+             for (size_t t = 0; t < numThreads; ++t) {
+                 size_t start = t * chunkSize;
+                 size_t end = std::min(start + chunkSize, (size_t)resCount);
+                 if (start >= end) break;
+                 futures.push_back(std::async(std::launch::async, [&, start, end]() {
+                     for (size_t i = start; i < end; ++i) {
+                         uint32_t idx = indices[i];
+                         if (idx < srcVec.size()) dstVec[i] = srcVec[idx];
+                     }
+                 }));
+             }
+             for (auto& f : futures) f.wait();
+        };
+
+        auto dictGather = [&](const std::string& name, const EvalContext& srcCtx,
+                              MTL::Buffer* indexBuf, const std::string& outName) {
+            auto dictIt = srcCtx.dictCols.find(name);
+            if (dictIt == srcCtx.dictCols.end() || !dictIt->second.idsGPU) return false;
+            const auto& srcDict = dictIt->second;
+            MTL::Buffer* gatheredIds = GpuOps::gatherU32(srcDict.idsGPU, indexBuf, resCount, false);
+            if (!gatheredIds) return false;
+            DictEncoded outDict;
+            outDict.dictionary = srcDict.dictionary;
+            outDict.idsGPU.reset(gatheredIds);
+            outDict.rowCount = resCount;
+            outCtx.dictCols[outName] = std::move(outDict);
+            outCtx.stringCols.erase(outName);
+            outCtx.flatStringCols.erase(outName);
+            if (debug) std::cerr << "[Exec] Join: GPU dict gather " << name << " -> " << outName
+                                 << " (" << srcDict.dictionary.size() << " unique, " << resCount << " rows)\n";
+            return true;
+        };
+
+        auto flatGather = [&](const EvalContext& srcCtx, const std::string& name,
+                              MTL::Buffer* indexBuf, const std::string& outName) -> bool {
+            auto fit = srcCtx.flatStringCols.find(name);
+            if (fit == srcCtx.flatStringCols.end() || !fit->second.chars) return false;
+            auto& flat = fit->second;
+            auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
+                                               indexBuf, resCount, true);
+            if (!r.chars) return false;
+            FlatStringCol outFlat;
+            outFlat.chars.reset(r.chars); outFlat.offsets.reset(r.offsets); outFlat.lengths.reset(r.lengths);
+            outFlat.rowCount = r.rowCount; outFlat.totalBytes = r.totalBytes;
+            outCtx.flatStringCols[outName] = outFlat;
+            outCtx.stringCols.erase(outName);
+            if (debug) std::cerr << "[Exec] Join: GPU flat string gather " << name << " -> " << outName
+                                 << " (" << resCount << " rows, " << r.totalBytes << " bytes)\n";
+            return true;
+        };
+
+        for (const auto& [name, vec] : leftCtx.stringCols) {
+            if (rightAntiGather) continue;
+            if (dictGather(name, leftCtx, jRes.probeIndices, name)) continue;
+            if (flatGather(leftCtx, name, jRes.probeIndices, name)) continue;
+            if (debug) std::cerr << "[Exec] Join: gathering L_STR " << name << " srcSize=" << vec.size() << " resCount=" << resCount << "\n";
+            std::vector<std::string> newVec;
+            parallelGather(cpuProbeIndices, vec, newVec);
+            if (debug) std::cerr << "[Exec] Join: gathered L_STR " << name << " newVec.size=" << newVec.size() << "\n";
+            outCtx.stringCols[name] = std::move(newVec);
+        }
+        for (const auto& [name, vec] : rightCtx.stringCols) {
+             if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
+             std::string outName = getRightColumnName(name);
+             if (dictGather(name, rightCtx, jRes.buildIndices, outName)) continue;
+             if (flatGather(rightCtx, name, jRes.buildIndices, outName)) continue;
+             if (debug) std::cerr << "[Exec] Join: gathering R_STR " << name << " -> " << outName << " srcSize=" << vec.size() << " resCount=" << resCount << "\n";
+             std::vector<std::string> newVec;
+             parallelGather(cpuBuildIndices, vec, newVec);
+             if (debug) std::cerr << "[Exec] Join: gathered R_STR " << name << " newVec.size=" << newVec.size() << "\n";
+             outCtx.stringCols[outName] = std::move(newVec);
+        }
+        for (const auto& [name, dc] : leftCtx.dictCols) {
+            if (rightAntiGather) continue;
+            if (leftCtx.stringCols.count(name)) continue;
+            dictGather(name, leftCtx, jRes.probeIndices, name);
+        }
+        for (const auto& [name, dc] : rightCtx.dictCols) {
+            if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
+            if (rightCtx.stringCols.count(name)) continue;
+            std::string outName = getRightColumnName(name);
+            dictGather(name, rightCtx, jRes.buildIndices, outName);
+        }
+        for (const auto& [name, flat] : leftCtx.flatStringCols) {
+            if (rightAntiGather) continue;
+            if (leftCtx.stringCols.count(name) || leftCtx.dictCols.count(name)) continue;
+            flatGather(leftCtx, name, jRes.probeIndices, name);
+        }
+        for (const auto& [name, flat] : rightCtx.flatStringCols) {
+            if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
+            if (rightCtx.stringCols.count(name) || rightCtx.dictCols.count(name)) continue;
+            std::string outName = getRightColumnName(name);
+            flatGather(rightCtx, name, jRes.buildIndices, outName);
+        }
+    }
+    
+    GpuOps::sync(); // Ensure all async gathers complete
+    return false; // Not an early return — caller continues
+}
+
+bool GpuExecutor::executeJoin(const IRJoin& join,
                                    EvalContext& leftCtx, EvalContext& rightCtx, EvalContext& outCtx) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     
@@ -73,14 +1113,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         std::cerr << "[Exec] Join: type=" << static_cast<int>(join.type) 
                   << " isLeft=" << isLeftJoin << " isRight=" << isRightJoin 
                   << " isSemi=" << isSemiJoin << " isAnti=" << isAntiJoin << "\n";
-        std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, "
+        if (debug) std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, "
                   << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows";
-        for (const auto& [k, v] : leftCtx.u32Cols) std::cerr << " " << k;
-        std::cerr << "\n";
-        std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
+        if (debug) for (const auto& [k, v] : leftCtx.u32Cols) std::cerr << " " << k;
+        if (debug) std::cerr << "\n";
+        if (debug) std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
                   << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows";
-        for (const auto& [k, v] : rightCtx.u32Cols) std::cerr << " " << k;
-        std::cerr << "\n";
+        if (debug) for (const auto& [k, v] : rightCtx.u32Cols) std::cerr << " " << k;
+        if (debug) std::cerr << "\n";
     }
     
     // Extract all join key pairs from the condition
@@ -193,14 +1233,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         for (const auto& [l, r] : keyPairs) {
             std::cerr << "[Exec] Join:   " << l << " = " << r << std::endl;
         }
-        std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, " 
+        if (debug) std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, " 
                   << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows";
-        for (const auto& [n,_] : leftCtx.u32Cols) std::cerr << " " << n;
-        std::cerr << std::endl;
-        std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
+        if (debug) for (const auto& [n,_] : leftCtx.u32Cols) std::cerr << " " << n;
+        if (debug) std::cerr << std::endl;
+        if (debug) std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
                   << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows";
-        for (const auto& [n,_] : rightCtx.u32Cols) std::cerr << " " << n;
-        std::cerr << std::endl;
+        if (debug) for (const auto& [n,_] : rightCtx.u32Cols) std::cerr << " " << n;
+        if (debug) std::cerr << std::endl;
     }
     
     // Helper to find column with suffix fallback for multi-instance tables
@@ -396,210 +1436,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
 
     auto& store = GpuColumnStore::instance();
     
+    // ensureGPU is now the static function ensureColumnOnGPU (extracted above)
     auto ensureGPU = [&](EvalContext& ctx, const std::string& col) -> MTL::Buffer* {
-        uint32_t expectedSize = ctx.activeRowsGPU ? ctx.activeRowsCountGPU : (uint32_t)ctx.rowCount;
-        if (ctx.u32ColsGPU.count(col)) {
-            MTL::Buffer* existing = ctx.u32ColsGPU.at(col);
-            // If the existing GPU buffer is larger than expected (uncompacted),
-            // apply activeRowsGPU gather to produce a compacted buffer.
-            if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 &&
-                existing->length() / sizeof(uint32_t) > expectedSize) {
-                if (debug) std::cerr << "[Exec] ensureGPU: compacting GPU buf " << col << " from " << (existing->length()/sizeof(uint32_t)) << " to " << expectedSize << "\n";
-                auto compactedBuf = GpuOps::gatherU32(existing, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
-                if (compactedBuf) {
-                    if (debug) {
-                        uint32_t* p = (uint32_t*)compactedBuf->contents();
-                        std::cerr << "[Exec] ensureGPU: compacted " << col << " first 5:";
-                        for (uint32_t i = 0; i < std::min(expectedSize, 5u); i++) std::cerr << " " << p[i];
-                        std::cerr << "\n";
-                    }
-                    ctx.u32ColsGPU[col].reset(compactedBuf);
-                    return compactedBuf;
-                }
-            }
-            return existing;
-        }
-        if (ctx.u32Cols.count(col)) {
-             const auto& vec = ctx.u32Cols.at(col);
-             // If activeRowsGPU is set and CPU vector is larger than expected,
-             // compact the column via GPU gather so indices are consistent.
-             if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && vec.size() > expectedSize) {
-                 auto fullBuf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                 if (fullBuf) {
-                     auto compactedBuf = GpuOps::gatherU32(fullBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
-                     fullBuf->release();
-                     if (compactedBuf) {
-                         ctx.u32ColsGPU[col].reset(compactedBuf);
-                         return compactedBuf;
-                     }
-                 }
-             }
-             auto buf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-             ctx.u32ColsGPU[col].reset(buf);
-             return buf;
-        }
-        return nullptr;
+        return ensureColumnOnGPU(ctx, col, debug);
     };
     
     // --- Materialize contexts before join (compact to dense form) ---
-    auto materializeCtx = [&](EvalContext& ctx, const char* label) {
-        if (!ctx.activeRowsGPU) return;  // No filter applied — nothing to materialize
-        uint32_t count = ctx.activeRowsCountGPU;
-        if (debug) std::cerr << "[Exec] Join: materializing " << label 
-                             << " ctx (" << count << " active rows from " << ctx.rowCount << ")\n";
-        // If the filter matched 0 rows, clear everything and set rowCount=0
-        if (count == 0) {
-            for (auto& [name, vec] : ctx.u32Cols) vec.clear();
-            for (auto& [name, vec] : ctx.f32Cols) vec.clear();
-            for (auto& [name, vec] : ctx.stringCols) vec.clear();
-            ctx.u32ColsGPU.clear();
-            ctx.f32ColsGPU.clear();
-            ctx.activeRowsGPU = nullptr;
-            ctx.activeRowsCountGPU = 0;
-            ctx.activeRows.clear();
-            ctx.rowCount = 0;
-            return;
-        }
-        
-        // Compact GPU u32 columns (async — no per-column sync)
-        for (auto& [name, buf] : ctx.u32ColsGPU) {
-            if (!buf) continue;
-            uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
-            if (bufRows > count) {
-                MTL::Buffer* compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count, false);
-                if (compacted) {
-                    buf.reset(compacted);
-                }
-            }
-        }
-        // Compact GPU f32 columns (async — no per-column sync)
-        for (auto& [name, buf] : ctx.f32ColsGPU) {
-            if (!buf) continue;
-            uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
-            if (bufRows > count) {
-                MTL::Buffer* compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, count, false);
-                if (compacted) {
-                    buf.reset(compacted);
-                }
-            }
-        }
-        // GPU-native dict compaction: gather dict IDs on GPU (async)
-        for (auto& [name, dict] : ctx.dictCols) {
-            if (dict.idsGPU) {
-                uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
-                if (bufRows > count) {
-                    MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, false);
-                    if (compacted) {
-                        dict.idsGPU.reset(compacted);
-                        dict.rowCount = count;
-                        dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
-                    }
-                }
-            } else if (dict.ids.size() > count) {
-                // CPU-only fallback (no GPU buffer) — needs sync first
-                GpuOps::sync();
-                uint32_t* indices2 = (uint32_t*)ctx.activeRowsGPU->contents();
-                std::vector<uint32_t> c;
-                c.reserve(count);
-                for (uint32_t i = 0; i < count; ++i)
-                    c.push_back(indices2[i] < (uint32_t)dict.ids.size() ? dict.ids[indices2[i]] : 0u);
-                dict.ids = std::move(c);
-                dict.rowCount = count;
-            }
-        }
-        // Sync all async GPU gathers before reading results on CPU
-        GpuOps::sync();
-        {
-            auto& s = GpuColumnStore::instance();
-            for (auto& [name, vec] : ctx.u32Cols) {
-                if (vec.size() > count) {
-                    auto itGpu = ctx.u32ColsGPU.find(name);
-                    if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
-                        // GPU buffer already compacted above — sync CPU from it (zero-cost on unified mem)
-                        vec.resize(count);
-                        std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(uint32_t));
-                    } else {
-                        MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
-                        vec.resize(count);
-                        std::memcpy(vec.data(), dst->contents(), count * sizeof(uint32_t));
-                        src->release(); dst->release();
-                    }
-                }
-            }
-            // Compact CPU f32 columns via GPU gather
-            for (auto& [name, vec] : ctx.f32Cols) {
-                if (vec.size() > count) {
-                    auto itGpu = ctx.f32ColsGPU.find(name);
-                    if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
-                        vec.resize(count);
-                        std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(float));
-                    } else {
-                        MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
-                        vec.resize(count);
-                        std::memcpy(vec.data(), dst->contents(), count * sizeof(float));
-                        src->release(); dst->release();
-                    }
-                }
-            }
-        }
-        // Compact CPU string columns: prefer invalidation if dictCol exists, else GPU/CPU gather
-        {
-            for (auto& [name, vec] : ctx.stringCols) {
-                if (ctx.dictCols.count(name) && ctx.dictCols[name].valid()) {
-                    vec.clear();  // Will be rebuilt from dict on demand
-                } else if (vec.size() > count) {
-                    // Try GPU gather via flatStringCols
-                    auto fit = ctx.flatStringCols.find(name);
-                    if (fit != ctx.flatStringCols.end() && fit->second.chars && ctx.activeRowsGPU) {
-                        auto r = GpuOps::gatherFlatString(
-                            fit->second.chars, fit->second.offsets, fit->second.lengths,
-                            ctx.activeRowsGPU, count, true);
-                        if (r.chars) {
-                            const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
-                            const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
-                            const char* ch = static_cast<const char*>(r.chars->contents());
-                            vec.resize(count);
-                            for (uint32_t i = 0; i < count; ++i) vec[i].assign(ch + offs[i], lens[i]);
-                            // Update flatStringCols to compacted version
-                            fit->second.takeFrom(r.chars, r.offsets, r.lengths,
-                                                 r.rowCount, r.totalBytes);
-                            continue;
-                        }
-                    }
-                    // CPU fallback
-                    uint32_t* indices = (uint32_t*)ctx.activeRowsGPU->contents();
-                    std::vector<std::string> c;
-                    c.reserve(count);
-                    for (uint32_t i = 0; i < count; ++i)
-                        c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : std::string());
-                    vec = std::move(c);
-                }
-            }
-        }
-        // Compact flatStringCols that don't have matching stringCols (handled above)
-        if (ctx.activeRowsGPU) {
-            for (auto& [name, flat] : ctx.flatStringCols) {
-                if (!ctx.stringCols.count(name) && flat.chars && flat.rowCount > count) {
-                    auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
-                                                       ctx.activeRowsGPU, count, true);
-                    if (r.chars) {
-                        flat.takeFrom(r.chars, r.offsets, r.lengths,
-                                      r.rowCount, r.totalBytes);
-                    }
-                }
-            }
-        }
-        // Clear selection vector — data is now dense
-        ctx.activeRowsGPU = nullptr;
-        ctx.activeRowsCountGPU = 0;
-        ctx.activeRows.clear();
-        ctx.rowCount = count;
-    };
-    
-    materializeCtx(leftCtx, "left");
-    materializeCtx(rightCtx, "right");
+    materializeJoinContext(leftCtx, "left", debug);
+    materializeJoinContext(rightCtx, "right", debug);
     
     uint32_t rCount = (uint32_t)rightCtx.rowCount;
     uint32_t lCount = (uint32_t)leftCtx.rowCount;
@@ -674,14 +1518,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         
         // Multi-match hash join; right=build, left=probe.
         
-        if (!isCrossJoin && debug) std::cerr << "[Exec] GPU Join: Build (" << rCount << "), Probe (" << lCount << ")\n";
+        if (debug) if (!isCrossJoin && debug) std::cerr << "[Exec] GPU Join: Build (" << rCount << "), Probe (" << lCount << ")\n";
         if (debug) {
             std::cerr << "[Exec] GPU Join: leftCtx.activeRowsGPU=" << (leftCtx.activeRowsGPU ? "SET" : "NULL") << " rightCtx.activeRowsGPU=" << (rightCtx.activeRowsGPU ? "SET" : "NULL") << "\n";
             if (leftCtx.activeRowsGPU) {
                 uint32_t* leftIndices = (uint32_t*)leftCtx.activeRowsGPU->contents();
-                std::cerr << "[Exec] GPU Join: leftActiveIndices first 5: ";
-                for (uint32_t i = 0; i < std::min(5u, leftCtx.activeRowsCountGPU); ++i) std::cerr << leftIndices[i] << " ";
-                std::cerr << "\n";
+                if (debug) std::cerr << "[Exec] GPU Join: leftActiveIndices first 5: ";
+                if (debug) for (uint32_t i = 0; i < std::min(5u, leftCtx.activeRowsCountGPU); ++i) std::cerr << leftIndices[i] << " ";
+                if (debug) std::cerr << "\n";
             }
         }
         
@@ -848,337 +1692,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
     // RIGHT ANTI: Only gather from right side (the build side)
     bool rightAntiGather = (isAntiJoin && join.rightVariant);
     
-    outCtx.rowCount = resCount;
-    outCtx.activeRowsGPU = nullptr;
-    outCtx.activeRowsCountGPU = 0; // Materialized
-
-    // Collect LEFT column names (these are the "primary" names in the output)
-    // We only rename RIGHT columns if they would collide with LEFT column names
-    // For RIGHT ANTI: left columns are not gathered, so no collision possible
-    std::unordered_set<std::string> leftColumnNames;
-    if (!rightAntiGather) {
-        for (const auto& [name, _] : leftCtx.u32Cols) leftColumnNames.insert(name);
-        for (const auto& [name, _] : leftCtx.f32Cols) leftColumnNames.insert(name);
-        for (const auto& [name, _] : leftCtx.stringCols) leftColumnNames.insert(name);
-        for (const auto& [name, _] : leftCtx.dictCols) leftColumnNames.insert(name);
-    }
-    
-    // Pre-compute the rename mapping for ALL right column names
-    // This ensures U32 hash and string versions of the same column get the same output name
-    std::unordered_set<std::string> rightColumnNames;
-    for (const auto& [name, _] : rightCtx.u32Cols) rightColumnNames.insert(name);
-    for (const auto& [name, _] : rightCtx.f32Cols) rightColumnNames.insert(name);
-    for (const auto& [name, _] : rightCtx.stringCols) rightColumnNames.insert(name);
-    for (const auto& [name, _] : rightCtx.dictCols) rightColumnNames.insert(name);
-    
-    // Map from original right column name to output column name
+    // Scatter/gather all columns into output context
     std::unordered_map<std::string, std::string> rightColumnMapping;
-    std::unordered_set<std::string> usedNames;
-    for (const auto& name : leftColumnNames) usedNames.insert(name);
-    
-    for (const auto& name : rightColumnNames) {
-        if (leftColumnNames.count(name) == 0) {
-            // No collision - use original name
-            rightColumnMapping[name] = name;
-            usedNames.insert(name);
-        } else {
-            // Collision - find a unique suffix
-            for (int suffix = 1; suffix <= 10; ++suffix) {
-                std::string newName = name + "_" + std::to_string(suffix);
-                if (usedNames.count(newName) == 0) {
-                    rightColumnMapping[name] = newName;
-                    usedNames.insert(newName);
-                    if (debug) {
-                        std::cerr << "[Exec] Join: Renaming duplicate column " << name << " -> " << newName << "\n";
-                    }
-                    break;
-                }
-            }
-            // Fallback if all suffixes taken
-            if (rightColumnMapping.count(name) == 0) {
-                std::string fallback = name + "_r";
-                rightColumnMapping[name] = fallback;
-                usedNames.insert(fallback);
-            }
-        }
-    }
-    
-    // Helper: Get output name for right column using the pre-computed mapping
-    auto getRightColumnName = [&](const std::string& name) -> std::string {
-        auto it = rightColumnMapping.find(name);
-        if (it != rightColumnMapping.end()) {
-            return it->second;
-        }
-        return name; // Shouldn't happen
-    };
-
-    if (resCount == 0) {
-        // Left columns - use name as-is
-        for (const auto& [name, _] : leftCtx.u32Cols) { 
-            outCtx.u32Cols[name] = {};
-        }
-        for (const auto& [name, _] : leftCtx.f32Cols) {
-            outCtx.f32Cols[name] = {};
-        }
-        for (const auto& [name, _] : leftCtx.stringCols) {
-            outCtx.stringCols[name] = {};
-        }
-        for (const auto& [name, dict] : leftCtx.dictCols) {
-            DictEncoded emptyDict;
-            emptyDict.dictionary = dict.dictionary;
-            emptyDict.rowCount = 0;
-            outCtx.dictCols[name] = std::move(emptyDict);
-        }
-        // Right columns - rename only if collision
-        for (const auto& [name, _] : rightCtx.u32Cols) {
-            std::string outName = getRightColumnName(name);
-            outCtx.u32Cols[outName] = {};
-        }
-        for (const auto& [name, _] : rightCtx.f32Cols) {
-            std::string outName = getRightColumnName(name);
-            outCtx.f32Cols[outName] = {};
-        }
-        for (const auto& [name, _] : rightCtx.stringCols) {
-            std::string outName = getRightColumnName(name);
-            outCtx.stringCols[outName] = {};
-        }
-        for (const auto& [name, dict] : rightCtx.dictCols) {
-            std::string outName = getRightColumnName(name);
-            DictEncoded emptyDict;
-            emptyDict.dictionary = dict.dictionary;
-            emptyDict.rowCount = 0;
-            outCtx.dictCols[outName] = std::move(emptyDict);
-        }
-        return true;
-    }
-
-    // Gather Left Columns - use names as-is (they're the "primary" columns)
-    // Skip for RIGHT ANTI - we only keep right side rows
-    if (!rightAntiGather) {
-    if (debug && jRes.probeIndices) {
-        uint32_t* probePtr = (uint32_t*)jRes.probeIndices->contents();
-        std::cerr << "[Exec] Join: probeIndices first 5: ";
-        for (uint32_t i = 0; i < std::min(5u, resCount); ++i) std::cerr << probePtr[i] << " ";
-        std::cerr << "\n";
-    }
-    for (const auto& [name, valid] : leftCtx.u32Cols) {
-        if (debug) std::cerr << "[Exec] Join: gathering L_U32 " << name << " srcSize=" << valid.size() << "\n";
-        MTL::Buffer* src = ensureGPU(leftCtx, name);
-        if (src) {
-             MTL::Buffer* gathered = GpuOps::gatherU32(src, jRes.probeIndices, resCount, false);
-             outCtx.u32ColsGPU[name].reset(gathered);
-             outCtx.u32Cols[name].clear(); // Mark CPU side as invalid
-        }
-    }
-    for (const auto& [name, valid] : leftCtx.f32Cols) {
-        if (debug) std::cerr << "[Exec] Join: gathering L_F32 " << name << " srcSize=" << valid.size() << "\n";
-        MTL::Buffer* src = nullptr;
-        if (leftCtx.f32ColsGPU.count(name)) src = leftCtx.f32ColsGPU.at(name);
-        else if (leftCtx.f32Cols.count(name)) {
-             const auto& vec = leftCtx.f32Cols.at(name);
-             src = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-             leftCtx.f32ColsGPU[name].reset(src);
-        }
-        
-        if (src) {
-             MTL::Buffer* gathered = GpuOps::gatherF32(src, jRes.probeIndices, resCount, false);
-             outCtx.f32ColsGPU[name].reset(gathered);
-             outCtx.f32Cols[name].clear();
-        }
-    }
-    } // end if (!rightAntiGather)
-    
-    // Gather Right Columns - rename only if collision with left
-    // For RIGHT ANTI: use original names (no left columns in output)
-    // Skip for SEMI and LEFT ANTI: buildIndices are placeholders (all zeros)
-    // Allow for RIGHT ANTI: buildIndices has real indices from hashJoinAntiU32
-    if (rCount > 0 && !isSemiJoin && (!isAntiJoin || rightAntiGather)) {
-        for (const auto& [name, valid] : rightCtx.u32Cols) {
-            std::string outName = getRightColumnName(name);
-            if (debug) std::cerr << "[Exec] Join: gathering R_U32 " << name << " -> " << outName << "\n";
-            MTL::Buffer* src = ensureGPU(rightCtx, name);
-            if (src) {
-                 MTL::Buffer* gathered = GpuOps::gatherU32(src, jRes.buildIndices, resCount, false);
-                 outCtx.u32ColsGPU[outName].reset(gathered);
-                 outCtx.u32Cols[outName].clear();
-            }
-        }
-        for (const auto& [name, valid] : rightCtx.f32Cols) {
-            std::string outName = getRightColumnName(name);
-            if (debug) std::cerr << "[Exec] Join: gathering R_F32 " << name << " -> " << outName << "\n";
-            MTL::Buffer* src = nullptr;
-            if (rightCtx.f32ColsGPU.count(name)) src = rightCtx.f32ColsGPU.at(name);
-            else if (rightCtx.f32Cols.count(name)) {
-                 const auto& vec = rightCtx.f32Cols.at(name);
-                 src = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                 rightCtx.f32ColsGPU[name].reset(src);
-            }
-    
-            if (src) {
-                 MTL::Buffer* gathered = GpuOps::gatherF32(src, jRes.buildIndices, resCount, false);
-                 outCtx.f32ColsGPU[outName].reset(gathered);
-                 outCtx.f32Cols[outName].clear();
-            }
-        }
-    } else if (resCount > 0) {
-         // Empty Build Side (Anti/Left Join) - Fill Right Columns with Default (0/Null)
-         for (const auto& [name, valid] : rightCtx.u32Cols) {
-             std::string outName = getRightColumnName(name);
-             MTL::Buffer* buf = store.device()->newBuffer(resCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-             std::memset(buf->contents(), 0, resCount * sizeof(uint32_t));
-             outCtx.u32ColsGPU[outName].reset(buf);
-             std::vector<uint32_t> cpuVec(resCount, 0);
-             outCtx.u32Cols[outName] = std::move(cpuVec);
-        }
-         for (const auto& [name, valid] : rightCtx.f32Cols) {
-             std::string outName = getRightColumnName(name);
-             MTL::Buffer* buf = store.device()->newBuffer(resCount * sizeof(float), MTL::ResourceStorageModeShared);
-             std::memset(buf->contents(), 0, resCount * sizeof(float));
-             outCtx.f32ColsGPU[outName].reset(buf);
-             std::vector<float> cpuVec(resCount, 0.0f);
-             outCtx.f32Cols[outName] = std::move(cpuVec);
-        }
-    }
-
-    // CPU Gather for String Columns (or GPU dict-id gather when available)
-    if (!leftCtx.stringCols.empty() || !rightCtx.stringCols.empty() ||
-        !leftCtx.dictCols.empty() || !rightCtx.dictCols.empty()) {
-        std::vector<uint32_t> cpuProbeIndices(resCount);
-        std::vector<uint32_t> cpuBuildIndices(resCount);
-        // Copy back
-        std::memcpy(cpuProbeIndices.data(), jRes.probeIndices->contents(), resCount * sizeof(uint32_t));
-        std::memcpy(cpuBuildIndices.data(), jRes.buildIndices->contents(), resCount * sizeof(uint32_t));
-        
-        // Helper for parallel string gather (fallback when dict not available)
-        auto parallelGather = [&](const std::vector<uint32_t>& indices, const std::vector<std::string>& srcVec, std::vector<std::string>& dstVec) {
-             dstVec.resize(resCount); // Default construct empty strings
-             
-             size_t numThreads = std::thread::hardware_concurrency();
-             if (numThreads == 0) numThreads = 4;
-             // Don't spawn threads for small data to avoid overhead
-             if (resCount < 10000) numThreads = 1;
-             
-             size_t chunkSize = (resCount + numThreads - 1) / numThreads;
-             std::vector<std::future<void>> futures;
-             
-             for (size_t t = 0; t < numThreads; ++t) {
-                 size_t start = t * chunkSize;
-                 size_t end = std::min(start + chunkSize, (size_t)resCount);
-                 if (start >= end) break;
-                 
-                 futures.push_back(std::async(std::launch::async, [&, start, end]() {
-                     for (size_t i = start; i < end; ++i) {
-                         uint32_t idx = indices[i];
-                         if (idx < srcVec.size()) dstVec[i] = srcVec[idx];
-                     }
-                 }));
-             }
-             for (auto& f : futures) f.wait();
-        };
-
-        // Helper: gather string column via GPU dict ID gather (stringCols materialized lazily)
-        auto dictGather = [&](const std::string& name, const EvalContext& srcCtx,
-                              MTL::Buffer* indexBuf, const std::string& outName) {
-            auto dictIt = srcCtx.dictCols.find(name);
-            if (dictIt == srcCtx.dictCols.end() || !dictIt->second.idsGPU) return false;
-
-            const auto& srcDict = dictIt->second;
-            // GPU gather dict IDs (async — sync happens in overall gather loop)
-            MTL::Buffer* gatheredIds = GpuOps::gatherU32(srcDict.idsGPU, indexBuf, resCount, false);
-            if (!gatheredIds) return false;
-
-            // Propagate dict to outCtx (stringCols NOT rebuilt — lazy materialization)
-            DictEncoded outDict;
-            outDict.dictionary = srcDict.dictionary;
-            outDict.idsGPU.reset(gatheredIds); // takes ownership of GPU buffer
-            outDict.rowCount = resCount;
-            outCtx.dictCols[outName] = std::move(outDict);
-
-            // Invalidate stale stringCols/flatStringCols for this column
-            outCtx.stringCols.erase(outName);
-            outCtx.flatStringCols.erase(outName);
-
-            if (debug) std::cerr << "[Exec] Join: GPU dict gather " << name << " -> " << outName
-                                 << " (" << srcDict.dictionary.size() << " unique, " << resCount << " rows)\n";
-            return true;
-        };
-
-        // Helper: GPU gather for FlatStringCol (lazy — no CPU materialization)
-        auto flatGather = [&](const EvalContext& srcCtx, const std::string& name,
-                              MTL::Buffer* indexBuf, const std::string& outName) -> bool {
-            auto fit = srcCtx.flatStringCols.find(name);
-            if (fit == srcCtx.flatStringCols.end() || !fit->second.chars) return false;
-            auto& flat = fit->second;
-            auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
-                                               indexBuf, resCount, true);
-            if (!r.chars) return false;
-            // Store compacted FlatStringCol in outCtx (stringCols materialized lazily via ensureStringCol)
-            FlatStringCol outFlat;
-            outFlat.chars.reset(r.chars); outFlat.offsets.reset(r.offsets); outFlat.lengths.reset(r.lengths);
-            outFlat.rowCount = r.rowCount; outFlat.totalBytes = r.totalBytes;
-            outCtx.flatStringCols[outName] = outFlat;
-            // Erase any stale stringCols — will be rebuilt on demand
-            outCtx.stringCols.erase(outName);
-            if (debug) std::cerr << "[Exec] Join: GPU flat string gather " << name << " -> " << outName
-                                 << " (" << resCount << " rows, " << r.totalBytes << " bytes)\n";
-            return true;
-        };
-
-        for (const auto& [name, vec] : leftCtx.stringCols) {
-            if (rightAntiGather) continue; // Skip left columns for RIGHT ANTI
-            // Try GPU dict gather first
-            if (dictGather(name, leftCtx, jRes.probeIndices, name)) continue;
-            // Try GPU flat string gather
-            if (flatGather(leftCtx, name, jRes.probeIndices, name)) continue;
-            // Fallback: CPU string gather
-            if (debug) std::cerr << "[Exec] Join: gathering L_STR " << name << " srcSize=" << vec.size() << " resCount=" << resCount << "\n";
-            std::vector<std::string> newVec;
-            parallelGather(cpuProbeIndices, vec, newVec);
-            if (debug) std::cerr << "[Exec] Join: gathered L_STR " << name << " newVec.size=" << newVec.size() << "\n";
-            outCtx.stringCols[name] = std::move(newVec);
-        }
-        for (const auto& [name, vec] : rightCtx.stringCols) {
-             if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue; // Skip: buildIndices are placeholders
-             // Right columns: rename only if collision with left
-             std::string outName = getRightColumnName(name);
-             // Try GPU dict gather first
-             if (dictGather(name, rightCtx, jRes.buildIndices, outName)) continue;
-             // Try GPU flat string gather
-             if (flatGather(rightCtx, name, jRes.buildIndices, outName)) continue;
-             // Fallback: CPU string gather
-             if (debug) std::cerr << "[Exec] Join: gathering R_STR " << name << " -> " << outName << " srcSize=" << vec.size() << " resCount=" << resCount << "\n";
-             std::vector<std::string> newVec;
-             parallelGather(cpuBuildIndices, vec, newVec);
-             if (debug) std::cerr << "[Exec] Join: gathered R_STR " << name << " newVec.size=" << newVec.size() << "\n";
-             outCtx.stringCols[outName] = std::move(newVec);
-        }
-        // GPU dict gather for dict-only columns (no corresponding stringCol)
-        for (const auto& [name, dc] : leftCtx.dictCols) {
-            if (rightAntiGather) continue;
-            if (leftCtx.stringCols.count(name)) continue; // already handled above
-            dictGather(name, leftCtx, jRes.probeIndices, name);
-        }
-        for (const auto& [name, dc] : rightCtx.dictCols) {
-            if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
-            if (rightCtx.stringCols.count(name)) continue; // already handled above
-            std::string outName = getRightColumnName(name);
-            dictGather(name, rightCtx, jRes.buildIndices, outName);
-        }
-        // GPU flat string gather for flat-only columns (no stringCol or dictCol)
-        for (const auto& [name, flat] : leftCtx.flatStringCols) {
-            if (rightAntiGather) continue;
-            if (leftCtx.stringCols.count(name) || leftCtx.dictCols.count(name)) continue;
-            flatGather(leftCtx, name, jRes.probeIndices, name);
-        }
-        for (const auto& [name, flat] : rightCtx.flatStringCols) {
-            if (isSemiJoin || (isAntiJoin && !rightAntiGather)) continue;
-            if (rightCtx.stringCols.count(name) || rightCtx.dictCols.count(name)) continue;
-            std::string outName = getRightColumnName(name);
-            flatGather(rightCtx, name, jRes.buildIndices, outName);
-        }
-    }
-    
-    GpuOps::sync(); // Ensure all async gathers complete
+    bool earlyReturn = scatterJoinOutputColumns(
+        leftCtx, rightCtx, outCtx, jRes, resCount, lCount, rCount,
+        isAntiJoin, isSemiJoin, rightAntiGather, rightColumnMapping, debug);
+    if (earlyReturn) return true;
 
     if (debug) {
         std::cerr << "[Exec] Join: After string gather, outCtx.stringCols sizes:\n";
@@ -1189,389 +1708,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
 
     // LEFT JOIN: Append unmatched left rows with NULL/0 for right columns
     if (isLeftJoin && rCount > 0 && resCount > 0) {
-        // Use GpuOps to find unmatched left (probe) indices via scatter→flip→compact
-        auto unmatched = GpuOps::findUnmatchedIndices(jRes.probeIndices, resCount, lCount);
-        uint32_t unmatchedCount = unmatched.count;
-
-        // Download unmatched indices for string gather (CPU)
-        std::vector<uint32_t> unmatchedIndices(unmatchedCount);
-        if (unmatchedCount > 0) {
-            std::memcpy(unmatchedIndices.data(), unmatched.indices->contents(),
-                        unmatchedCount * sizeof(uint32_t));
-        }
-        MTL::Buffer* unmatchedBuf = unmatched.indices; // reuse for GPU gather
-
-        if (debug) std::cerr << "[Exec] Left Join: " << unmatchedCount << " unmatched left rows to append\n";
-
-        if (unmatchedCount > 0) {
-            uint32_t totalCount = resCount + unmatchedCount;
-
-            // Append left columns: gather unmatched rows and concatenate with matched
-            for (auto& [name, buf] : outCtx.u32ColsGPU) {
-                if (leftCtx.u32Cols.count(name) || leftCtx.u32ColsGPU.count(name)) {
-                    MTL::Buffer* leftSrc = nullptr;
-                    bool leftSrcAllocated = false;
-                    if (leftCtx.u32ColsGPU.count(name)) leftSrc = leftCtx.u32ColsGPU.at(name);
-                    else if (leftCtx.u32Cols.count(name) && !leftCtx.u32Cols.at(name).empty()) {
-                        const auto& vec = leftCtx.u32Cols.at(name);
-                        leftSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        leftSrcAllocated = true;
-                    }
-                    if (leftSrc) {
-                        MTL::Buffer* g = GpuOps::gatherU32(leftSrc, unmatchedBuf, unmatchedCount, false);
-                        MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
-                        std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
-                                    g->contents(), unmatchedCount * sizeof(uint32_t));
-                        if (leftSrcAllocated) leftSrc->release();
-                        buf.reset(combined); g->release();
-                    }
-                } else {
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
-                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    buf.reset(combined);
-                }
-            }
-            for (auto& [name, buf] : outCtx.f32ColsGPU) {
-                if (leftCtx.f32Cols.count(name) || leftCtx.f32ColsGPU.count(name)) {
-                    MTL::Buffer* leftSrc = nullptr;
-                    bool leftSrcAllocated = false;
-                    if (leftCtx.f32ColsGPU.count(name)) leftSrc = leftCtx.f32ColsGPU.at(name);
-                    else if (leftCtx.f32Cols.count(name) && !leftCtx.f32Cols.at(name).empty()) {
-                        const auto& vec = leftCtx.f32Cols.at(name);
-                        leftSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                        leftSrcAllocated = true;
-                    }
-                    if (leftSrc) {
-                        MTL::Buffer* g = GpuOps::gatherF32(leftSrc, unmatchedBuf, unmatchedCount, false);
-                        MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
-                        std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
-                        std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
-                                    g->contents(), unmatchedCount * sizeof(float));
-                        if (leftSrcAllocated) leftSrc->release();
-                        g->release(); buf.reset(combined);
-                    }
-                } else {
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
-                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
-                    buf.reset(combined);
-                }
-            }
-
-            // String columns: append unmatched left values + empty for right
-            for (auto& [name, vec] : outCtx.stringCols) {
-                if (leftCtx.stringCols.count(name)) {
-                    const auto& leftVec = leftCtx.stringCols.at(name);
-                    for (uint32_t idx : unmatchedIndices) {
-                        vec.push_back(idx < leftVec.size() ? leftVec[idx] : "");
-                    }
-                } else {
-                    for (uint32_t i = 0; i < unmatchedCount; ++i) vec.push_back("");
-                }
-            }
-
-            // Dict columns: GPU gather unmatched left dict IDs + append zeros for right
-            for (auto& [name, dc] : outCtx.dictCols) {
-                if (!dc.idsGPU) continue;
-                // Check if this is a left-side column
-                auto leftDictIt = leftCtx.dictCols.find(name);
-                if (leftDictIt != leftCtx.dictCols.end() && leftDictIt->second.idsGPU) {
-                    // GPU gather unmatched left dict IDs
-                    MTL::Buffer* g = GpuOps::gatherU32(leftDictIt->second.idsGPU, unmatchedBuf, unmatchedCount, false);
-                    // Concatenate matched + unmatched
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
-                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
-                                g->contents(), unmatchedCount * sizeof(uint32_t));
-                    g->release();
-                    dc.idsGPU.reset(combined);
-                } else {
-                    // Right-side column: pad with sentinel (0) for unmatched left rows
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
-                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    dc.idsGPU.reset(combined);
-                }
-                dc.ids.clear(); // invalidate CPU mirror
-                dc.rowCount = totalCount;
-                // Invalidate stale stringCols for this column
-                outCtx.stringCols.erase(name);
-                outCtx.flatStringCols.erase(name);
-            }
-
-            // Sync CPU-side u32/f32 cols via GPU gather or GPU buffer download
-            for (auto& [name, vec] : outCtx.u32Cols) {
-                if (!vec.empty()) {
-                    if (outCtx.u32ColsGPU.count(name)) {
-                        // GPU buffer already has combined data — sync from it
-                        vec.resize(totalCount);
-                        std::memcpy(vec.data(), outCtx.u32ColsGPU.at(name)->contents(), totalCount * sizeof(uint32_t));
-                    } else if (leftCtx.u32ColsGPU.count(name) && leftCtx.u32ColsGPU.at(name)) {
-                        // Prefer existing GPU buffer from left context
-                        MTL::Buffer* g = GpuOps::gatherU32(leftCtx.u32ColsGPU.at(name), unmatchedBuf, unmatchedCount, false);
-                        size_t oldSz = vec.size();
-                        vec.resize(oldSz + unmatchedCount);
-                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
-                        g->release();
-                    } else if (leftCtx.u32Cols.count(name)) {
-                        const auto& leftVec = leftCtx.u32Cols.at(name);
-                        MTL::Buffer* src = store.device()->newBuffer(leftVec.data(), leftVec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* g = GpuOps::gatherU32(src, unmatchedBuf, unmatchedCount, false);
-                        size_t oldSz = vec.size();
-                        vec.resize(oldSz + unmatchedCount);
-                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
-                        src->release(); g->release();
-                    } else {
-                        vec.resize(vec.size() + unmatchedCount, 0);
-                    }
-                }
-            }
-            for (auto& [name, vec] : outCtx.f32Cols) {
-                if (!vec.empty()) {
-                    if (outCtx.f32ColsGPU.count(name)) {
-                        vec.resize(totalCount);
-                        std::memcpy(vec.data(), outCtx.f32ColsGPU.at(name)->contents(), totalCount * sizeof(float));
-                    } else if (leftCtx.f32ColsGPU.count(name) && leftCtx.f32ColsGPU.at(name)) {
-                        MTL::Buffer* g = GpuOps::gatherF32(leftCtx.f32ColsGPU.at(name), unmatchedBuf, unmatchedCount, false);
-                        size_t oldSz = vec.size();
-                        vec.resize(oldSz + unmatchedCount);
-                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
-                        g->release();
-                    } else if (leftCtx.f32Cols.count(name)) {
-                        const auto& leftVec = leftCtx.f32Cols.at(name);
-                        MTL::Buffer* src = store.device()->newBuffer(leftVec.data(), leftVec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* g = GpuOps::gatherF32(src, unmatchedBuf, unmatchedCount, false);
-                        size_t oldSz = vec.size();
-                        vec.resize(oldSz + unmatchedCount);
-                        std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
-                        src->release(); g->release();
-                    } else {
-                        vec.resize(vec.size() + unmatchedCount, 0.0f);
-                    }
-                }
-            }
-
-            outCtx.rowCount = totalCount;
-            resCount = totalCount;
-            // Dict IDs already updated with unmatched rows above
-            if (debug) std::cerr << "[Exec] Left Join: total output rows = " << totalCount << "\n";
-        }
+        appendUnmatchedLeftRows(leftCtx, outCtx, jRes, resCount, lCount, rightColumnMapping, debug);
     }
 
     // RIGHT JOIN: Append unmatched right (build) rows with NULL/0 for left columns
     if (isRightJoin && rCount > 0 && resCount > 0) {
-        uint32_t matchedCount = jRes.count;
-        // Use GpuOps to find unmatched right (build) indices via scatter→flip→compact
-        auto unmatched = GpuOps::findUnmatchedIndices(jRes.buildIndices, matchedCount, rCount);
-        uint32_t unmatchedCount = unmatched.count;
-
-        // Download unmatched indices for string gather (CPU)
-        std::vector<uint32_t> unmatchedIndices(unmatchedCount);
-        if (unmatchedCount > 0) {
-            std::memcpy(unmatchedIndices.data(), unmatched.indices->contents(),
-                        unmatchedCount * sizeof(uint32_t));
-        }
-        MTL::Buffer* unmatchedBuf = unmatched.indices;
-
-        if (debug) std::cerr << "[Exec] Right Join: " << unmatchedCount << " unmatched right rows to append\n";
-
-        if (unmatchedCount > 0) {
-            uint32_t totalCount = resCount + unmatchedCount;
-
-            // For RIGHT columns: gather unmatched rows and append
-            // For LEFT columns: extend with zeros (NULL)
-            for (auto& [name, buf] : outCtx.u32ColsGPU) {
-                if (rightCtx.u32Cols.count(name) || rightCtx.u32ColsGPU.count(name) ||
-                    rightCtx.u32Cols.count(getRightColumnName(name)) || rightCtx.u32ColsGPU.count(getRightColumnName(name))) {
-                    std::string srcName = name;
-                    for (const auto& [origName, mappedName] : rightColumnMapping) {
-                        if (mappedName == name) { srcName = origName; break; }
-                    }
-                    MTL::Buffer* rightSrc = nullptr;
-                    bool rightSrcAllocated = false;
-                    if (rightCtx.u32ColsGPU.count(srcName)) rightSrc = rightCtx.u32ColsGPU.at(srcName);
-                    else if (rightCtx.u32Cols.count(srcName) && !rightCtx.u32Cols.at(srcName).empty()) {
-                        const auto& vec = rightCtx.u32Cols.at(srcName);
-                        rightSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        rightSrcAllocated = true;
-                    }
-                    if (rightSrc) {
-                        MTL::Buffer* g = GpuOps::gatherU32(rightSrc, unmatchedBuf, unmatchedCount, false);
-                        MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
-                        std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
-                                    g->contents(), unmatchedCount * sizeof(uint32_t));
-                        if (rightSrcAllocated) rightSrc->release();
-                        buf.reset(combined); g->release();
-                    } else {
-                        MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
-                        std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                        buf.reset(combined);
-                    }
-                } else {
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
-                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    buf.reset(combined);
-                }
-            }
-            for (auto& [name, buf] : outCtx.f32ColsGPU) {
-                if (rightCtx.f32Cols.count(name) || rightCtx.f32ColsGPU.count(name)) {
-                    MTL::Buffer* rightSrc = nullptr;
-                    bool rightSrcAllocated = false;
-                    std::string srcName = name;
-                    for (const auto& [origName, mappedName] : rightColumnMapping) {
-                        if (mappedName == name) { srcName = origName; break; }
-                    }
-                    if (rightCtx.f32ColsGPU.count(srcName)) rightSrc = rightCtx.f32ColsGPU.at(srcName);
-                    else if (rightCtx.f32Cols.count(srcName) && !rightCtx.f32Cols.at(srcName).empty()) {
-                        const auto& vec = rightCtx.f32Cols.at(srcName);
-                        rightSrc = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                        rightSrcAllocated = true;
-                    }
-                    if (rightSrc) {
-                        MTL::Buffer* g = GpuOps::gatherF32(rightSrc, unmatchedBuf, unmatchedCount, false);
-                        MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
-                        std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
-                        std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
-                                    g->contents(), unmatchedCount * sizeof(float));
-                        if (rightSrcAllocated) rightSrc->release();
-                        g->release(); buf.reset(combined);
-                    } else {
-                        MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
-                        std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
-                        std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
-                        buf.reset(combined);
-                    }
-                } else {
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
-                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
-                    buf.reset(combined);
-                }
-            }
-
-            // String columns
-            for (auto& [name, vec] : outCtx.stringCols) {
-                std::string srcName = name;
-                for (const auto& [origName, mappedName] : rightColumnMapping) {
-                    if (mappedName == name) { srcName = origName; break; }
-                }
-                if (rightCtx.stringCols.count(srcName)) {
-                    const auto& rightVec = rightCtx.stringCols.at(srcName);
-                    for (uint32_t idx : unmatchedIndices) {
-                        vec.push_back(idx < rightVec.size() ? rightVec[idx] : "");
-                    }
-                } else {
-                    for (uint32_t i = 0; i < unmatchedCount; ++i) vec.push_back("");
-                }
-            }
-
-            // Dict columns: GPU gather unmatched right dict IDs + append zeros for left
-            for (auto& [name, dc] : outCtx.dictCols) {
-                if (!dc.idsGPU) continue;
-                std::string srcName = name;
-                for (const auto& [origName, mappedName] : rightColumnMapping) {
-                    if (mappedName == name) { srcName = origName; break; }
-                }
-                auto rightDictIt = rightCtx.dictCols.find(srcName);
-                if (rightDictIt != rightCtx.dictCols.end() && rightDictIt->second.idsGPU) {
-                    // GPU gather unmatched right dict IDs
-                    MTL::Buffer* g = GpuOps::gatherU32(rightDictIt->second.idsGPU, unmatchedBuf, unmatchedCount, false);
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
-                    std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
-                                g->contents(), unmatchedCount * sizeof(uint32_t));
-                    g->release();
-                    dc.idsGPU.reset(combined);
-                } else {
-                    // Left-side column: pad with sentinel (0) for unmatched right rows
-                    MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
-                    std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    dc.idsGPU.reset(combined);
-                }
-                dc.ids.clear();
-                dc.rowCount = totalCount;
-                outCtx.stringCols.erase(name);
-                outCtx.flatStringCols.erase(name);
-            }
-
-            // Sync CPU-side u32/f32 cols via GPU gather or GPU buffer download
-            for (auto& [name, vec] : outCtx.u32Cols) {
-                if (!vec.empty()) {
-                    if (outCtx.u32ColsGPU.count(name)) {
-                        vec.resize(totalCount);
-                        std::memcpy(vec.data(), outCtx.u32ColsGPU.at(name)->contents(), totalCount * sizeof(uint32_t));
-                    } else {
-                        std::string srcName = name;
-                        for (const auto& [origName, mappedName] : rightColumnMapping) {
-                            if (mappedName == name) { srcName = origName; break; }
-                        }
-                        // Prefer existing GPU buffer from right context
-                        MTL::Buffer* rightGpu = nullptr;
-                        if (rightCtx.u32ColsGPU.count(srcName)) rightGpu = rightCtx.u32ColsGPU.at(srcName);
-                        if (rightGpu) {
-                            MTL::Buffer* g = GpuOps::gatherU32(rightGpu, unmatchedBuf, unmatchedCount, false);
-                            size_t oldSz = vec.size();
-                            vec.resize(oldSz + unmatchedCount);
-                            std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
-                            g->release();
-                        } else if (rightCtx.u32Cols.count(srcName)) {
-                            const auto& rightVec = rightCtx.u32Cols.at(srcName);
-                            MTL::Buffer* src = store.device()->newBuffer(rightVec.data(), rightVec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                            MTL::Buffer* g = GpuOps::gatherU32(src, unmatchedBuf, unmatchedCount, false);
-                            size_t oldSz = vec.size();
-                            vec.resize(oldSz + unmatchedCount);
-                            std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(uint32_t));
-                            src->release(); g->release();
-                        } else {
-                            vec.resize(vec.size() + unmatchedCount, 0);
-                        }
-                    }
-                }
-            }
-            for (auto& [name, vec] : outCtx.f32Cols) {
-                if (!vec.empty()) {
-                    if (outCtx.f32ColsGPU.count(name)) {
-                        vec.resize(totalCount);
-                        std::memcpy(vec.data(), outCtx.f32ColsGPU.at(name)->contents(), totalCount * sizeof(float));
-                    } else {
-                        std::string srcName = name;
-                        for (const auto& [origName, mappedName] : rightColumnMapping) {
-                            if (mappedName == name) { srcName = origName; break; }
-                        }
-                        MTL::Buffer* rightGpu = nullptr;
-                        if (rightCtx.f32ColsGPU.count(srcName)) rightGpu = rightCtx.f32ColsGPU.at(srcName);
-                        if (rightGpu) {
-                            MTL::Buffer* g = GpuOps::gatherF32(rightGpu, unmatchedBuf, unmatchedCount, false);
-                            size_t oldSz = vec.size();
-                            vec.resize(oldSz + unmatchedCount);
-                            std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
-                            g->release();
-                        } else if (rightCtx.f32Cols.count(srcName)) {
-                            const auto& rightVec = rightCtx.f32Cols.at(srcName);
-                            MTL::Buffer* src = store.device()->newBuffer(rightVec.data(), rightVec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                            MTL::Buffer* g = GpuOps::gatherF32(src, unmatchedBuf, unmatchedCount, false);
-                            size_t oldSz = vec.size();
-                            vec.resize(oldSz + unmatchedCount);
-                            std::memcpy(vec.data() + oldSz, g->contents(), unmatchedCount * sizeof(float));
-                            src->release(); g->release();
-                        } else {
-                            vec.resize(vec.size() + unmatchedCount, 0.0f);
-                        }
-                    }
-                }
-            }
-
-            outCtx.rowCount = totalCount;
-            resCount = totalCount;
-            // Dict IDs already updated with unmatched rows above
-            if (debug) std::cerr << "[Exec] Right Join: total output rows = " << totalCount << "\n";
-        }
+        appendUnmatchedRightRows(rightCtx, outCtx, jRes, resCount, rCount, rightColumnMapping, debug);
     }
 
     // jRes goes out of scope — GpuBuffer handles release
@@ -1619,118 +1761,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
     // Apply post-join filter for non-equality conditions (e.g., l_suppkey != l_suppkey)
     // Use the regular filter pipeline which handles col-vs-col, col-vs-scalar, etc.
     if (hasPostJoinFilter && postJoinFilter && outCtx.rowCount > 0) {
-        if (debug) {
-            std::cerr << "[Exec] Join: applying post-join filter, current rows=" << outCtx.rowCount << "\n";
-        }
-        
-        // Rewrite column references in the residual filter to resolve to actual outCtx columns.
-        // When a condition like "l_suppkey != l_suppkey" appears, both sides have the same name
-        // but refer to columns from different contexts (left vs right).
-        // After join, outCtx may have e.g. l_suppkey_2 (from left) and l_suppkey (from right).
-        // We resolve by finding which actual column in leftCtx/rightCtx matches the base name.
-        
-        // Helper: find a column in a context matching a base name (with possible instance suffix)
-        auto findColInCtx = [](const EvalContext& ctx, const std::string& baseName) -> std::string {
-            // Exact match first
-            if (ctx.u32Cols.count(baseName) || ctx.f32Cols.count(baseName)) return baseName;
-            if (ctx.stringCols.count(baseName)) return baseName;
-            // Try instance-suffixed versions (e.g., l_suppkey_1, l_suppkey_2, ...)
-            for (const auto& [name, _] : ctx.u32Cols) {
-                auto pos = name.rfind('_');
-                if (pos != std::string::npos) {
-                    std::string suffix = name.substr(pos + 1);
-                    bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
-                    if (allDigits && name.substr(0, pos) == baseName) return name;
-                }
-            }
-            for (const auto& [name, _] : ctx.f32Cols) {
-                auto pos = name.rfind('_');
-                if (pos != std::string::npos) {
-                    std::string suffix = name.substr(pos + 1);
-                    bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
-                    if (allDigits && name.substr(0, pos) == baseName) return name;
-                }
-            }
-            return "";
-        };
-        
-        std::function<TypedExprPtr(const TypedExprPtr&)> rewriteResidualCols;
-        rewriteResidualCols = [&](const TypedExprPtr& expr) -> TypedExprPtr {
-            if (!expr) return expr;
-            if (expr->kind == TypedExpr::Kind::Compare) {
-                auto& cmp = expr->asCompare();
-                bool bothCols = (cmp.left && cmp.right &&
-                                 cmp.left->kind == TypedExpr::Kind::Column &&
-                                 cmp.right->kind == TypedExpr::Kind::Column);
-                if (bothCols) {
-                    const std::string& lName = cmp.left->asColumn().column;
-                    const std::string& rName = cmp.right->asColumn().column;
-                    
-                    // Find actual column names in left/right contexts
-                    std::string leftActual = findColInCtx(leftCtx, lName);
-                    std::string rightActual = findColInCtx(rightCtx, rName);
-                    
-                    // Map right-side column through rightColumnMapping (rename after join)
-                    std::string rightInOut = rightActual;
-                    if (!rightActual.empty() && rightColumnMapping.count(rightActual)) {
-                        rightInOut = rightColumnMapping.at(rightActual);
-                    }
-                    
-                    // Use the actual names if we found them
-                    std::string newLName = !leftActual.empty() ? leftActual : lName;
-                    std::string newRName = !rightInOut.empty() ? rightInOut : rName;
-                    
-                    if (newLName != lName || newRName != rName) {
-                        if (debug) {
-                            std::cerr << "[Exec] Join: rewrote residual col: " 
-                                      << lName << " -> " << newLName << ", "
-                                      << rName << " -> " << newRName << "\n";
-                        }
-                        return TypedExpr::compare(cmp.op, 
-                                                  TypedExpr::column(newLName), 
-                                                  TypedExpr::column(newRName));
-                    }
-                }
-                return expr;
-            }
-            if (expr->kind == TypedExpr::Kind::Binary) {
-                auto& bin = expr->asBinary();
-                auto newLeft = rewriteResidualCols(bin.left);
-                auto newRight = rewriteResidualCols(bin.right);
-                if (newLeft != bin.left || newRight != bin.right) {
-                    return TypedExpr::binary(bin.op, newLeft, newRight);
-                }
-                return expr;
-            }
-            return expr;
-        };
-        
-        TypedExprPtr rewrittenFilter = rewriteResidualCols(postJoinFilter);
-        if (debug && rewrittenFilter != postJoinFilter) {
-            std::cerr << "[Exec] Join: rewrote post-join filter column references\n";
-        }
-        
-        // Upload CPU columns to GPU for filtering (they were gathered from join)
-        for (const auto& [name, vec] : outCtx.u32Cols) {
-            if (!vec.empty() && outCtx.u32ColsGPU.find(name) == outCtx.u32ColsGPU.end()) {
-                MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
-                if (buf) outCtx.u32ColsGPU[name].reset(buf);
-            }
-        }
-        for (const auto& [name, vec] : outCtx.f32Cols) {
-            if (!vec.empty() && outCtx.f32ColsGPU.find(name) == outCtx.f32ColsGPU.end()) {
-                MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
-                if (buf) outCtx.f32ColsGPU[name].reset(buf);
-            }
-        }
-        
-        // Use the regular filter infrastructure
-        IRFilter postFilter{rewrittenFilter, ""};
-        bool filterOk = GpuExecutor::executeFilter(postFilter, outCtx);
-        if (debug) {
-            std::cerr << "[Exec] Join: post-join filter " << (filterOk?"ok":"failed") 
-                      << ", rows after=" << outCtx.rowCount << "\n";
-        }
+        applyPostJoinFilter(postJoinFilter, leftCtx, rightCtx, rightColumnMapping, outCtx, debug);
     }
     
     // Rebuild flat string buffers and dictionary encoding for downstream operators
@@ -1748,9 +1779,821 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
 }
 
 
+// -- Extracted: handleScalarSubquerySavedPipelines --
+// Handles scalar SUBQUERY join when savedPipelines contains main data.
+// Returns true if handled (caller should return).
+static bool handleScalarSubquerySavedPipelines(
+    const IRJoin& join, EvalContext& currentCtx,
+    std::vector<EvalContext>& savedPipelines,
+    std::vector<std::set<std::string>>& savedPipelineTables,
+    std::set<std::string>& joinedTables,
+    GpuExecutor::ExecutionResult& result, bool debug) {
+    if (debug) {
+        std::cerr << "[Exec] Join: detected scalar subquery pattern\n";
+        std::cerr << "[Exec]   Current context rows: " << currentCtx.rowCount << "\n";
+        std::cerr << "[Exec]   Saved pipelines: " << savedPipelines.size() << "\n";
+    }
+
+    // Determine if scalar is in currentCtx or savedPipelines
+    double scalarValue = 0.0;
+    bool foundScalar = false;
+    bool scalarIsInCurrent = (currentCtx.rowCount == 1);
+
+    int groupedPipelineIdx = -1;
+    int scalarPipelineIdx = -1;
+
+    if (!scalarIsInCurrent) {
+        // Check if scalar is in savedPipelines
+        for (size_t pi = 0; pi < savedPipelines.size(); ++pi) {
+            if (savedPipelines[pi].rowCount == 1 || savedPipelines[pi].isScalarResult) {
+                scalarPipelineIdx = static_cast<int>(pi);
+                if (debug && savedPipelines[pi].isScalarResult) {
+                    std::cerr << "[Exec]   Found scalar pipeline via flag (rowCount=" << savedPipelines[pi].rowCount << ")\n";
+                }
+                break;
+            }
+        }
+    } else {
+        // Scalar is current. Find grouped pipeline in saved
+        for (size_t pi = 0; pi < savedPipelineTables.size(); ++pi) {
+             if (savedPipelineTables[pi].count("__GROUPED__") > 0 || savedPipelines[pi].rowCount > 1) {
+                 groupedPipelineIdx = static_cast<int>(pi);
+                 break;
+             }
+        }
+    }
+
+    const EvalContext* scalarCtx = nullptr;
+    if (scalarIsInCurrent) {
+         scalarCtx = &currentCtx;
+    } else if (scalarPipelineIdx >= 0) {
+         scalarCtx = &savedPipelines[scalarPipelineIdx];
+    }
+
+    if (!scalarCtx) {
+        result.error = "Scalar subquery join: could not locate scalar value source (neither current inputs nor saved pipelines seem correct)";
+        return false;
+    }
+
+    // Extract scalar from scalarCtx
+    // Priority: #0, then SUM/AVG, then any
+    auto tryExtract = [&](const std::string& pattern, bool exact) -> bool {
+         // Search f32
+         for (const auto& [name, values] : scalarCtx->f32Cols) {
+             if (values.empty()) continue;
+             bool match = exact ? (name == pattern) : (name.find(pattern) != std::string::npos);
+             if (match) {
+                 scalarValue = values[0];
+                 if (debug) std::cerr << "[Exec]   Scalar value from f32 col '" << name << "': " << scalarValue << "\n";
+                 return true;
+             }
+         }
+         // Search u32
+         for (const auto& [name, values] : scalarCtx->u32Cols) {
+             if (values.empty()) continue;
+             bool match = exact ? (name == pattern) : (name.find(pattern) != std::string::npos);
+             if (match) {
+                 scalarValue = static_cast<double>(values[0]);
+                 if (debug) std::cerr << "[Exec]   Scalar value from u32 col '" << name << "': " << scalarValue << "\n";
+                 return true;
+             }
+         }
+         return false;
+    };
+
+    if (!foundScalar) foundScalar = tryExtract("#0", true);
+    // Also check for #0 in u32 (some DBs output integer counts)
+    if (!foundScalar) foundScalar = tryExtract("SUM", false);
+    if (!foundScalar) foundScalar = tryExtract("AVG", false);
+    if (!foundScalar) foundScalar = tryExtract("first", false);
+
+    // Fallback to any
+    if (!foundScalar) foundScalar = tryExtract("", false);
+
+    if (!foundScalar) {
+        result.error = "Scalar subquery join: could not find scalar value";
+        return false;
+    }
+
+    // Capture input scalars (e.g. CASE, Aggregates) to broadcast.
+    std::map<std::string, float> scalarF32s;
+    std::map<std::string, uint32_t> scalarU32s;
+    if (scalarCtx) {
+         for(auto& [n, v] : scalarCtx->f32Cols) if(!v.empty()) scalarF32s[n] = v[0];
+         for(auto& [n, v] : scalarCtx->u32Cols) if(!v.empty()) scalarU32s[n] = v[0];
+    }
+
+    // Prepare the Data (Grouped) Pipeline
+    if (scalarIsInCurrent) {
+        if (groupedPipelineIdx < 0) {
+            result.error = "Scalar subquery join: could not find grouped pipeline";
+            return false;
+        }
+        // Restore saved pipeline
+        currentCtx = savedPipelines[groupedPipelineIdx];
+        joinedTables = savedPipelineTables[groupedPipelineIdx];
+        joinedTables.erase("__GROUPED__");
+
+        savedPipelines.erase(savedPipelines.begin() + groupedPipelineIdx);
+        savedPipelineTables.erase(savedPipelineTables.begin() + groupedPipelineIdx);
+
+        if (debug) {
+            std::cerr << "[Exec]   Restored saved pipeline with " << currentCtx.rowCount << " rows\n";
+        }
+    } else {
+        // Data is already currentCtx. Just remove the scalar pipeline from saved.
+        if (scalarPipelineIdx >= 0) {
+            savedPipelines.erase(savedPipelines.begin() + scalarPipelineIdx);
+            savedPipelineTables.erase(savedPipelineTables.begin() + scalarPipelineIdx);
+        }
+        if (debug) {
+            std::cerr << "[Exec]   Using current context as data table with " << currentCtx.rowCount << " rows\n";
+        }
+    }
+
+    // Inject broadcasted scalars into the data context
+    for(auto& [n, v] : scalarF32s) {
+        if (currentCtx.f32Cols.find(n) == currentCtx.f32Cols.end() && currentCtx.f32ColsGPU.find(n) == currentCtx.f32ColsGPU.end()) {
+             currentCtx.f32Cols[n] = {v}; // Size 1 vector (scalar broadcast)
+             if (debug) std::cerr << "[Exec]   Broadcasted scalar F32col: " << n << "\n";
+        }
+    }
+    for(auto& [n, v] : scalarU32s) {
+        if (currentCtx.u32Cols.find(n) == currentCtx.u32Cols.end() && currentCtx.u32ColsGPU.find(n) == currentCtx.u32ColsGPU.end()) {
+             currentCtx.u32Cols[n] = {v};
+             if (debug) std::cerr << "[Exec]   Broadcasted scalar U32col: " << n << "\n";
+        }
+    }
+
+    // Parse condition to extract comparison column and operator
+    std::string condStr = join.conditionStr;
+
+    // Find the comparison operator
+    size_t opPos = std::string::npos;
+    std::string opStr;
+    engine::GpuFilterOp compOp = engine::GpuFilterOp::EQ;
+    if ((opPos = condStr.find(" > SUBQUERY")) != std::string::npos) {
+        opStr = ">";
+        compOp = engine::GpuFilterOp::GT;
+    } else if ((opPos = condStr.find(" >= SUBQUERY")) != std::string::npos) {
+        opStr = ">=";
+        compOp = engine::GpuFilterOp::GE;
+    } else if ((opPos = condStr.find(" < SUBQUERY")) != std::string::npos) {
+        opStr = "<";
+        compOp = engine::GpuFilterOp::LT;
+    } else if ((opPos = condStr.find(" <= SUBQUERY")) != std::string::npos) {
+        opStr = "<=";
+        compOp = engine::GpuFilterOp::LE;
+    } else if ((opPos = condStr.find(" = SUBQUERY")) != std::string::npos) {
+        opStr = "=";
+        compOp = engine::GpuFilterOp::EQ;
+    }
+
+    if (opPos == std::string::npos) {
+        result.error = "Scalar subquery join: unsupported comparison operator in condition: " + condStr;
+        return false;
+    }
+
+    // Extract the column/expression being compared
+    std::string leftExpr = condStr.substr(0, opPos);
+    // Trim
+    while (!leftExpr.empty() && std::isspace(leftExpr.back())) leftExpr.pop_back();
+
+    // Find matching aggregate column in context
+    std::string aggColName;
+
+    // First check if we have #1 (typical aggregate position)
+    if (currentCtx.f32Cols.find("#1") != currentCtx.f32Cols.end()) {
+        aggColName = "#1";
+    } else if (currentCtx.f32Cols.find("SUM_#1") != currentCtx.f32Cols.end()) {
+        aggColName = "SUM_#1";
+    } else if (currentCtx.u32Cols.find("#1") != currentCtx.u32Cols.end()) {
+        aggColName = "#1";
+    } else {
+        // Look for any aggregate column
+        for (const auto& [name, vals] : currentCtx.f32Cols) {
+            if (name.find("SUM") != std::string::npos || 
+                name.find("AVG") != std::string::npos ||
+                name.find("COUNT") != std::string::npos ||
+                name[0] == '#') {
+                aggColName = name;
+                break;
+            }
+        }
+    }
+
+    if (aggColName.empty()) {
+        result.error = "Scalar subquery join: could not find aggregate column";
+        return false;
+    }
+
+    if (debug) {
+        std::cerr << "[Exec]   Filtering: " << aggColName << " " << opStr << " " << scalarValue << "\n";
+    }
+
+    // Apply scalar subquery filter on GPU
+    // 1. Ensure data columns are uploaded to GPU
+    auto device = GpuColumnStore::instance().device();
+    for (auto& [name, vec] : currentCtx.f32Cols) {
+        if (currentCtx.f32ColsGPU.find(name) == currentCtx.f32ColsGPU.end()) {
+            auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+            if (buf) currentCtx.f32ColsGPU[name].reset(buf);
+        }
+    }
+    for (auto& [name, vec] : currentCtx.u32Cols) {
+        if (currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end()) {
+            auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            if (buf) currentCtx.u32ColsGPU[name].reset(buf);
+        }
+    }
+
+    // 2. Build a TypedExpr comparison predicate: aggColName <op> scalarValue
+    CompareOp typedOp = CompareOp::Eq;
+    switch (compOp) {
+        case engine::GpuFilterOp::GT: typedOp = CompareOp::Gt; break;
+        case engine::GpuFilterOp::GE: typedOp = CompareOp::Ge; break;
+        case engine::GpuFilterOp::LT: typedOp = CompareOp::Lt; break;
+        case engine::GpuFilterOp::LE: typedOp = CompareOp::Le; break;
+        case engine::GpuFilterOp::EQ: typedOp = CompareOp::Eq; break;
+        case engine::GpuFilterOp::NE: typedOp = CompareOp::Ne; break;
+        default: break;
+    }
+    auto filterPred = TypedExpr::compare(
+        typedOp,
+        TypedExpr::column(aggColName),
+        TypedExpr::literal(static_cast<double>(scalarValue))
+    );
+
+    // 3. Execute GPU filter
+    if (!GpuExecutor::executeFilterRecursive(filterPred, currentCtx)) {
+        result.error = "Scalar subquery join: GPU filter failed for " + aggColName;
+        return false;
+    }
+
+    // 4. Materialize: compact all columns using activeRowsGPU
+    if (currentCtx.activeRowsGPU && currentCtx.activeRowsCountGPU > 0) {
+        uint32_t count = currentCtx.activeRowsCountGPU;
+        uint32_t* indices = (uint32_t*)currentCtx.activeRowsGPU->contents();
+
+        // Compact GPU columns
+        for (auto& [name, buf] : currentCtx.u32ColsGPU) {
+            if (!buf) continue;
+            uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
+            if (bufRows > count) {
+                auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, count, true);
+                if (compacted) buf.reset(compacted);
+            }
+        }
+        for (auto& [name, buf] : currentCtx.f32ColsGPU) {
+            if (!buf) continue;
+            uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
+            if (bufRows > count) {
+                auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, count, true);
+                if (compacted) buf.reset(compacted);
+            }
+        }
+        // Compact CPU columns: sync from GPU if possible, else CPU gather
+        for (auto& [name, vec] : currentCtx.u32Cols) {
+            if (vec.size() > count) {
+                if (currentCtx.u32ColsGPU.count(name) && currentCtx.u32ColsGPU[name]) {
+                    vec.resize(count);
+                    std::memcpy(vec.data(), currentCtx.u32ColsGPU[name]->contents(), count * sizeof(uint32_t));
+                } else {
+                    std::vector<uint32_t> c;
+                    c.reserve(count);
+                    for (uint32_t i = 0; i < count; ++i)
+                        c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : 0u);
+                    vec = std::move(c);
+                }
+            }
+        }
+        for (auto& [name, vec] : currentCtx.f32Cols) {
+            if (vec.size() > count) {
+                if (currentCtx.f32ColsGPU.count(name) && currentCtx.f32ColsGPU[name]) {
+                    vec.resize(count);
+                    std::memcpy(vec.data(), currentCtx.f32ColsGPU[name]->contents(), count * sizeof(float));
+                } else {
+                    std::vector<float> c;
+                    c.reserve(count);
+                    for (uint32_t i = 0; i < count; ++i)
+                        c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : 0.0f);
+                    vec = std::move(c);
+                }
+            }
+        }
+
+        if (currentCtx.activeRowsGPU) { currentCtx.activeRowsGPU = nullptr; }
+        currentCtx.activeRowsCountGPU = 0;
+        currentCtx.activeRows.clear();
+        currentCtx.rowCount = count;
+    } else {
+        // No rows matched
+        currentCtx.rowCount = 0;
+        currentCtx.activeRows.clear();
+        currentCtx.activeRowsGPU = nullptr;
+        currentCtx.activeRowsCountGPU = 0;
+    }
+
+    // Reset scalar aggregate flag - we now have a proper table result
+    result.isScalarAggregate = false;
+
+    if (debug) {
+        std::cerr << "[Exec]   After scalar filter: " << currentCtx.rowCount << " rows\n";
+    }
+
+    // Don't do the normal join - we've handled this specially
+    return true;
+    return false;
+}
+
+// -- Extracted: handleScalarSubqueryTableContexts --
+// Handles scalar SUBQUERY join via tableContexts (theta-comparison).
+// Returns true if handled (caller should return).
+static bool handleScalarSubqueryTableContexts(
+    const IRJoin& join, EvalContext& currentCtx,
+    std::unordered_map<std::string, EvalContext>& tableContexts,
+    std::set<std::string>& joinedTables, bool& hasPipeline,
+    GpuExecutor::ExecutionResult& result, bool debug) {
+    // Check if this is a theta-comparison (>, <, >=, <=) with SUBQUERY
+    std::string condStr = join.conditionStr;
+    size_t opPos = std::string::npos;
+    std::string opStr;
+    bool isTheta = false;
+
+    if ((opPos = condStr.find(" > SUBQUERY")) != std::string::npos) {
+        opStr = ">"; isTheta = true;
+    } else if ((opPos = condStr.find(" >= SUBQUERY")) != std::string::npos) {
+        opStr = ">="; isTheta = true;
+    } else if ((opPos = condStr.find(" < SUBQUERY")) != std::string::npos) {
+        opStr = "<"; isTheta = true;
+    } else if ((opPos = condStr.find(" <= SUBQUERY")) != std::string::npos) {
+        opStr = "<="; isTheta = true;
+    } else if ((opPos = condStr.find(" = SUBQUERY")) != std::string::npos) {
+        opStr = "="; isTheta = true;
+    }
+
+    if (isTheta && currentCtx.rowCount <= 1) {
+        if (debug) {
+            std::cerr << "[Exec] Join: scalar SUBQUERY theta-join (tableContexts path)\n";
+            std::cerr << "[Exec]   Current context rows: " << currentCtx.rowCount << "\n";
+        }
+
+        // Extract scalar value from currentCtx
+        double scalarValue = 0.0;
+        bool foundScalar = false;
+
+        // Priority 1: Explicit AVG column (common for scalar subquery).
+        auto avgIt = currentCtx.f32Cols.find("AVG");
+        if (avgIt != currentCtx.f32Cols.end() && !avgIt->second.empty()) {
+            scalarValue = avgIt->second[0];
+            foundScalar = true;
+            if (debug) {
+                std::cerr << "[Exec]   Scalar value from 'AVG': " << scalarValue << "\n";
+            }
+        }
+
+        // Priority 2: Look for SUM column
+        if (!foundScalar) {
+            auto sumIt = currentCtx.f32Cols.find("SUM");
+            if (sumIt != currentCtx.f32Cols.end() && !sumIt->second.empty()) {
+                scalarValue = sumIt->second[0];
+                foundScalar = true;
+                if (debug) {
+                    std::cerr << "[Exec]   Scalar value from 'SUM': " << scalarValue << "\n";
+                }
+            }
+        }
+
+        // Priority 3: #0 (first computed column, scalar result).
+        if (!foundScalar) {
+            auto numIt = currentCtx.f32Cols.find("#0");
+            if (numIt != currentCtx.f32Cols.end() && !numIt->second.empty()) {
+                scalarValue = numIt->second[0];
+                foundScalar = true;
+                if (debug) {
+                    std::cerr << "[Exec]   Scalar value from '#0': " << scalarValue << "\n";
+                }
+            }
+        }
+
+        // Fallback: any f32 column except COUNT
+        if (!foundScalar) {
+            for (const auto& [name, values] : currentCtx.f32Cols) {
+                if (!values.empty() && name.find("COUNT") == std::string::npos) {
+                    scalarValue = values[0];
+                    foundScalar = true;
+                    if (debug) {
+                        std::cerr << "[Exec]   Scalar value fallback from '" << name << "': " << scalarValue << "\n";
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (!foundScalar) {
+            if (debug) std::cerr << "[Exec]   Could not find scalar value\n";
+            result.error = "Scalar SUBQUERY join: could not extract scalar value";
+            return false;
+        }
+
+        // Find the data table - the one containing the comparison column
+        // Parse column from condition (e.g., "CAST(c_acctbal AS DOUBLE)" -> c_acctbal)
+        std::string leftExpr = condStr.substr(0, opPos);
+        // Extract column name from CAST or direct reference
+        std::string filterCol;
+        if (leftExpr.find("CAST(") != std::string::npos) {
+            size_t start = leftExpr.find("CAST(") + 5;
+            size_t end = leftExpr.find(" AS", start);
+            if (end != std::string::npos) {
+                filterCol = leftExpr.substr(start, end - start);
+                // Trim
+                while (!filterCol.empty() && std::isspace(filterCol.front())) filterCol.erase(0, 1);
+                while (!filterCol.empty() && std::isspace(filterCol.back())) filterCol.pop_back();
+            }
+        }
+        if (filterCol.empty()) {
+            filterCol = leftExpr;
+            while (!filterCol.empty() && std::isspace(filterCol.front())) filterCol.erase(0, 1);
+            while (!filterCol.empty() && std::isspace(filterCol.back())) filterCol.pop_back();
+        }
+
+        if (debug) {
+            std::cerr << "[Exec]   Filter column: " << filterCol << "\n";
+        }
+
+        // Find the table with this column in tableContexts
+        std::string dataTable;
+        for (const auto& [tname, tctx] : tableContexts) {
+            if (tctx.f32Cols.find(filterCol) != tctx.f32Cols.end() ||
+                tctx.u32Cols.find(filterCol) != tctx.u32Cols.end()) {
+                // Check for suffixed versions too
+                if (joinedTables.find(tname) == joinedTables.end()) {
+                    dataTable = tname;
+                    break;
+                }
+            }
+            // Try with suffix
+            for (const auto& [cname, cvals] : tctx.f32Cols) {
+                if ((cname == filterCol || cname.find(filterCol + "_") == 0 || 
+                     cname.rfind("_" + filterCol) == cname.size() - filterCol.size() - 1) &&
+                    joinedTables.find(tname) == joinedTables.end()) {
+                    dataTable = tname;
+                    filterCol = cname;  // Use actual column name
+                    break;
+                }
+            }
+            if (!dataTable.empty()) break;
+        }
+
+        if (dataTable.empty()) {
+            if (debug) std::cerr << "[Exec]   Could not find data table\n";
+            result.error = "Scalar SUBQUERY join: could not find data table";
+            return false;
+        }
+
+        if (debug) {
+            std::cerr << "[Exec]   Data table: " << dataTable << " with " 
+                      << tableContexts[dataTable].rowCount << " rows\n";
+        }
+
+        // Apply the filter: col <op> scalarValue
+        EvalContext& dataCtx = tableContexts[dataTable];
+        std::vector<uint32_t> passingIndices;
+
+        auto it = dataCtx.f32Cols.find(filterCol);
+        if (it == dataCtx.f32Cols.end()) {
+            // Try suffixed versions
+            for (const auto& [cname, cvals] : dataCtx.f32Cols) {
+                if (cname.find(filterCol) != std::string::npos) {
+                    it = dataCtx.f32Cols.find(cname);
+                    filterCol = cname;
+                    break;
+                }
+            }
+        }
+
+        if (it != dataCtx.f32Cols.end()) {
+            // Valid column to filter
+            auto& store = GpuColumnStore::instance();
+
+            // Ensure column is on GPU
+            MTL::Buffer* colBuf = nullptr;
+            if (dataCtx.f32ColsGPU.count(filterCol)) {
+                colBuf = dataCtx.f32ColsGPU[filterCol];
+            } else {
+                // Upload (Lazy)
+                const auto& vec = it->second;
+                colBuf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                dataCtx.f32ColsGPU[filterCol].reset(colBuf);
+            }
+
+            // Map Op
+            engine::GpuFilterOp op = engine::GpuFilterOp::EQ;
+            if (opStr == ">") op = engine::GpuFilterOp::GT;
+            else if (opStr == ">=") op = engine::GpuFilterOp::GE;
+            else if (opStr == "<") op = engine::GpuFilterOp::LT;
+            else if (opStr == "<=") op = engine::GpuFilterOp::LE;
+            else if (opStr == "=") op = engine::GpuFilterOp::EQ;
+
+            std::optional<FilterResult> filterRes;
+            if (dataCtx.activeRowsGPU) {
+                 filterRes = GpuOps::filterF32Indexed(filterCol, colBuf, dataCtx.activeRowsGPU, dataCtx.activeRowsCountGPU, op, static_cast<float>(scalarValue));
+            } else {
+                 filterRes = GpuOps::filterF32(filterCol, colBuf, dataCtx.rowCount, op, static_cast<float>(scalarValue));
+            }
+
+            if (!filterRes) throw std::runtime_error("GPU Scalar Filter failed");
+
+            MTL::Buffer* indices = filterRes->indices;
+            uint32_t newCount = filterRes->count;
+
+            // Download indices for CPU String sync
+            std::vector<uint32_t> passingIndices(newCount);
+            if (newCount > 0) {
+                std::memcpy(passingIndices.data(), indices->contents(), newCount * sizeof(uint32_t));
+            }
+
+            // Safe Gather for U32 (preserving aliases and avoiding double-free)
+            std::unordered_map<MTL::Buffer*, MTL::Buffer*> u32Replacements;
+            for (auto& [name, buf] : dataCtx.u32ColsGPU) {
+                if (buf && u32Replacements.find(buf) == u32Replacements.end()) {
+                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount);
+                }
+            }
+            // Update map with new buffers
+            for (auto& [name, buf] : dataCtx.u32ColsGPU) {
+                if (buf) {
+                    MTL::Buffer* newBuf = u32Replacements[buf];
+                    newBuf->retain(); 
+                    buf.reset(newBuf); 
+                }
+            }
+            // Consume creation refs of new buffers (old buffers already released by GpuBuffer::reset)
+            for (auto& [_, newBuf] : u32Replacements) {
+                newBuf->release(); 
+            }
+
+            // Safe Gather for F32
+            std::unordered_map<MTL::Buffer*, MTL::Buffer*> f32Replacements;
+            for (auto& [name, buf] : dataCtx.f32ColsGPU) {
+                if (buf && f32Replacements.find(buf.get()) == f32Replacements.end()) {
+                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount);
+                }
+            }
+            for (auto& [name, buf] : dataCtx.f32ColsGPU) {
+                if (buf) {
+                    MTL::Buffer* newBuf = f32Replacements[buf.get()];
+                    newBuf->retain();
+                    buf.reset(newBuf);
+                }
+            }
+            for (auto& [_, newBuf] : f32Replacements) {
+                newBuf->release();
+            }
+
+            // Handle strings on CPU (fallback when dict/flat not available)
+            for (auto& [name, vals] : dataCtx.stringCols) {
+                if (dataCtx.dictCols.count(name)) continue; // dict path below
+                if (dataCtx.flatStringCols.count(name)) continue; // flat path below
+                std::vector<std::string> compacted;
+                compacted.reserve(passingIndices.size());
+                for (uint32_t idx : passingIndices) {
+                    if (idx < vals.size()) compacted.push_back(vals[idx]);
+                    else compacted.push_back("");
+                }
+                vals = std::move(compacted);
+            }
+
+            // GPU gather for dict and flat string columns
+            dataCtx.compactDictCols(indices, newCount);
+            dataCtx.compactFlatStringCols(indices, newCount);
+            dataCtx.invalidateStringColsForDictFlat();
+
+            // Update Context
+            dataCtx.rowCount = newCount;
+
+            dataCtx.clearActiveRows();
+
+            // Clear CPU vectors to enforce GPU usage
+            for(auto& [n, v] : dataCtx.u32Cols) v.clear(); 
+            for(auto& [n, v] : dataCtx.f32Cols) v.clear();
+        }
+
+        // Switch currentCtx to the filtered data table
+        currentCtx = dataCtx;
+        joinedTables.clear();
+        joinedTables.insert(dataTable);
+        hasPipeline = true;
+
+        return true;  // Handled this join
+    }
+    return false;
+}
+
+// -- Extracted: dedupDelimJoinRHS --
+// Deduplicates RHS for DELIM_JOIN self-comparison patterns.
+static void dedupDelimJoinRHS(
+    const IRJoin& join, EvalContext& currentCtx, EvalContext& rightCtx, bool debug) {
+    // Extract all self-comparison key columns from the condition
+    std::vector<std::string> delimDedupKeys;
+    bool hasINDFKey = false; // Has "IS NOT DISTINCT FROM" pattern
+
+    auto parts = splitConditionByAnd(join.conditionStr);
+    for (const auto& part : parts) {
+        bool isINDF = false;
+        std::string col = parseSelfComparison(part, &isINDF);
+        if (!col.empty()) {
+            delimDedupKeys.push_back(col);
+            hasINDFKey = hasINDFKey || isINDF;
+        }
+    }
+
+    // Only apply RHS dedup when:
+    // 1. IS NOT DISTINCT FROM conditions (standard DELIM_JOIN marker), OR
+    // 2. For "=" self-comparison: only when the left side has fewer rows
+    //    (indicating it's a DELIM correlation join, not a regular inner
+    //    join inside a DELIM subquery). Without this check, regular joins
+    //    like "l_orderkey = l_orderkey AND l_suppkey != l_suppkey" inside
+    //    EXISTS subqueries would incorrectly dedup the build side by a
+    //    subset of keys, losing correlation information (Q21 bug).
+    bool shouldDedup = !delimDedupKeys.empty() && !join.rightTable.empty() && rightCtx.rowCount > 1;
+    if (shouldDedup && !hasINDFKey) {
+        // Non-INDF self-comparison: only dedup when left has fewer rows
+        // (DELIM correlation pattern: small subquery result on left,
+        // large original context on right needing dedup)
+        shouldDedup = (currentCtx.rowCount < rightCtx.rowCount);
+    }
+    if (shouldDedup) {
+        // Compact rightCtx GPU buffers if activeRowsGPU is set (e.g., from
+        // post-join filter). Without this, GPU buffers have more elements
+        // than rowCount and the first rowCount elements are NOT the valid
+        // filtered rows — the dedup would operate on wrong data.
+        if (rightCtx.activeRowsGPU && rightCtx.activeRowsCountGPU > 0) {
+            uint32_t compactCount = rightCtx.activeRowsCountGPU;
+            if (debug) {
+                std::cerr << "[Exec] Join: DELIM dedup: compacting rightCtx GPU buffers via activeRowsGPU ("
+                          << compactCount << " active rows)\n";
+            }
+            rightCtx.gatherAllGPU(rightCtx.activeRowsGPU, compactCount);
+            // NOTE: syncCPUFromGPU removed — unified memory means
+            // ->contents() already provides zero-cost CPU access.
+            // Downstream code uses GPU buffers directly.
+            rightCtx.clearActiveRows();
+            rightCtx.rowCount = compactCount;
+        }
+        // Resolve key columns from GPU buffers (avoid CPU materialization)
+        std::vector<std::string> resolvedKeys;
+        std::vector<MTL::Buffer*> gpuKeys;
+        for (const auto& k : delimDedupKeys) {
+            // Try direct name in GPU
+            if (rightCtx.u32ColsGPU.count(k) && rightCtx.u32ColsGPU[k]) {
+                resolvedKeys.push_back(k);
+                gpuKeys.push_back(rightCtx.u32ColsGPU[k]);
+                continue;
+            }
+            bool found = false;
+            // Try suffixed names
+            for (int s = 1; s <= 9; ++s) {
+                std::string sk = k + "_" + std::to_string(s);
+                if (rightCtx.u32ColsGPU.count(sk) && rightCtx.u32ColsGPU[sk]) {
+                    resolvedKeys.push_back(sk);
+                    gpuKeys.push_back(rightCtx.u32ColsGPU[sk]);
+                    found = true;
+                    break;
+                }
+            }
+            // Try prefix swap
+            if (!found && k.size() > 2 && k[1] == '_') {
+                std::string suffix = k.substr(2);
+                for (const auto& p : {"l_", "o_", "c_", "p_", "s_", "ps_", "n_", "r_"}) {
+                    std::string alt = std::string(p) + suffix;
+                    if (rightCtx.u32ColsGPU.count(alt) && rightCtx.u32ColsGPU[alt]) {
+                        resolvedKeys.push_back(alt);
+                        gpuKeys.push_back(rightCtx.u32ColsGPU[alt]);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            // Fallback: upload from CPU
+            if (!found) {
+                auto tryUpload = [&](const std::string& name) -> bool {
+                    if (rightCtx.u32Cols.count(name) && rightCtx.u32Cols.at(name).size() == rightCtx.rowCount) {
+                        MTL::Buffer* buf = GpuOps::createBuffer(rightCtx.u32Cols[name].data(),
+                                                                rightCtx.rowCount * sizeof(uint32_t));
+                        rightCtx.u32ColsGPU[name].reset(buf);
+                        resolvedKeys.push_back(name);
+                        gpuKeys.push_back(buf);
+                        return true;
+                    }
+                    return false;
+                };
+                if (!tryUpload(k)) {
+                    for (int s = 1; s <= 9 && !found; ++s) {
+                        std::string sk = k + "_" + std::to_string(s);
+                        if (tryUpload(sk)) { found = true; break; }
+                    }
+                }
+            }
+        }
+
+        if (!resolvedKeys.empty()) {
+            // GPU-based dedup using dedupByKeys (radix sort + mark unique)
+            uint32_t newCount = 0;
+            MTL::Buffer* uniqueIdx = GpuOps::dedupByKeys(gpuKeys, rightCtx.rowCount, newCount);
+
+            if (newCount < rightCtx.rowCount) {
+                if (debug) {
+                    std::cerr << "[Exec] Join: DELIM dedup RHS by [";
+                    for (size_t ri=0; ri<resolvedKeys.size(); ++ri) { if (ri) std::cerr << ","; std::cerr << resolvedKeys[ri]; }
+                    std::cerr << "]: " << rightCtx.rowCount << " -> " << newCount << "\n";
+                }
+                // GPU gather all GPU columns (u32, f32, dict, flat string)
+                rightCtx.gatherAllGPU(uniqueIdx, newCount);
+                // NOTE: syncCPUFromGPU removed — unified memory means
+                // ->contents() already provides zero-cost CPU access.
+                // CPU-only columns below are gathered explicitly.
+                // CPU-only columns: download uniqueIdx and gather
+                std::vector<uint32_t> keepIdx(newCount);
+                memcpy(keepIdx.data(), uniqueIdx->contents(), newCount * sizeof(uint32_t));
+                for (auto& [name, col] : rightCtx.u32Cols) {
+                    if (!rightCtx.u32ColsGPU.count(name) && col.size() == rightCtx.rowCount) {
+                        std::vector<uint32_t> compact(newCount);
+                        for (uint32_t i = 0; i < newCount; ++i) compact[i] = col[keepIdx[i]];
+                        col = std::move(compact);
+                    }
+                }
+                for (auto& [name, col] : rightCtx.f32Cols) {
+                    if (!rightCtx.f32ColsGPU.count(name) && col.size() == rightCtx.rowCount) {
+                        std::vector<float> compact(newCount);
+                        for (uint32_t i = 0; i < newCount; ++i) compact[i] = col[keepIdx[i]];
+                        col = std::move(compact);
+                    }
+                }
+                for (auto& [name, vec] : rightCtx.stringCols) {
+                    if (vec.size() == rightCtx.rowCount && !rightCtx.dictCols.count(name) && !rightCtx.flatStringCols.count(name)) {
+                        std::vector<std::string> compact(newCount);
+                        for (uint32_t i = 0; i < newCount; ++i) compact[i] = vec[keepIdx[i]];
+                        vec = std::move(compact);
+                    }
+                }
+                rightCtx.invalidateStringColsForDictFlat();
+                uniqueIdx->release();
+
+                rightCtx.rowCount = newCount;
+                rightCtx.activeRows.clear();
+                rightCtx.activeRowsGPU = nullptr;
+                rightCtx.activeRowsCountGPU = 0;
+
+                // Strip right-side columns that already exist on the left side
+                {
+                    std::set<std::string> keepU32(resolvedKeys.begin(), resolvedKeys.end());
+                    // Check both CPU and GPU column maps (CPU may be absent
+                    // when syncCPUFromGPU is skipped — unified memory)
+                    for (const auto& [name, _] : rightCtx.u32Cols) {
+                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() &&
+                            currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end())
+                            keepU32.insert(name);
+                    }
+                    for (const auto& [name, _] : rightCtx.u32ColsGPU) {
+                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() &&
+                            currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end())
+                            keepU32.insert(name);
+                    }
+                    for (auto it2 = rightCtx.u32Cols.begin(); it2 != rightCtx.u32Cols.end(); ) {
+                        if (keepU32.find(it2->first) == keepU32.end()) it2 = rightCtx.u32Cols.erase(it2);
+                        else ++it2;
+                    }
+                    for (auto it2 = rightCtx.u32ColsGPU.begin(); it2 != rightCtx.u32ColsGPU.end(); ) {
+                        if (keepU32.find(it2->first) == keepU32.end())
+                            it2 = rightCtx.u32ColsGPU.erase(it2);
+                        else ++it2;
+                    }
+                    for (auto it2 = rightCtx.f32Cols.begin(); it2 != rightCtx.f32Cols.end(); ) {
+                        if (currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end() ||
+                            currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end())
+                            it2 = rightCtx.f32Cols.erase(it2);
+                        else ++it2;
+                    }
+                    for (auto it2 = rightCtx.f32ColsGPU.begin(); it2 != rightCtx.f32ColsGPU.end(); ) {
+                        if (currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end() ||
+                            currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end())
+                            it2 = rightCtx.f32ColsGPU.erase(it2);
+                        else ++it2;
+                    }
+                    if (debug) {
+                        std::cerr << "[Exec] Join: stripped RHS to " << rightCtx.u32Cols.size()
+                                  << " u32, " << rightCtx.f32Cols.size() << " f32, "
+                                  << rightCtx.stringCols.size() << " string cols\n";
+                    }
+                }
+            }
+        }
+    }
+}
+
 bool GpuExecutor::executeJoinPipeline(
     const IRJoin& join,
-    const std::string& datasetPath,
     EvalContext& currentCtx,
     std::unordered_map<std::string, EvalContext>& tableContexts,
     std::vector<EvalContext>& savedPipelines,
@@ -1770,17 +2613,17 @@ bool GpuExecutor::executeJoinPipeline(
                     std::cerr << "[Exec] Join: conditionStr=" << join.conditionStr << "\n";
                     std::cerr << "[Exec] Join: type=";
                     switch (join.type) {
-                        case JoinType::Inner: std::cerr << "Inner"; break;
-                        case JoinType::Left: std::cerr << "Left"; break;
-                        case JoinType::Semi: std::cerr << "Semi"; break;
-                        case JoinType::Anti: std::cerr << "Anti"; break;
-                        case JoinType::Mark: std::cerr << "Mark"; break;
-                        default: std::cerr << "Unknown(" << static_cast<int>(join.type) << ")"; break;
+                        if (debug) case JoinType::Inner: std::cerr << "Inner"; break;
+                        if (debug) case JoinType::Left: std::cerr << "Left"; break;
+                        if (debug) case JoinType::Semi: std::cerr << "Semi"; break;
+                        if (debug) case JoinType::Anti: std::cerr << "Anti"; break;
+                        if (debug) case JoinType::Mark: std::cerr << "Mark"; break;
+                        if (debug) default: std::cerr << "Unknown(" << static_cast<int>(join.type) << ")"; break;
                     }
-                    std::cerr << "\n";
-                    std::cerr << "[Exec] Join: condCols extracted: ";
-                    for (const auto& c : condCols) std::cerr << c << " ";
-                    std::cerr << "(total=" << condCols.size() << ")\n";
+                    if (debug) std::cerr << "\n";
+                    if (debug) std::cerr << "[Exec] Join: condCols extracted: ";
+                    if (debug) for (const auto& c : condCols) std::cerr << c << " ";
+                    if (debug) std::cerr << "(total=" << condCols.size() << ")\n";
                 }
                 
                 // Skip trivial self-joins from DELIM_SCAN correlation markers.
@@ -1861,601 +2704,15 @@ bool GpuExecutor::executeJoinPipeline(
                 }
                 
                 // Check for scalar subquery pattern (join condition contains SUBQUERY).
-                // currentCtx has scalar value; savedPipelines has main data.
                 if (join.conditionStr.find("SUBQUERY") != std::string::npos && !savedPipelines.empty()) {
-                    if (debug) {
-                        std::cerr << "[Exec] Join: detected scalar subquery pattern\n";
-                        std::cerr << "[Exec]   Current context rows: " << currentCtx.rowCount << "\n";
-                        std::cerr << "[Exec]   Saved pipelines: " << savedPipelines.size() << "\n";
-                    }
-                    
-                    // Determine if scalar is in currentCtx or savedPipelines
-                    double scalarValue = 0.0;
-                    bool foundScalar = false;
-                    bool scalarIsInCurrent = (currentCtx.rowCount == 1);
-                    
-                    int groupedPipelineIdx = -1;
-                    int scalarPipelineIdx = -1;
-
-                    if (!scalarIsInCurrent) {
-                        // Check if scalar is in savedPipelines
-                        for (size_t pi = 0; pi < savedPipelines.size(); ++pi) {
-                            if (savedPipelines[pi].rowCount == 1 || savedPipelines[pi].isScalarResult) {
-                                scalarPipelineIdx = static_cast<int>(pi);
-                                if (debug && savedPipelines[pi].isScalarResult) {
-                                    std::cerr << "[Exec]   Found scalar pipeline via flag (rowCount=" << savedPipelines[pi].rowCount << ")\n";
-                                }
-                                break;
-                            }
-                        }
-                    } else {
-                        // Scalar is current. Find grouped pipeline in saved
-                        for (size_t pi = 0; pi < savedPipelineTables.size(); ++pi) {
-                             if (savedPipelineTables[pi].count("__GROUPED__") > 0 || savedPipelines[pi].rowCount > 1) {
-                                 groupedPipelineIdx = static_cast<int>(pi);
-                                 break;
-                             }
-                        }
-                    }
-
-                    const EvalContext* scalarCtx = nullptr;
-                    if (scalarIsInCurrent) {
-                         scalarCtx = &currentCtx;
-                    } else if (scalarPipelineIdx >= 0) {
-                         scalarCtx = &savedPipelines[scalarPipelineIdx];
-                    }
-
-                    if (!scalarCtx) {
-                        result.error = "Scalar subquery join: could not locate scalar value source (neither current inputs nor saved pipelines seem correct)";
-                        return false;
-                    }
-
-                    // Extract scalar from scalarCtx
-                    // Priority: #0, then SUM/AVG, then any
-                    auto tryExtract = [&](const std::string& pattern, bool exact) -> bool {
-                         // Search f32
-                         for (const auto& [name, values] : scalarCtx->f32Cols) {
-                             if (values.empty()) continue;
-                             bool match = exact ? (name == pattern) : (name.find(pattern) != std::string::npos);
-                             if (match) {
-                                 scalarValue = values[0];
-                                 if (debug) std::cerr << "[Exec]   Scalar value from f32 col '" << name << "': " << scalarValue << "\n";
-                                 return true;
-                             }
-                         }
-                         // Search u32
-                         for (const auto& [name, values] : scalarCtx->u32Cols) {
-                             if (values.empty()) continue;
-                             bool match = exact ? (name == pattern) : (name.find(pattern) != std::string::npos);
-                             if (match) {
-                                 scalarValue = static_cast<double>(values[0]);
-                                 if (debug) std::cerr << "[Exec]   Scalar value from u32 col '" << name << "': " << scalarValue << "\n";
-                                 return true;
-                             }
-                         }
-                         return false;
-                    };
-
-                    if (!foundScalar) foundScalar = tryExtract("#0", true);
-                    // Also check for #0 in u32 (some DBs output integer counts)
-                    if (!foundScalar) foundScalar = tryExtract("SUM", false);
-                    if (!foundScalar) foundScalar = tryExtract("AVG", false);
-                    if (!foundScalar) foundScalar = tryExtract("first", false);
-                    
-                    // Fallback to any
-                    if (!foundScalar) foundScalar = tryExtract("", false);
-
-                    if (!foundScalar) {
-                        result.error = "Scalar subquery join: could not find scalar value";
-                        return false;
-                    }
-
-                    // Capture input scalars (e.g. CASE, Aggregates) to broadcast.
-                    std::map<std::string, float> scalarF32s;
-                    std::map<std::string, uint32_t> scalarU32s;
-                    if (scalarCtx) {
-                         for(auto& [n, v] : scalarCtx->f32Cols) if(!v.empty()) scalarF32s[n] = v[0];
-                         for(auto& [n, v] : scalarCtx->u32Cols) if(!v.empty()) scalarU32s[n] = v[0];
-                    }
-
-                    // Prepare the Data (Grouped) Pipeline
-                    if (scalarIsInCurrent) {
-                        if (groupedPipelineIdx < 0) {
-                            result.error = "Scalar subquery join: could not find grouped pipeline";
-                            return false;
-                        }
-                        // Restore saved pipeline
-                        currentCtx = savedPipelines[groupedPipelineIdx];
-                        joinedTables = savedPipelineTables[groupedPipelineIdx];
-                        joinedTables.erase("__GROUPED__");
-                        
-                        savedPipelines.erase(savedPipelines.begin() + groupedPipelineIdx);
-                        savedPipelineTables.erase(savedPipelineTables.begin() + groupedPipelineIdx);
-                        
-                        if (debug) {
-                            std::cerr << "[Exec]   Restored saved pipeline with " << currentCtx.rowCount << " rows\n";
-                        }
-                    } else {
-                        // Data is already currentCtx. Just remove the scalar pipeline from saved.
-                        if (scalarPipelineIdx >= 0) {
-                            savedPipelines.erase(savedPipelines.begin() + scalarPipelineIdx);
-                            savedPipelineTables.erase(savedPipelineTables.begin() + scalarPipelineIdx);
-                        }
-                        if (debug) {
-                            std::cerr << "[Exec]   Using current context as data table with " << currentCtx.rowCount << " rows\n";
-                        }
-                    }
-
-                    // Inject broadcasted scalars into the data context
-                    for(auto& [n, v] : scalarF32s) {
-                        if (currentCtx.f32Cols.find(n) == currentCtx.f32Cols.end() && currentCtx.f32ColsGPU.find(n) == currentCtx.f32ColsGPU.end()) {
-                             currentCtx.f32Cols[n] = {v}; // Size 1 vector (scalar broadcast)
-                             if (debug) std::cerr << "[Exec]   Broadcasted scalar F32col: " << n << "\n";
-                        }
-                    }
-                    for(auto& [n, v] : scalarU32s) {
-                        if (currentCtx.u32Cols.find(n) == currentCtx.u32Cols.end() && currentCtx.u32ColsGPU.find(n) == currentCtx.u32ColsGPU.end()) {
-                             currentCtx.u32Cols[n] = {v};
-                             if (debug) std::cerr << "[Exec]   Broadcasted scalar U32col: " << n << "\n";
-                        }
-                    }
-
-                    // Parse condition to extract comparison column and operator
-                    std::string condStr = join.conditionStr;
-                    
-                    // Find the comparison operator
-                    size_t opPos = std::string::npos;
-                    std::string opStr;
-                    engine::GpuFilterOp compOp = engine::GpuFilterOp::EQ;
-                    if ((opPos = condStr.find(" > SUBQUERY")) != std::string::npos) {
-                        opStr = ">";
-                        compOp = engine::GpuFilterOp::GT;
-                    } else if ((opPos = condStr.find(" >= SUBQUERY")) != std::string::npos) {
-                        opStr = ">=";
-                        compOp = engine::GpuFilterOp::GE;
-                    } else if ((opPos = condStr.find(" < SUBQUERY")) != std::string::npos) {
-                        opStr = "<";
-                        compOp = engine::GpuFilterOp::LT;
-                    } else if ((opPos = condStr.find(" <= SUBQUERY")) != std::string::npos) {
-                        opStr = "<=";
-                        compOp = engine::GpuFilterOp::LE;
-                    } else if ((opPos = condStr.find(" = SUBQUERY")) != std::string::npos) {
-                        opStr = "=";
-                        compOp = engine::GpuFilterOp::EQ;
-                    }
-                    
-                    if (opPos == std::string::npos) {
-                        result.error = "Scalar subquery join: unsupported comparison operator in condition: " + condStr;
-                        return false;
-                    }
-                    
-                    // Extract the column/expression being compared
-                    std::string leftExpr = condStr.substr(0, opPos);
-                    // Trim
-                    while (!leftExpr.empty() && std::isspace(leftExpr.back())) leftExpr.pop_back();
-                    
-                    // Find matching aggregate column in context
-                    std::string aggColName;
-                    
-                    // First check if we have #1 (typical aggregate position)
-                    if (currentCtx.f32Cols.find("#1") != currentCtx.f32Cols.end()) {
-                        aggColName = "#1";
-                    } else if (currentCtx.f32Cols.find("SUM_#1") != currentCtx.f32Cols.end()) {
-                        aggColName = "SUM_#1";
-                    } else if (currentCtx.u32Cols.find("#1") != currentCtx.u32Cols.end()) {
-                        aggColName = "#1";
-                    } else {
-                        // Look for any aggregate column
-                        for (const auto& [name, vals] : currentCtx.f32Cols) {
-                            if (name.find("SUM") != std::string::npos || 
-                                name.find("AVG") != std::string::npos ||
-                                name.find("COUNT") != std::string::npos ||
-                                name[0] == '#') {
-                                aggColName = name;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (aggColName.empty()) {
-                        result.error = "Scalar subquery join: could not find aggregate column";
-                        return false;
-                    }
-                    
-                    if (debug) {
-                        std::cerr << "[Exec]   Filtering: " << aggColName << " " << opStr << " " << scalarValue << "\n";
-                    }
-                    
-                    // Apply scalar subquery filter on GPU
-                    // 1. Ensure data columns are uploaded to GPU
-                    auto device = GpuColumnStore::instance().device();
-                    for (auto& [name, vec] : currentCtx.f32Cols) {
-                        if (currentCtx.f32ColsGPU.find(name) == currentCtx.f32ColsGPU.end()) {
-                            auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                            if (buf) currentCtx.f32ColsGPU[name].reset(buf);
-                        }
-                    }
-                    for (auto& [name, vec] : currentCtx.u32Cols) {
-                        if (currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end()) {
-                            auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                            if (buf) currentCtx.u32ColsGPU[name].reset(buf);
-                        }
-                    }
-                    
-                    // 2. Build a TypedExpr comparison predicate: aggColName <op> scalarValue
-                    CompareOp typedOp = CompareOp::Eq;
-                    switch (compOp) {
-                        case engine::GpuFilterOp::GT: typedOp = CompareOp::Gt; break;
-                        case engine::GpuFilterOp::GE: typedOp = CompareOp::Ge; break;
-                        case engine::GpuFilterOp::LT: typedOp = CompareOp::Lt; break;
-                        case engine::GpuFilterOp::LE: typedOp = CompareOp::Le; break;
-                        case engine::GpuFilterOp::EQ: typedOp = CompareOp::Eq; break;
-                        case engine::GpuFilterOp::NE: typedOp = CompareOp::Ne; break;
-                        default: break;
-                    }
-                    auto filterPred = TypedExpr::compare(
-                        typedOp,
-                        TypedExpr::column(aggColName),
-                        TypedExpr::literal(static_cast<double>(scalarValue))
-                    );
-                    
-                    // 3. Execute GPU filter
-                    if (!executeFilterRecursive(filterPred, currentCtx)) {
-                        result.error = "Scalar subquery join: GPU filter failed for " + aggColName;
-                        return false;
-                    }
-                    
-                    // 4. Materialize: compact all columns using activeRowsGPU
-                    if (currentCtx.activeRowsGPU && currentCtx.activeRowsCountGPU > 0) {
-                        uint32_t count = currentCtx.activeRowsCountGPU;
-                        uint32_t* indices = (uint32_t*)currentCtx.activeRowsGPU->contents();
-                        
-                        // Compact GPU columns
-                        for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-                            if (!buf) continue;
-                            uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
-                            if (bufRows > count) {
-                                auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, count, true);
-                                if (compacted) buf.reset(compacted);
-                            }
-                        }
-                        for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-                            if (!buf) continue;
-                            uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
-                            if (bufRows > count) {
-                                auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, count, true);
-                                if (compacted) buf.reset(compacted);
-                            }
-                        }
-                        // Compact CPU columns: sync from GPU if possible, else CPU gather
-                        for (auto& [name, vec] : currentCtx.u32Cols) {
-                            if (vec.size() > count) {
-                                if (currentCtx.u32ColsGPU.count(name) && currentCtx.u32ColsGPU[name]) {
-                                    vec.resize(count);
-                                    std::memcpy(vec.data(), currentCtx.u32ColsGPU[name]->contents(), count * sizeof(uint32_t));
-                                } else {
-                                    std::vector<uint32_t> c;
-                                    c.reserve(count);
-                                    for (uint32_t i = 0; i < count; ++i)
-                                        c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : 0u);
-                                    vec = std::move(c);
-                                }
-                            }
-                        }
-                        for (auto& [name, vec] : currentCtx.f32Cols) {
-                            if (vec.size() > count) {
-                                if (currentCtx.f32ColsGPU.count(name) && currentCtx.f32ColsGPU[name]) {
-                                    vec.resize(count);
-                                    std::memcpy(vec.data(), currentCtx.f32ColsGPU[name]->contents(), count * sizeof(float));
-                                } else {
-                                    std::vector<float> c;
-                                    c.reserve(count);
-                                    for (uint32_t i = 0; i < count; ++i)
-                                        c.push_back(indices[i] < (uint32_t)vec.size() ? vec[indices[i]] : 0.0f);
-                                    vec = std::move(c);
-                                }
-                            }
-                        }
-                        
-                        if (currentCtx.activeRowsGPU) { currentCtx.activeRowsGPU = nullptr; }
-                        currentCtx.activeRowsCountGPU = 0;
-                        currentCtx.activeRows.clear();
-                        currentCtx.rowCount = count;
-                    } else {
-                        // No rows matched
-                        currentCtx.rowCount = 0;
-                        currentCtx.activeRows.clear();
-                        currentCtx.activeRowsGPU = nullptr;
-                        currentCtx.activeRowsCountGPU = 0;
-                    }
-                    
-                    // Reset scalar aggregate flag - we now have a proper table result
-                    result.isScalarAggregate = false;
-                    
-                    if (debug) {
-                        std::cerr << "[Exec]   After scalar filter: " << currentCtx.rowCount << " rows\n";
-                    }
-                    
-                    // Don't do the normal join - we've handled this specially
-                    return true;
+                    if (handleScalarSubquerySavedPipelines(join, currentCtx, savedPipelines, savedPipelineTables, joinedTables, result, debug))
+                        return true;
                 }
                 
                 // Alt: scalar SUBQUERY join (savedPipelines empty, data in tableContexts).
-                // currentCtx has scalar; right side is in tableContexts.
                 if (join.conditionStr.find("SUBQUERY") != std::string::npos && savedPipelines.empty()) {
-                    // Check if this is a theta-comparison (>, <, >=, <=) with SUBQUERY
-                    std::string condStr = join.conditionStr;
-                    size_t opPos = std::string::npos;
-                    std::string opStr;
-                    bool isTheta = false;
-                    
-                    if ((opPos = condStr.find(" > SUBQUERY")) != std::string::npos) {
-                        opStr = ">"; isTheta = true;
-                    } else if ((opPos = condStr.find(" >= SUBQUERY")) != std::string::npos) {
-                        opStr = ">="; isTheta = true;
-                    } else if ((opPos = condStr.find(" < SUBQUERY")) != std::string::npos) {
-                        opStr = "<"; isTheta = true;
-                    } else if ((opPos = condStr.find(" <= SUBQUERY")) != std::string::npos) {
-                        opStr = "<="; isTheta = true;
-                    } else if ((opPos = condStr.find(" = SUBQUERY")) != std::string::npos) {
-                        opStr = "="; isTheta = true;
-                    }
-                    
-                    if (isTheta && currentCtx.rowCount <= 1) {
-                        if (debug) {
-                            std::cerr << "[Exec] Join: scalar SUBQUERY theta-join (tableContexts path)\n";
-                            std::cerr << "[Exec]   Current context rows: " << currentCtx.rowCount << "\n";
-                        }
-                        
-                        // Extract scalar value from currentCtx
-                        double scalarValue = 0.0;
-                        bool foundScalar = false;
-                        
-                        // Priority 1: Explicit AVG column (common for scalar subquery).
-                        auto avgIt = currentCtx.f32Cols.find("AVG");
-                        if (avgIt != currentCtx.f32Cols.end() && !avgIt->second.empty()) {
-                            scalarValue = avgIt->second[0];
-                            foundScalar = true;
-                            if (debug) {
-                                std::cerr << "[Exec]   Scalar value from 'AVG': " << scalarValue << "\n";
-                            }
-                        }
-                        
-                        // Priority 2: Look for SUM column
-                        if (!foundScalar) {
-                            auto sumIt = currentCtx.f32Cols.find("SUM");
-                            if (sumIt != currentCtx.f32Cols.end() && !sumIt->second.empty()) {
-                                scalarValue = sumIt->second[0];
-                                foundScalar = true;
-                                if (debug) {
-                                    std::cerr << "[Exec]   Scalar value from 'SUM': " << scalarValue << "\n";
-                                }
-                            }
-                        }
-                        
-                        // Priority 3: #0 (first computed column, scalar result).
-                        if (!foundScalar) {
-                            auto numIt = currentCtx.f32Cols.find("#0");
-                            if (numIt != currentCtx.f32Cols.end() && !numIt->second.empty()) {
-                                scalarValue = numIt->second[0];
-                                foundScalar = true;
-                                if (debug) {
-                                    std::cerr << "[Exec]   Scalar value from '#0': " << scalarValue << "\n";
-                                }
-                            }
-                        }
-                        
-                        // Fallback: any f32 column except COUNT
-                        if (!foundScalar) {
-                            for (const auto& [name, values] : currentCtx.f32Cols) {
-                                if (!values.empty() && name.find("COUNT") == std::string::npos) {
-                                    scalarValue = values[0];
-                                    foundScalar = true;
-                                    if (debug) {
-                                        std::cerr << "[Exec]   Scalar value fallback from '" << name << "': " << scalarValue << "\n";
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (!foundScalar) {
-                            if (debug) std::cerr << "[Exec]   Could not find scalar value\n";
-                            result.error = "Scalar SUBQUERY join: could not extract scalar value";
-                            return false;
-                        }
-                        
-                        // Find the data table - the one containing the comparison column
-                        // Parse column from condition (e.g., "CAST(c_acctbal AS DOUBLE)" -> c_acctbal)
-                        std::string leftExpr = condStr.substr(0, opPos);
-                        // Extract column name from CAST or direct reference
-                        std::string filterCol;
-                        if (leftExpr.find("CAST(") != std::string::npos) {
-                            size_t start = leftExpr.find("CAST(") + 5;
-                            size_t end = leftExpr.find(" AS", start);
-                            if (end != std::string::npos) {
-                                filterCol = leftExpr.substr(start, end - start);
-                                // Trim
-                                while (!filterCol.empty() && std::isspace(filterCol.front())) filterCol.erase(0, 1);
-                                while (!filterCol.empty() && std::isspace(filterCol.back())) filterCol.pop_back();
-                            }
-                        }
-                        if (filterCol.empty()) {
-                            filterCol = leftExpr;
-                            while (!filterCol.empty() && std::isspace(filterCol.front())) filterCol.erase(0, 1);
-                            while (!filterCol.empty() && std::isspace(filterCol.back())) filterCol.pop_back();
-                        }
-                        
-                        if (debug) {
-                            std::cerr << "[Exec]   Filter column: " << filterCol << "\n";
-                        }
-                        
-                        // Find the table with this column in tableContexts
-                        std::string dataTable;
-                        for (const auto& [tname, tctx] : tableContexts) {
-                            if (tctx.f32Cols.find(filterCol) != tctx.f32Cols.end() ||
-                                tctx.u32Cols.find(filterCol) != tctx.u32Cols.end()) {
-                                // Check for suffixed versions too
-                                if (joinedTables.find(tname) == joinedTables.end()) {
-                                    dataTable = tname;
-                                    break;
-                                }
-                            }
-                            // Try with suffix
-                            for (const auto& [cname, cvals] : tctx.f32Cols) {
-                                if ((cname == filterCol || cname.find(filterCol + "_") == 0 || 
-                                     cname.rfind("_" + filterCol) == cname.size() - filterCol.size() - 1) &&
-                                    joinedTables.find(tname) == joinedTables.end()) {
-                                    dataTable = tname;
-                                    filterCol = cname;  // Use actual column name
-                                    break;
-                                }
-                            }
-                            if (!dataTable.empty()) break;
-                        }
-                        
-                        if (dataTable.empty()) {
-                            if (debug) std::cerr << "[Exec]   Could not find data table\n";
-                            result.error = "Scalar SUBQUERY join: could not find data table";
-                            return false;
-                        }
-                        
-                        if (debug) {
-                            std::cerr << "[Exec]   Data table: " << dataTable << " with " 
-                                      << tableContexts[dataTable].rowCount << " rows\n";
-                        }
-                        
-                        // Apply the filter: col <op> scalarValue
-                        EvalContext& dataCtx = tableContexts[dataTable];
-                        std::vector<uint32_t> passingIndices;
-                        
-                        auto it = dataCtx.f32Cols.find(filterCol);
-                        if (it == dataCtx.f32Cols.end()) {
-                            // Try suffixed versions
-                            for (const auto& [cname, cvals] : dataCtx.f32Cols) {
-                                if (cname.find(filterCol) != std::string::npos) {
-                                    it = dataCtx.f32Cols.find(cname);
-                                    filterCol = cname;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (it != dataCtx.f32Cols.end()) {
-                            // Valid column to filter
-                            auto& store = GpuColumnStore::instance();
-                             
-                            // Ensure column is on GPU
-                            MTL::Buffer* colBuf = nullptr;
-                            if (dataCtx.f32ColsGPU.count(filterCol)) {
-                                colBuf = dataCtx.f32ColsGPU[filterCol];
-                            } else {
-                                // Upload (Lazy)
-                                const auto& vec = it->second;
-                                colBuf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                                dataCtx.f32ColsGPU[filterCol].reset(colBuf);
-                            }
-
-                            // Map Op
-                            engine::GpuFilterOp op = engine::GpuFilterOp::EQ;
-                            if (opStr == ">") op = engine::GpuFilterOp::GT;
-                            else if (opStr == ">=") op = engine::GpuFilterOp::GE;
-                            else if (opStr == "<") op = engine::GpuFilterOp::LT;
-                            else if (opStr == "<=") op = engine::GpuFilterOp::LE;
-                            else if (opStr == "=") op = engine::GpuFilterOp::EQ;
-
-                            std::optional<FilterResult> filterRes;
-                            if (dataCtx.activeRowsGPU) {
-                                 filterRes = GpuOps::filterF32Indexed(filterCol, colBuf, dataCtx.activeRowsGPU, dataCtx.activeRowsCountGPU, op, static_cast<float>(scalarValue));
-                            } else {
-                                 filterRes = GpuOps::filterF32(filterCol, colBuf, dataCtx.rowCount, op, static_cast<float>(scalarValue));
-                            }
-                            
-                            if (!filterRes) throw std::runtime_error("GPU Scalar Filter failed");
-                            
-                            MTL::Buffer* indices = filterRes->indices;
-                            uint32_t newCount = filterRes->count;
-                            
-                            // Download indices for CPU String sync
-                            std::vector<uint32_t> passingIndices(newCount);
-                            if (newCount > 0) {
-                                std::memcpy(passingIndices.data(), indices->contents(), newCount * sizeof(uint32_t));
-                            }
-
-                            // Safe Gather for U32 (preserving aliases and avoiding double-free)
-                            std::unordered_map<MTL::Buffer*, MTL::Buffer*> u32Replacements;
-                            for (auto& [name, buf] : dataCtx.u32ColsGPU) {
-                                if (buf && u32Replacements.find(buf) == u32Replacements.end()) {
-                                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount);
-                                }
-                            }
-                            // Update map with new buffers
-                            for (auto& [name, buf] : dataCtx.u32ColsGPU) {
-                                if (buf) {
-                                    MTL::Buffer* newBuf = u32Replacements[buf];
-                                    newBuf->retain(); 
-                                    buf.reset(newBuf); 
-                                }
-                            }
-                            // Consume creation refs of new buffers (old buffers already released by GpuBuffer::reset)
-                            for (auto& [_, newBuf] : u32Replacements) {
-                                newBuf->release(); 
-                            }
-                            
-                            // Safe Gather for F32
-                            std::unordered_map<MTL::Buffer*, MTL::Buffer*> f32Replacements;
-                            for (auto& [name, buf] : dataCtx.f32ColsGPU) {
-                                if (buf && f32Replacements.find(buf.get()) == f32Replacements.end()) {
-                                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount);
-                                }
-                            }
-                            for (auto& [name, buf] : dataCtx.f32ColsGPU) {
-                                if (buf) {
-                                    MTL::Buffer* newBuf = f32Replacements[buf.get()];
-                                    newBuf->retain();
-                                    buf.reset(newBuf);
-                                }
-                            }
-                            for (auto& [_, newBuf] : f32Replacements) {
-                                newBuf->release();
-                            }
-                            
-                            // Handle strings on CPU (fallback when dict/flat not available)
-                            for (auto& [name, vals] : dataCtx.stringCols) {
-                                if (dataCtx.dictCols.count(name)) continue; // dict path below
-                                if (dataCtx.flatStringCols.count(name)) continue; // flat path below
-                                std::vector<std::string> compacted;
-                                compacted.reserve(passingIndices.size());
-                                for (uint32_t idx : passingIndices) {
-                                    if (idx < vals.size()) compacted.push_back(vals[idx]);
-                                    else compacted.push_back("");
-                                }
-                                vals = std::move(compacted);
-                            }
-
-                            // GPU gather for dict and flat string columns
-                            dataCtx.compactDictCols(indices, newCount);
-                            dataCtx.compactFlatStringCols(indices, newCount);
-                            dataCtx.invalidateStringColsForDictFlat();
-
-                            // Update Context
-                            dataCtx.rowCount = newCount;
-                            
-                            dataCtx.clearActiveRows();
-                            
-                            // Clear CPU vectors to enforce GPU usage
-                            for(auto& [n, v] : dataCtx.u32Cols) v.clear(); 
-                            for(auto& [n, v] : dataCtx.f32Cols) v.clear();
-                        }
-                        
-                        // Switch currentCtx to the filtered data table
-                        currentCtx = dataCtx;
-                        joinedTables.clear();
-                        joinedTables.insert(dataTable);
-                        hasPipeline = true;
-                        
-                        return true;  // Handled this join
-                    }
+                    if (handleScalarSubqueryTableContexts(join, currentCtx, tableContexts, joinedTables, hasPipeline, result, debug))
+                        return true;
                 }
                 
                 // Check for malformed joins where both condition columns are from the same table
@@ -2987,7 +3244,7 @@ bool GpuExecutor::executeJoinPipeline(
                                     continue;  // Skip - use saved pipeline instead
                                 }
                                 if (savedPipelineIsAggregated && debug) {
-                                    std::cerr << "[Exec] Join: table " << key 
+                                    if (debug) std::cerr << "[Exec] Join: table " << key 
                                               << " is in saved pipeline but pipeline was aggregated, using fresh table\n";
                                 }
                                 
@@ -3016,8 +3273,8 @@ bool GpuExecutor::executeJoinPipeline(
                         std::cerr << "[Exec] Join: using saved pipeline " << savedPipelineIdx 
                                   << " with " << rightCtx.rowCount << " rows as right side\n";
                         std::cerr << "[Exec] Join: saved pipeline tables: ";
-                        for (const auto& t : rightJoinedTables) std::cerr << t << " ";
-                        std::cerr << "\n";
+                        if (debug) for (const auto& t : rightJoinedTables) std::cerr << t << " ";
+                        if (debug) std::cerr << "\n";
                     }
                 } else if (!unjoinedTableForJoin.empty()) {
                     // Use the unjoined table we found earlier (priority over other inference)
@@ -3153,9 +3410,9 @@ bool GpuExecutor::executeJoinPipeline(
                             std::cerr << "[Exec] Join: cannot determine right table. joinedTables=";
                             for (const auto& t : joinedTables) std::cerr << t << " ";
                             std::cerr << "\n";
-                            std::cerr << "[Exec] Join: available tableContexts=";
-                            for (const auto& [k, v] : tableContexts) std::cerr << k << " ";
-                            std::cerr << "\n";
+                            if (debug) std::cerr << "[Exec] Join: available tableContexts=";
+                            if (debug) for (const auto& [k, v] : tableContexts) std::cerr << k << " ";
+                            if (debug) std::cerr << "\n";
                         }
                         result.error = "Cannot determine right table for join";
                         return false;
@@ -3177,208 +3434,7 @@ bool GpuExecutor::executeJoinPipeline(
                     }
                 }
 
-                // DELIM_JOIN dedup: For self-comparison joins (same column on both sides),
-                // part of DuckDB's DELIM pattern, the RHS may have duplicate join keys
-                // causing many-to-many fan-out. Deduplicate the RHS by ALL join key columns
-                // to ensure each probe gets at most one match.
-                {
-                    // Extract all self-comparison key columns from the condition
-                    std::vector<std::string> delimDedupKeys;
-                    bool hasINDFKey = false; // Has "IS NOT DISTINCT FROM" pattern
-                    
-                    auto parts = splitConditionByAnd(join.conditionStr);
-                    for (const auto& part : parts) {
-                        bool isINDF = false;
-                        std::string col = parseSelfComparison(part, &isINDF);
-                        if (!col.empty()) {
-                            delimDedupKeys.push_back(col);
-                            hasINDFKey = hasINDFKey || isINDF;
-                        }
-                    }
-                    
-                    // Only apply RHS dedup when:
-                    // 1. IS NOT DISTINCT FROM conditions (standard DELIM_JOIN marker), OR
-                    // 2. For "=" self-comparison: only when the left side has fewer rows
-                    //    (indicating it's a DELIM correlation join, not a regular inner
-                    //    join inside a DELIM subquery). Without this check, regular joins
-                    //    like "l_orderkey = l_orderkey AND l_suppkey != l_suppkey" inside
-                    //    EXISTS subqueries would incorrectly dedup the build side by a
-                    //    subset of keys, losing correlation information (Q21 bug).
-                    bool shouldDedup = !delimDedupKeys.empty() && !join.rightTable.empty() && rightCtx.rowCount > 1;
-                    if (shouldDedup && !hasINDFKey) {
-                        // Non-INDF self-comparison: only dedup when left has fewer rows
-                        // (DELIM correlation pattern: small subquery result on left,
-                        // large original context on right needing dedup)
-                        shouldDedup = (currentCtx.rowCount < rightCtx.rowCount);
-                    }
-                    if (shouldDedup) {
-                        // Compact rightCtx GPU buffers if activeRowsGPU is set (e.g., from
-                        // post-join filter). Without this, GPU buffers have more elements
-                        // than rowCount and the first rowCount elements are NOT the valid
-                        // filtered rows — the dedup would operate on wrong data.
-                        if (rightCtx.activeRowsGPU && rightCtx.activeRowsCountGPU > 0) {
-                            uint32_t compactCount = rightCtx.activeRowsCountGPU;
-                            if (debug) {
-                                std::cerr << "[Exec] Join: DELIM dedup: compacting rightCtx GPU buffers via activeRowsGPU ("
-                                          << compactCount << " active rows)\n";
-                            }
-                            rightCtx.gatherAllGPU(rightCtx.activeRowsGPU, compactCount);
-                            // NOTE: syncCPUFromGPU removed — unified memory means
-                            // ->contents() already provides zero-cost CPU access.
-                            // Downstream code uses GPU buffers directly.
-                            rightCtx.clearActiveRows();
-                            rightCtx.rowCount = compactCount;
-                        }
-                        // Resolve key columns from GPU buffers (avoid CPU materialization)
-                        std::vector<std::string> resolvedKeys;
-                        std::vector<MTL::Buffer*> gpuKeys;
-                        for (const auto& k : delimDedupKeys) {
-                            // Try direct name in GPU
-                            if (rightCtx.u32ColsGPU.count(k) && rightCtx.u32ColsGPU[k]) {
-                                resolvedKeys.push_back(k);
-                                gpuKeys.push_back(rightCtx.u32ColsGPU[k]);
-                                continue;
-                            }
-                            bool found = false;
-                            // Try suffixed names
-                            for (int s = 1; s <= 9; ++s) {
-                                std::string sk = k + "_" + std::to_string(s);
-                                if (rightCtx.u32ColsGPU.count(sk) && rightCtx.u32ColsGPU[sk]) {
-                                    resolvedKeys.push_back(sk);
-                                    gpuKeys.push_back(rightCtx.u32ColsGPU[sk]);
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            // Try prefix swap
-                            if (!found && k.size() > 2 && k[1] == '_') {
-                                std::string suffix = k.substr(2);
-                                for (const auto& p : {"l_", "o_", "c_", "p_", "s_", "ps_", "n_", "r_"}) {
-                                    std::string alt = std::string(p) + suffix;
-                                    if (rightCtx.u32ColsGPU.count(alt) && rightCtx.u32ColsGPU[alt]) {
-                                        resolvedKeys.push_back(alt);
-                                        gpuKeys.push_back(rightCtx.u32ColsGPU[alt]);
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            // Fallback: upload from CPU
-                            if (!found) {
-                                auto tryUpload = [&](const std::string& name) -> bool {
-                                    if (rightCtx.u32Cols.count(name) && rightCtx.u32Cols.at(name).size() == rightCtx.rowCount) {
-                                        MTL::Buffer* buf = GpuOps::createBuffer(rightCtx.u32Cols[name].data(),
-                                                                                rightCtx.rowCount * sizeof(uint32_t));
-                                        rightCtx.u32ColsGPU[name].reset(buf);
-                                        resolvedKeys.push_back(name);
-                                        gpuKeys.push_back(buf);
-                                        return true;
-                                    }
-                                    return false;
-                                };
-                                if (!tryUpload(k)) {
-                                    for (int s = 1; s <= 9 && !found; ++s) {
-                                        std::string sk = k + "_" + std::to_string(s);
-                                        if (tryUpload(sk)) { found = true; break; }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if (!resolvedKeys.empty()) {
-                            // GPU-based dedup using dedupByKeys (radix sort + mark unique)
-                            uint32_t newCount = 0;
-                            MTL::Buffer* uniqueIdx = GpuOps::dedupByKeys(gpuKeys, rightCtx.rowCount, newCount);
-                            
-                            if (newCount < rightCtx.rowCount) {
-                                if (debug) {
-                                    std::cerr << "[Exec] Join: DELIM dedup RHS by [";
-                                    for (size_t ri=0; ri<resolvedKeys.size(); ++ri) { if (ri) std::cerr << ","; std::cerr << resolvedKeys[ri]; }
-                                    std::cerr << "]: " << rightCtx.rowCount << " -> " << newCount << "\n";
-                                }
-                                // GPU gather all GPU columns (u32, f32, dict, flat string)
-                                rightCtx.gatherAllGPU(uniqueIdx, newCount);
-                                // NOTE: syncCPUFromGPU removed — unified memory means
-                                // ->contents() already provides zero-cost CPU access.
-                                // CPU-only columns below are gathered explicitly.
-                                // CPU-only columns: download uniqueIdx and gather
-                                std::vector<uint32_t> keepIdx(newCount);
-                                memcpy(keepIdx.data(), uniqueIdx->contents(), newCount * sizeof(uint32_t));
-                                for (auto& [name, col] : rightCtx.u32Cols) {
-                                    if (!rightCtx.u32ColsGPU.count(name) && col.size() == rightCtx.rowCount) {
-                                        std::vector<uint32_t> compact(newCount);
-                                        for (uint32_t i = 0; i < newCount; ++i) compact[i] = col[keepIdx[i]];
-                                        col = std::move(compact);
-                                    }
-                                }
-                                for (auto& [name, col] : rightCtx.f32Cols) {
-                                    if (!rightCtx.f32ColsGPU.count(name) && col.size() == rightCtx.rowCount) {
-                                        std::vector<float> compact(newCount);
-                                        for (uint32_t i = 0; i < newCount; ++i) compact[i] = col[keepIdx[i]];
-                                        col = std::move(compact);
-                                    }
-                                }
-                                for (auto& [name, vec] : rightCtx.stringCols) {
-                                    if (vec.size() == rightCtx.rowCount && !rightCtx.dictCols.count(name) && !rightCtx.flatStringCols.count(name)) {
-                                        std::vector<std::string> compact(newCount);
-                                        for (uint32_t i = 0; i < newCount; ++i) compact[i] = vec[keepIdx[i]];
-                                        vec = std::move(compact);
-                                    }
-                                }
-                                rightCtx.invalidateStringColsForDictFlat();
-                                uniqueIdx->release();
-                                
-                                rightCtx.rowCount = newCount;
-                                rightCtx.activeRows.clear();
-                                rightCtx.activeRowsGPU = nullptr;
-                                rightCtx.activeRowsCountGPU = 0;
-                                
-                                // Strip right-side columns that already exist on the left side
-                                {
-                                    std::set<std::string> keepU32(resolvedKeys.begin(), resolvedKeys.end());
-                                    // Check both CPU and GPU column maps (CPU may be absent
-                                    // when syncCPUFromGPU is skipped — unified memory)
-                                    for (const auto& [name, _] : rightCtx.u32Cols) {
-                                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() &&
-                                            currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end())
-                                            keepU32.insert(name);
-                                    }
-                                    for (const auto& [name, _] : rightCtx.u32ColsGPU) {
-                                        if (currentCtx.u32Cols.find(name) == currentCtx.u32Cols.end() &&
-                                            currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end())
-                                            keepU32.insert(name);
-                                    }
-                                    for (auto it2 = rightCtx.u32Cols.begin(); it2 != rightCtx.u32Cols.end(); ) {
-                                        if (keepU32.find(it2->first) == keepU32.end()) it2 = rightCtx.u32Cols.erase(it2);
-                                        else ++it2;
-                                    }
-                                    for (auto it2 = rightCtx.u32ColsGPU.begin(); it2 != rightCtx.u32ColsGPU.end(); ) {
-                                        if (keepU32.find(it2->first) == keepU32.end())
-                                            it2 = rightCtx.u32ColsGPU.erase(it2);
-                                        else ++it2;
-                                    }
-                                    for (auto it2 = rightCtx.f32Cols.begin(); it2 != rightCtx.f32Cols.end(); ) {
-                                        if (currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end() ||
-                                            currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end())
-                                            it2 = rightCtx.f32Cols.erase(it2);
-                                        else ++it2;
-                                    }
-                                    for (auto it2 = rightCtx.f32ColsGPU.begin(); it2 != rightCtx.f32ColsGPU.end(); ) {
-                                        if (currentCtx.f32ColsGPU.find(it2->first) != currentCtx.f32ColsGPU.end() ||
-                                            currentCtx.f32Cols.find(it2->first) != currentCtx.f32Cols.end())
-                                            it2 = rightCtx.f32ColsGPU.erase(it2);
-                                        else ++it2;
-                                    }
-                                    if (debug) {
-                                        std::cerr << "[Exec] Join: stripped RHS to " << rightCtx.u32Cols.size()
-                                                  << " u32, " << rightCtx.f32Cols.size() << " f32, "
-                                                  << rightCtx.stringCols.size() << " string cols\n";
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                dedupDelimJoinRHS(join, currentCtx, rightCtx, debug);
 
                 // SEMI join with self-comparison: swap so outer table is the probe side.
                 if (join.type == JoinType::Semi && !join.rightTable.empty()) {
@@ -3397,7 +3453,7 @@ bool GpuExecutor::executeJoinPipeline(
                     }
                 }
 
-                if (!executeJoin(join, datasetPath, currentCtx, rightCtx, joinCtx)) {
+                if (!executeJoin(join, currentCtx, rightCtx, joinCtx)) {
                     result.error = "Join execution failed";
                     return false;
                 }
@@ -3407,9 +3463,9 @@ bool GpuExecutor::executeJoinPipeline(
                     std::cerr << "[Exec] Join: currentCtx after move: rowCount=" << currentCtx.rowCount << " u32ColsGPU.size=" << currentCtx.u32ColsGPU.size() << "\n";
                     std::cerr << "[Exec] Join: currentCtx.stringCols after move:\n";
                     for (const auto& [n, v] : currentCtx.stringCols) {
-                        std::cerr << "[Exec]   " << n << " size=" << v.size() << "\n";
+                        if (debug) std::cerr << "[Exec]   " << n << " size=" << v.size() << "\n";
                     }
-                    std::cerr << "[Exec] Join: currentCtx.currentTable='" << currentCtx.currentTable << "'\n";
+                    if (debug) std::cerr << "[Exec] Join: currentCtx.currentTable='" << currentCtx.currentTable << "'\n";
                 }
                 // Merge all joined tables from both sides
                 for (const auto& t : rightJoinedTables) {
