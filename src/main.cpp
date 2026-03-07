@@ -218,5 +218,12 @@ int main(int argc, const char* argv[]) {
 
     // Make sure DuckDB EXPLAIN reads the same dataset directory as execution.
     setenv("GPUDB_DATASET_PATH", s_datasetPath.c_str(), 1);
-    return executeQuery(sql);
+
+    // Initialise embedded DuckDB once (persistent DB or in-memory views)
+    engine::DuckDBAdapter::init(s_datasetPath);
+
+    int rc = executeQuery(sql);
+
+    engine::DuckDBAdapter::shutdown();
+    return rc;
 }

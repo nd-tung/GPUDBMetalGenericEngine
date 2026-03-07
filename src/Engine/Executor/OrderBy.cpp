@@ -373,16 +373,16 @@ bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table,
             gatherMs, totalGatherElements);
 
         // Sync gathered GPU buffers to CPU vectors; keep GPU buffers alive for downstream reuse
-        table.u32ColsGPU.resize(table.u32Cols.size(), nullptr);
+        table.u32ColsGPU.resize(table.u32Cols.size());
         for (size_t i = 0; i < table.u32Cols.size(); ++i) {
             std::memcpy(table.u32Cols[i].data(), gatheredU32[i]->contents(), n * sizeof(uint32_t));
-            table.u32ColsGPU[i] = gatheredU32[i];  // retain gathered GPU buffer
+            table.u32ColsGPU[i].reset(gatheredU32[i]);  // GpuBuffer takes ownership
             if (srcU32Bufs[i]) srcU32Bufs[i]->release();
         }
-        table.f32ColsGPU.resize(table.f32Cols.size(), nullptr);
+        table.f32ColsGPU.resize(table.f32Cols.size());
         for (size_t i = 0; i < table.f32Cols.size(); ++i) {
             std::memcpy(table.f32Cols[i].data(), gatheredF32[i]->contents(), n * sizeof(float));
-            table.f32ColsGPU[i] = gatheredF32[i];  // retain gathered GPU buffer
+            table.f32ColsGPU[i].reset(gatheredF32[i]);  // GpuBuffer takes ownership
             if (srcF32Bufs[i]) srcF32Bufs[i]->release();
         }
 

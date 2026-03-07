@@ -91,17 +91,20 @@ static uint64_t scanInPlace(MTL::Buffer* data, uint32_t count) {
             cmd->waitUntilCompleted();
         }
     } else {
-        auto readBuf = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        // Cached 4-byte readBuf — avoids repeated alloc/release for single-block scans
+        static MTL::Buffer* s_readBuf = nullptr;
+        if (!s_readBuf) {
+            s_readBuf = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        }
         auto cmd = store.queue()->commandBuffer();
         auto blit = cmd->blitCommandEncoder();
-        blit->copyFromBuffer(partials, 0, readBuf, 0, sizeof(uint32_t));
+        blit->copyFromBuffer(partials, 0, s_readBuf, 0, sizeof(uint32_t));
         blit->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
         uint32_t val;
-        std::memcpy(&val, readBuf->contents(), sizeof(uint32_t));
+        std::memcpy(&val, s_readBuf->contents(), sizeof(uint32_t));
         totalSum = val;
-        readBuf->release();
     }
     
     partials->release();
@@ -128,119 +131,142 @@ uint32_t GpuOps::fnv1a32(std::string_view s) {
 
 // --- File loaders ---
 
-static std::vector<uint32_t> loadU32Column(const std::string& filePath, int columnIndex) {
-    std::vector<uint32_t> data;
-    std::ifstream file(filePath);
-    if (!file.is_open()) return data;
+// ============================================================================
+// Single-pass multi-column loader: reads a .tbl file ONCE and extracts all
+// requested columns in a single sweep. Replaces per-column loaders that each
+// re-read the entire file.
+// ============================================================================
 
+struct ColLoadSpec {
+    int columnIndex;           // 0-based column in the pipe-delimited file
+    std::string outputName;    // key for the result maps
+    enum Type { kU32, kF32, kDateU32, kStrCharU32, kStringRaw } type;
+};
+
+struct OnePassResults {
+    std::unordered_map<std::string, std::vector<uint32_t>> u32Data;   // U32, DateU32, StrCharU32
+    std::unordered_map<std::string, std::vector<float>>    f32Data;   // F32
+    std::unordered_map<std::string, std::vector<std::string>> strData; // StringRaw
+};
+
+static OnePassResults loadColumnsOnePass(const std::string& filePath,
+                                          const std::vector<ColLoadSpec>& specs) {
+    OnePassResults result;
+    if (specs.empty()) return result;
+
+    std::ifstream file(filePath);
+    if (!file.is_open()) return result;
+
+    // Find the maximum column index we need to scan to
+    int maxColIdx = 0;
+    for (const auto& s : specs)
+        if (s.columnIndex > maxColIdx) maxColIdx = s.columnIndex;
+
+    // Build lookup: column_index -> list of spec indices
+    std::vector<std::vector<size_t>> idxToSpecs(maxColIdx + 1);
+    for (size_t i = 0; i < specs.size(); ++i)
+        idxToSpecs[specs[i].columnIndex].push_back(i);
+
+    // Pre-allocate result maps
+    for (const auto& s : specs) {
+        switch (s.type) {
+            case ColLoadSpec::kF32:
+                result.f32Data[s.outputName].reserve(1 << 20); break;
+            case ColLoadSpec::kStringRaw:
+                result.strData[s.outputName].reserve(1 << 20); break;
+            default:
+                result.u32Data[s.outputName].reserve(1 << 20); break;
+        }
+    }
+
+    const int totalSpecs = static_cast<int>(specs.size());
     std::string line;
     while (std::getline(file, line)) {
         int col = 0;
-        size_t s = 0;
-        size_t e = line.find('|');
-        while (e != std::string::npos) {
-            if (col == columnIndex) {
-                std::string token = line.substr(s, e - s);
-                token.erase(0, token.find_first_not_of(" \t\n\r"));
-                token.erase(token.find_last_not_of(" \t\n\r") + 1);
-                try { data.push_back(static_cast<uint32_t>(std::stoul(token))); }
-                catch (...) { data.push_back(0); }
-                break;
+        size_t start = 0;
+        size_t end = line.find('|');
+        int found = 0;
+
+        while (end != std::string::npos && col <= maxColIdx) {
+            if (!idxToSpecs[col].empty()) {
+                // Trim whitespace from token
+                size_t ts = start, te = end;
+                while (ts < te && (line[ts] == ' ' || line[ts] == '\t')) ++ts;
+                while (te > ts && (line[te-1] == ' ' || line[te-1] == '\t' ||
+                                   line[te-1] == '\n' || line[te-1] == '\r')) --te;
+
+                for (size_t si : idxToSpecs[col]) {
+                    const auto& spec = specs[si];
+                    switch (spec.type) {
+                        case ColLoadSpec::kU32: {
+                            uint32_t val = 0;
+                            for (size_t i = ts; i < te; ++i) {
+                                char c = line[i];
+                                if (c >= '0' && c <= '9') val = val * 10 + (c - '0');
+                            }
+                            result.u32Data[spec.outputName].push_back(val);
+                            break;
+                        }
+                        case ColLoadSpec::kF32: {
+                            float val = 0.0f;
+                            try { val = std::stof(std::string(line, ts, te - ts)); }
+                            catch (...) {}
+                            result.f32Data[spec.outputName].push_back(val);
+                            break;
+                        }
+                        case ColLoadSpec::kDateU32: {
+                            // Parse YYYY-MM-DD → YYYYMMDD (skip '-' chars)
+                            uint32_t val = 0;
+                            for (size_t i = ts; i < te; ++i) {
+                                char c = line[i];
+                                if (c >= '0' && c <= '9') val = val * 10 + (c - '0');
+                            }
+                            result.u32Data[spec.outputName].push_back(val);
+                            break;
+                        }
+                        case ColLoadSpec::kStrCharU32: {
+                            uint32_t val = (ts < te)
+                                ? static_cast<uint32_t>(static_cast<unsigned char>(line[ts])) : 0;
+                            result.u32Data[spec.outputName].push_back(val);
+                            break;
+                        }
+                        case ColLoadSpec::kStringRaw: {
+                            result.strData[spec.outputName].emplace_back(line, ts, te - ts);
+                            break;
+                        }
+                    }
+                    ++found;
+                }
             }
-            s = e + 1;
-            e = line.find('|', s);
+
+            if (found >= totalSpecs) break;  // All columns found for this row
+
+            start = end + 1;
+            end = line.find('|', start);
             ++col;
         }
     }
-    return data;
+
+    return result;
 }
 
-static std::vector<uint32_t> loadDateAsU32YYYYMMDD(const std::string& filePath, int columnIndex) {
-    std::vector<uint32_t> data;
-    std::ifstream file(filePath);
-    if (!file.is_open()) return data;
+// Cache for raw string columns, populated by one-pass loader.
+// Key: "filePath:columnIndex"
+static std::unordered_map<std::string, std::vector<std::string>> s_rawStringCache;
 
-    std::string line;
-    while (std::getline(file, line)) {
-        int col = 0;
-        size_t s = 0;
-        size_t e = line.find('|');
-        while (e != std::string::npos) {
-            if (col == columnIndex) {
-                std::string token = line.substr(s, e - s);
-                token.erase(std::remove(token.begin(), token.end(), '-'), token.end());
-                token.erase(0, token.find_first_not_of(" \t\n\r"));
-                token.erase(token.find_last_not_of(" \t\n\r") + 1);
-                try { data.push_back(static_cast<uint32_t>(std::stoul(token))); }
-                catch (...) { data.push_back(0); }
-                break;
-            }
-            s = e + 1;
-            e = line.find('|', s);
-            ++col;
-        }
-    }
-    return data;
-}
-
-static std::vector<float> loadF32Column(const std::string& filePath, int columnIndex) {
-    std::vector<float> data;
-    std::ifstream file(filePath);
-    if (!file.is_open()) return data;
-
-    std::string line;
-    while (std::getline(file, line)) {
-        int col = 0;
-        size_t s = 0;
-        size_t e = line.find('|');
-        while (e != std::string::npos) {
-            if (col == columnIndex) {
-                std::string token = line.substr(s, e - s);
-                token.erase(0, token.find_first_not_of(" \t\n\r"));
-                token.erase(token.find_last_not_of(" \t\n\r") + 1);
-                try { data.push_back(std::stof(token)); }
-                catch (...) { data.push_back(0.0f); }
-                break;
-            }
-            s = e + 1;
-            e = line.find('|', s);
-            ++col;
-        }
-    }
-    return data;
-}
-
-// Load single-character string column as char code (reversible)
-static std::vector<uint32_t> loadStringCharU32(const std::string& filePath, int columnIndex) {
-    std::vector<uint32_t> data;
-    std::ifstream file(filePath);
-    if (!file.is_open()) return data;
-
-    std::string line;
-    while (std::getline(file, line)) {
-        int col = 0;
-        size_t s = 0;
-        size_t e = line.find('|');
-        while (e != std::string::npos) {
-            if (col == columnIndex) {
-                std::string token = line.substr(s, e - s);
-                token.erase(0, token.find_first_not_of(" \t\n\r"));
-                token.erase(token.find_last_not_of(" \t\n\r") + 1);
-                // Store first character code (or 0 if empty)
-                uint32_t val = token.empty() ? 0 : static_cast<uint32_t>(static_cast<unsigned char>(token[0]));
-                data.push_back(val);
-                break;
-            }
-            s = e + 1;
-            e = line.find('|', s);
-            ++col;
-        }
-    }
-    return data;
+static std::string rawStringCacheKey(const std::string& filePath, int columnIndex) {
+    return filePath + ":" + std::to_string(columnIndex);
 }
 
 // Load raw string column (for LIKE/CONTAINS pattern matching)
+// Checks the cache first; falls back to file read.
 static std::vector<std::string> loadStringColumnRawImpl(const std::string& filePath, int columnIndex) {
+    // Check cache (populated by single-pass loader)
+    std::string cKey = rawStringCacheKey(filePath, columnIndex);
+    auto cit = s_rawStringCache.find(cKey);
+    if (cit != s_rawStringCache.end()) return cit->second;
+
+    // Cache miss: read this single column from file
     std::vector<std::string> data;
     std::ifstream file(filePath);
     if (!file.is_open()) return data;
@@ -264,6 +290,25 @@ static std::vector<std::string> loadStringColumnRawImpl(const std::string& fileP
         }
     }
     return data;
+}
+
+// ============================================================================
+// GPU Arithmetic Batch Mode
+// When active, arithmetic ops skip waitUntilCompleted() — the serial command
+// queue guarantees ordering. A sync is performed at the end of the batch.
+// ============================================================================
+static thread_local int s_gpuBatchDepth = 0;
+
+bool GpuOps::isBatchActive() { return s_gpuBatchDepth > 0; }
+
+void GpuOps::beginBatch() { s_gpuBatchDepth++; }
+
+void GpuOps::endBatch() {
+    if (--s_gpuBatchDepth <= 0) {
+        s_gpuBatchDepth = 0;
+        // Flush: ensure all submitted command buffers have completed
+        sync();
+    }
 }
 
 // --- Schema ---
@@ -342,70 +387,109 @@ GpuRelation GpuOps::scanTable(const std::string& datasetPath,
     std::string path = datasetPath + table + ".tbl";
 
     auto cache_key = [&](const std::string& colName) {
-        // Ensure SF-1 vs SF-10 (and other datasets) don't collide.
         return datasetPath + table + "." + colName;
     };
 
     bool sizeSet = false;
     uint32_t rowCount = 0;
 
+    // Phase 1: Check GpuColumnStore cache for each column; collect uncached ones
+    std::vector<ColLoadSpec> uncached;
+    // Track which columns are already cached (name -> ColMeta::Kind)
+    struct CachedCol { std::string name; ColMeta::Kind kind; };
+
     for (const auto& c : neededCols) {
         const auto itC = itT->second.find(c);
         if (itC == itT->second.end()) continue;
 
-        const ColMeta meta = itC->second;
-        if (meta.kind == ColMeta::Kind::F32) {
-            const std::string key = cache_key(c);
-            GpuColumn* staged = store.getColumn(key);
-            if (!staged) {
-                auto host = loadF32Column(path, meta.idx);
-                if (host.empty()) continue;
-                staged = store.stageFloatColumn(key, host);
+        const std::string key = cache_key(c);
+        GpuColumn* staged = store.getColumn(key);
+        if (staged && staged->buffer) {
+            // Already cached — use directly
+            if (!sizeSet) { rowCount = static_cast<uint32_t>(staged->count); sizeSet = true; }
+            if (static_cast<uint32_t>(staged->count) != rowCount) continue;
+            staged->buffer->retain();
+            if (itC->second.kind == ColMeta::Kind::F32)
+                rel.f32cols[c].reset(staged->buffer);
+            else
+                rel.u32cols[c].reset(staged->buffer);
+            continue;
+        }
+
+        // Not cached — will load in one-pass
+        ColLoadSpec spec;
+        spec.columnIndex = itC->second.idx;
+        spec.outputName = c;
+        switch (itC->second.kind) {
+            case ColMeta::Kind::U32:       spec.type = ColLoadSpec::kU32; break;
+            case ColMeta::Kind::F32:       spec.type = ColLoadSpec::kF32; break;
+            case ColMeta::Kind::DateU32:   spec.type = ColLoadSpec::kDateU32; break;
+            case ColMeta::Kind::StrCharU32:spec.type = ColLoadSpec::kStrCharU32; break;
+        }
+        uncached.push_back(spec);
+    }
+
+    // Also opportunistically load StringHash columns from SchemaRegistry
+    // in the same file pass, caching them for later loadStringColumnRaw calls.
+    const auto& schemaReg = engine::SchemaRegistry::instance();
+    const auto* tblSchema = schemaReg.getTable(table);
+    if (tblSchema) {
+        for (const auto& c : neededCols) {
+            // Skip columns already handled via kTpchSchema
+            if (itT->second.count(c)) continue;
+            const auto* colSchema = tblSchema->getColumn(c);
+            if (colSchema && colSchema->type == ColumnType::StringHash) {
+                std::string cKey = rawStringCacheKey(path, colSchema->index);
+                if (s_rawStringCache.find(cKey) == s_rawStringCache.end()) {
+                    ColLoadSpec spec;
+                    spec.columnIndex = colSchema->index;
+                    spec.outputName = c;
+                    spec.type = ColLoadSpec::kStringRaw;
+                    uncached.push_back(spec);
+                }
             }
+        }
+    }
+
+    // Phase 2: Load ALL uncached columns in a SINGLE file pass
+    if (!uncached.empty()) {
+        auto loaded = loadColumnsOnePass(path, uncached);
+
+        for (const auto& spec : uncached) {
+            if (spec.type == ColLoadSpec::kStringRaw) {
+                // Cache raw strings for later loadStringColumnRaw calls
+                auto it = loaded.strData.find(spec.outputName);
+                if (it != loaded.strData.end() && !it->second.empty()) {
+                    const auto* cs = tblSchema ? tblSchema->getColumn(spec.outputName) : nullptr;
+                    if (cs) {
+                        s_rawStringCache[rawStringCacheKey(path, cs->index)] = std::move(it->second);
+                    }
+                }
+                continue;
+            }
+
+            const std::string key = cache_key(spec.outputName);
+            GpuColumn* staged = nullptr;
+
+            if (spec.type == ColLoadSpec::kF32) {
+                auto it = loaded.f32Data.find(spec.outputName);
+                if (it == loaded.f32Data.end() || it->second.empty()) continue;
+                staged = store.stageFloatColumn(key, it->second);
+            } else {
+                auto it = loaded.u32Data.find(spec.outputName);
+                if (it == loaded.u32Data.end() || it->second.empty()) continue;
+                staged = store.stageU32Column(key, it->second);
+            }
+
             if (!staged || !staged->buffer) continue;
             if (!sizeSet) { rowCount = static_cast<uint32_t>(staged->count); sizeSet = true; }
             if (static_cast<uint32_t>(staged->count) != rowCount) continue;
             staged->buffer->retain();
-            rel.f32cols[c] = staged->buffer;
-        } else if (meta.kind == ColMeta::Kind::U32) {
-            const std::string key = cache_key(c);
-            GpuColumn* staged = store.getColumn(key);
-            if (!staged) {
-                auto host = loadU32Column(path, meta.idx);
-                if (host.empty()) continue;
-                staged = store.stageU32Column(key, host);
-            }
-            if (!staged || !staged->buffer) continue;
-            if (!sizeSet) { rowCount = static_cast<uint32_t>(staged->count); sizeSet = true; }
-            if (static_cast<uint32_t>(staged->count) != rowCount) continue;
-            staged->buffer->retain();
-            rel.u32cols[c] = staged->buffer;
-        } else if (meta.kind == ColMeta::Kind::DateU32) {
-            const std::string key = cache_key(c);
-            GpuColumn* staged = store.getColumn(key);
-            if (!staged) {
-                auto host = loadDateAsU32YYYYMMDD(path, meta.idx);
-                if (host.empty()) continue;
-                staged = store.stageU32Column(key, host);
-            }
-            if (!staged || !staged->buffer) continue;
-            if (!sizeSet) { rowCount = static_cast<uint32_t>(staged->count); sizeSet = true; }
-            if (static_cast<uint32_t>(staged->count) != rowCount) continue;
-            staged->buffer->retain();
-            rel.u32cols[c] = staged->buffer;
-        } else if (meta.kind == ColMeta::Kind::StrCharU32) {
-            const std::string key = cache_key(c);
-            GpuColumn* staged = store.getColumn(key);
-            if (!staged) {
-                auto host = loadStringCharU32(path, meta.idx);
-                if (host.empty()) continue;
-                staged = store.stageU32Column(key, host);
-            }
-            if (!staged || !staged->buffer) continue;
-            if (!sizeSet) { rowCount = static_cast<uint32_t>(staged->count); sizeSet = true; }
-            if (static_cast<uint32_t>(staged->count) != rowCount) continue;
-            staged->buffer->retain();
-            rel.u32cols[c] = staged->buffer;
+
+            if (spec.type == ColLoadSpec::kF32)
+                rel.f32cols[spec.outputName].reset(staged->buffer);
+            else
+                rel.u32cols[spec.outputName].reset(staged->buffer);
         }
     }
 
@@ -445,9 +529,15 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
 
+    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
+    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
+
     auto filterStart = std::chrono::high_resolution_clock::now();
     {
         auto cmd = store.queue()->commandBuffer();
+        // Encoder 1: filter kernel → mask
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_filter);
         enc->setBuffer(col, 0, 0);
@@ -458,38 +548,24 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
         }
         dispatch1D(enc, rowCount);
         enc->endEncoding();
+        // Encoder 2: compact mask → indices (same cmd buffer, sequential execution)
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(outIdx, 0, 1);
+        enc2->setBuffer(outCnt, 0, 2);
+        enc2->setBytes(&rowCount, sizeof(rowCount), 3);
+        dispatch1D(enc2, rowCount);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
     auto filterEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record(fn, "filter", 
+    KernelTimer::instance().record(fn, "filter",
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), rowCount);
 
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
-    auto compactStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&rowCount, sizeof(rowCount), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto compactEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compact_indices", "compact", 
-        std::chrono::duration<double, std::milli>(compactEnd - compactStart).count(), rowCount);
-
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
     mask->release();
@@ -509,7 +585,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
 
     // 1. Prepare data
     size_t rowCount = data.size();
-    if (rowCount == 0) return FilterResult{nullptr, 0};
+    if (rowCount == 0) return FilterResult{};
     if (env_truthy("GPUDB_DEBUG_OPS")) {
         std::cerr << "[Exec] GPU filterString: rowCount=" << rowCount << " pattern=" << pattern << "\n";
     }
@@ -625,36 +701,68 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
+
+    // Prepare compact output
+    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
+
+    // Check if we need mask flip (NOTLIKE with multi-segment)
+    bool needFlip = (useMultiContains && op == engine::GpuFilterOp::NE);
+    MTL::ComputePipelineState* p_flip = nullptr;
+    if (needFlip) {
+        p_flip = makePSO(store.device(), store.library(), "ops::flip_mask_u8");
+    }
     
     auto filterStart = std::chrono::high_resolution_clock::now();
 
+    // Fused: FILTER [→ FLIP] → COMPACT in one command buffer
     {
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Encoding...\n";
         auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(bufChars, 0, 0);
-        enc->setBuffer(bufOffsets, 0, 1);
-        enc->setBuffer(bufLengths, 0, 2);
-        enc->setBuffer(mask, 0, 3);
+        // Encoder 1: filter
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_filter);
+        enc1->setBuffer(bufChars, 0, 0);
+        enc1->setBuffer(bufOffsets, 0, 1);
+        enc1->setBuffer(bufLengths, 0, 2);
+        enc1->setBuffer(mask, 0, 3);
         if (useMultiContains) {
-            enc->setBuffer(bufPattern, 0, 4);
-            enc->setBuffer(bufPatOffsets, 0, 5);
-            enc->setBuffer(bufPatLengths, 0, 6);
-            enc->setBytes(&numSegments, sizeof(numSegments), 7);
-            enc->setBytes(&rc, sizeof(rc), 8);
+            enc1->setBuffer(bufPattern, 0, 4);
+            enc1->setBuffer(bufPatOffsets, 0, 5);
+            enc1->setBuffer(bufPatLengths, 0, 6);
+            enc1->setBytes(&numSegments, sizeof(numSegments), 7);
+            enc1->setBytes(&rc, sizeof(rc), 8);
         } else {
-            enc->setBuffer(bufPattern, 0, 4);
-            enc->setBytes(&patternLen, sizeof(patternLen), 5);
-            enc->setBytes(&rc, sizeof(rc), 6);
+            enc1->setBuffer(bufPattern, 0, 4);
+            enc1->setBytes(&patternLen, sizeof(patternLen), 5);
+            enc1->setBytes(&rc, sizeof(rc), 6);
         }
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Dispatching 1D...\n";
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
+        dispatch1D(enc1, rowCount);
+        enc1->endEncoding();
+
+        // Encoder 2 (optional): flip mask for NOTLIKE
+        if (needFlip && p_flip) {
+            auto encFlip = cmd->computeCommandEncoder();
+            encFlip->setComputePipelineState(p_flip);
+            encFlip->setBuffer(mask, 0, 0);
+            encFlip->setBytes(&rc, sizeof(rc), 1);
+            dispatch1D(encFlip, rowCount);
+            encFlip->endEncoding();
+            if (env_truthy("GPUDB_DEBUG_OPS"))
+                std::cerr << "[Exec] GPU filterString: flipped mask for NOTLIKE multi-contains\n";
+        }
+
+        // Final encoder: compact
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(outIdx, 0, 1);
+        enc2->setBuffer(outCnt, 0, 2);
+        enc2->setBytes(&rc, sizeof(rc), 3);
+        dispatch1D(enc2, rowCount);
+        enc2->endEncoding();
         cmd->commit();
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Waiting...\n";
         cmd->waitUntilCompleted();
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Done waiting.\n";
     }
     
     auto filterEnd = std::chrono::high_resolution_clock::now();
@@ -666,43 +774,10 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     if (bufPatOffsets) bufPatOffsets->release();
     if (bufPatLengths) bufPatLengths->release();
     
-    // 4b. Flip mask for NOTLIKE with multi-segment pattern
-    if (useMultiContains && op == engine::GpuFilterOp::NE) {
-        flipMaskU8(mask, (uint32_t)rowCount);
-        if (env_truthy("GPUDB_DEBUG_OPS"))
-            std::cerr << "[Exec] GPU filterString: flipped mask for NOTLIKE multi-contains\n";
-    }
-    
-    // 5. Compact Results
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-    
-    auto compactStart = std::chrono::high_resolution_clock::now();
-    {
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Compacting...\n";
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&rc, sizeof(rc), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "Compact done.\n";
-    }
-    auto compactEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compact_indices", "compact", 
-        std::chrono::duration<double, std::milli>(compactEnd - compactStart).count(), rowCount);
-    
     mask->release();
     
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
     outCnt->release();
@@ -724,7 +799,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     }
 
     size_t rowCount = data.size();
-    if (rowCount == 0) return FilterResult{nullptr, 0};
+    if (rowCount == 0) return FilterResult{};
     
     if (env_truthy("GPUDB_DEBUG_OPS")) {
         std::cerr << "[GpuOps] filterStringPrefix pattern='" << pattern << "' invert=" << invert << " rowCount=" << rowCount << "\n";
@@ -787,19 +862,34 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount);
 
+    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
+
+    // Fused: FILTER → COMPACT in one command buffer (2 encoders)
     {
         auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(bufChars, 0, 0);
-        enc->setBuffer(bufOffsets, 0, 1);
-        enc->setBuffer(bufLengths, 0, 2);
-        enc->setBuffer(mask, 0, 3);
-        enc->setBuffer(bufPattern, 0, 4);
-        enc->setBytes(&patternLen, sizeof(patternLen), 5);
-        enc->setBytes(&rc, sizeof(rc), 6);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
+        // Encoder 1: filter
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_filter);
+        enc1->setBuffer(bufChars, 0, 0);
+        enc1->setBuffer(bufOffsets, 0, 1);
+        enc1->setBuffer(bufLengths, 0, 2);
+        enc1->setBuffer(mask, 0, 3);
+        enc1->setBuffer(bufPattern, 0, 4);
+        enc1->setBytes(&patternLen, sizeof(patternLen), 5);
+        enc1->setBytes(&rc, sizeof(rc), 6);
+        dispatch1D(enc1, rowCount);
+        enc1->endEncoding();
+        // Encoder 2: compact
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(outIdx, 0, 1);
+        enc2->setBuffer(outCnt, 0, 2);
+        enc2->setBytes(&rc, sizeof(rc), 3);
+        dispatch1D(enc2, rowCount);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
@@ -807,29 +897,10 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
     bufPattern->release();
     
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&rc, sizeof(rc), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    
     mask->release();
     
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
     outCnt->release();
@@ -844,7 +915,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
                                      uint32_t probeCount) {
     auto& store = GpuColumnStore::instance();
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
-    if (buildCount == 0 || probeCount == 0 || !store.device()) return {nullptr, nullptr, 0};
+    if (buildCount == 0 || probeCount == 0 || !store.device()) return JoinResult{};
 
     // Use multi-match join to correctly handle duplicate keys on the build side.
     // The hash table uses linked lists so multiple build rows per key are preserved.
@@ -864,23 +935,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     auto p_build = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
     if (!p_build) {
         bufHTKeys->release(); bufHTHead->release(); bufNext->release();
-        return {nullptr, nullptr, 0};
-    }
-    
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_build);
-        enc->setBuffer(buildKeys, 0, 0);
-        enc->setBuffer(bufHTKeys, 0, 1);
-        enc->setBuffer(bufHTHead, 0, 2);
-        enc->setBuffer(bufNext, 0, 3);
-        enc->setBytes(&capacity, 4, 4);
-        enc->setBytes(&buildCount, 4, 5);
-        dispatch1D(enc, buildCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
+        return JoinResult{};
     }
     
     // 3. Count Phase — count matches per probe row
@@ -888,22 +943,35 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     auto p_count = makePSO(store.device(), store.library(), "ops::hash_join_probe_count_multi");
     if (!p_count) {
         bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufCounts->release();
-        return {nullptr, nullptr, 0};
+        return JoinResult{};
     }
     
+    // Fused: BUILD → COUNT in one command buffer (2 encoders)
     {
         auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_count);
-        enc->setBuffer(probeKeys, 0, 0);
-        enc->setBuffer(bufHTKeys, 0, 1);
-        enc->setBuffer(bufHTHead, 0, 2);
-        enc->setBuffer(bufNext, 0, 3);
-        enc->setBuffer(bufCounts, 0, 4);
-        enc->setBytes(&capacity, 4, 5);
-        enc->setBytes(&probeCount, 4, 6);
-        dispatch1D(enc, probeCount);
-        enc->endEncoding();
+        // Encoder 1: build
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_build);
+        enc1->setBuffer(buildKeys, 0, 0);
+        enc1->setBuffer(bufHTKeys, 0, 1);
+        enc1->setBuffer(bufHTHead, 0, 2);
+        enc1->setBuffer(bufNext, 0, 3);
+        enc1->setBytes(&capacity, 4, 4);
+        enc1->setBytes(&buildCount, 4, 5);
+        dispatch1D(enc1, buildCount);
+        enc1->endEncoding();
+        // Encoder 2: count
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_count);
+        enc2->setBuffer(probeKeys, 0, 0);
+        enc2->setBuffer(bufHTKeys, 0, 1);
+        enc2->setBuffer(bufHTHead, 0, 2);
+        enc2->setBuffer(bufNext, 0, 3);
+        enc2->setBuffer(bufCounts, 0, 4);
+        enc2->setBytes(&capacity, 4, 5);
+        enc2->setBytes(&probeCount, 4, 6);
+        dispatch1D(enc2, probeCount);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
@@ -918,7 +986,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     if (totalPairs == 0) {
         bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufCounts->release();
         auto emptyBuf = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-        return {emptyBuf, store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared), 0};
+        return {GpuBuffer(emptyBuf), GpuBuffer(store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared)), 0};
     }
     
     // 5. Write Phase — write matched pairs (bufCounts now holds exclusive prefix sums = offsets)
@@ -930,7 +998,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     if (!p_write) {
         bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufOffsets->release();
         outProbeIndices->release(); outBuildIndices->release();
-        return {nullptr, nullptr, 0};
+        return JoinResult{};
     }
     
     {
@@ -961,7 +1029,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     bufNext->release();
     bufOffsets->release();  // bufCounts was reused as bufOffsets
     
-    return {outBuildIndices, outProbeIndices, totalPairs};
+    return {GpuBuffer(outBuildIndices), GpuBuffer(outProbeIndices), totalPairs};
 }
 
 JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys, 
@@ -973,7 +1041,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
     auto& store = GpuColumnStore::instance();
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (debug) std::cerr << "[GPU] joinHashU64: buildCount=" << buildCount << " probeCount=" << probeCount << std::endl << std::flush;
-    if (buildCount == 0 || probeCount == 0 || !store.device()) return {nullptr, nullptr, 0};
+    if (buildCount == 0 || probeCount == 0 || !store.device()) return JoinResult{};
 
     uint32_t capacity = 1024;
     while (capacity < buildCount * 2) capacity <<= 1;
@@ -992,7 +1060,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
     auto p_build = makePSO(store.device(), store.library(), "ops::join_build_u64");
     if (!p_build) {
         bufHTKeysLow->release(); bufHTKeysHigh->release(); bufHTVals->release();
-        return {nullptr, nullptr, 0};
+        return JoinResult{};
     }
     
     if (debug) std::cerr << "[GPU] joinHashU64: starting build phase..." << std::endl << std::flush;
@@ -1023,7 +1091,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
     if (!p_probe) {
         bufHTKeysLow->release(); bufHTKeysHigh->release(); bufHTVals->release();
         outBuildIndices->release(); outProbeIndices->release(); outCount->release();
-        return {nullptr, nullptr, 0};
+        return JoinResult{};
     }
 
     if (debug) std::cerr << "[GPU] joinHashU64: starting probe phase..." << std::endl << std::flush;
@@ -1060,7 +1128,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
     bufHTVals->release();
     outCount->release();
     
-    return {outBuildIndices, outProbeIndices, totalPairs};
+    return {GpuBuffer(outBuildIndices), GpuBuffer(outProbeIndices), totalPairs};
 }
 
 MTL::Buffer* GpuOps::packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count) {
@@ -1115,18 +1183,34 @@ std::optional<FilterResult> GpuOps::filterU32Indexed(const std::string& colName,
     auto mask = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, static_cast<size_t>(count) * sizeof(uint8_t));
 
+    auto outIdx = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
+
     auto filterStart = std::chrono::high_resolution_clock::now();
+    // Fused: FILTER → COMPACT in one command buffer (2 encoders)
     {
         auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_filter);
-        enc->setBuffer(col, 0, 0);
-        enc->setBuffer(indices, 0, 1);
-        enc->setBuffer(mask, 0, 2);
-        enc->setBytes(&literal, sizeof(literal), 3);
-        enc->setBytes(&count, sizeof(count), 4);
-        dispatch1D(enc, count);
-        enc->endEncoding();
+        // Encoder 1: filter
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_filter);
+        enc1->setBuffer(col, 0, 0);
+        enc1->setBuffer(indices, 0, 1);
+        enc1->setBuffer(mask, 0, 2);
+        enc1->setBytes(&literal, sizeof(literal), 3);
+        enc1->setBytes(&count, sizeof(count), 4);
+        dispatch1D(enc1, count);
+        enc1->endEncoding();
+        // Encoder 2: compact
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(indices, 0, 1);
+        enc2->setBuffer(outIdx, 0, 2);
+        enc2->setBuffer(outCnt, 0, 3);
+        enc2->setBytes(&count, sizeof(count), 4);
+        dispatch1D(enc2, count);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
@@ -1134,32 +1218,8 @@ std::optional<FilterResult> GpuOps::filterU32Indexed(const std::string& colName,
     KernelTimer::instance().record(fn, "filter", 
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), count);
 
-    auto outIdx = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, static_cast<size_t>(count) * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
-    auto compactStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(indices, 0, 1);    // Pass input indices for indexed compact
-        enc->setBuffer(outIdx, 0, 2);
-        enc->setBuffer(outCnt, 0, 3);
-        enc->setBytes(&count, sizeof(count), 4);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto compactEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compact_indices_indexed", "compact", 
-        std::chrono::duration<double, std::milli>(compactEnd - compactStart).count(), count);
-
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
     bool debug = env_truthy("GPUDB_DEBUG_OPS");
@@ -1198,6 +1258,10 @@ std::optional<FilterResult> GpuOps::filterF32(const std::string& colName,
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
 
+    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
+
     auto filterStart = std::chrono::high_resolution_clock::now();
     {
         auto cmd = store.queue()->commandBuffer();
@@ -1209,38 +1273,23 @@ std::optional<FilterResult> GpuOps::filterF32(const std::string& colName,
         enc->setBytes(&rowCount, sizeof(rowCount), 3);
         dispatch1D(enc, rowCount);
         enc->endEncoding();
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(outIdx, 0, 1);
+        enc2->setBuffer(outCnt, 0, 2);
+        enc2->setBytes(&rowCount, sizeof(rowCount), 3);
+        dispatch1D(enc2, rowCount);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
     auto filterEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record(fn, "filter", 
+    KernelTimer::instance().record(fn, "filter",
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), rowCount);
 
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
-    auto compactStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&rowCount, sizeof(rowCount), 3);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto compactEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compact_indices", "compact", 
-        std::chrono::duration<double, std::milli>(compactEnd - compactStart).count(), rowCount);
-
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
     mask->release();
@@ -1277,6 +1326,10 @@ std::optional<FilterResult> GpuOps::filterF32Indexed(const std::string& colName,
     auto mask = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, static_cast<size_t>(count) * sizeof(uint8_t));
 
+    auto outIdx = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
+
     auto filterStart = std::chrono::high_resolution_clock::now();
     {
         auto cmd = store.queue()->commandBuffer();
@@ -1289,39 +1342,24 @@ std::optional<FilterResult> GpuOps::filterF32Indexed(const std::string& colName,
         enc->setBytes(&count, sizeof(count), 4);
         dispatch1D(enc, count);
         enc->endEncoding();
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(indices, 0, 1);
+        enc2->setBuffer(outIdx, 0, 2);
+        enc2->setBuffer(outCnt, 0, 3);
+        enc2->setBytes(&count, sizeof(count), 4);
+        dispatch1D(enc2, count);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
     auto filterEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record(fn, "filter", 
+    KernelTimer::instance().record(fn, "filter",
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), count);
 
-    auto outIdx = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, static_cast<size_t>(count) * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
-    auto compactStart = std::chrono::high_resolution_clock::now();
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(indices, 0, 1);    // Pass input indices for indexed compact
-        enc->setBuffer(outIdx, 0, 2);
-        enc->setBuffer(outCnt, 0, 3);
-        enc->setBytes(&count, sizeof(count), 4);
-        dispatch1D(enc, count);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    auto compactEnd = std::chrono::high_resolution_clock::now();
-    KernelTimer::instance().record("ops::compact_indices_indexed", "compact", 
-        std::chrono::duration<double, std::milli>(compactEnd - compactStart).count(), count);
-
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
 
     mask->release();
@@ -1422,7 +1460,7 @@ MTL::Buffer* GpuOps::castU32ToF32(MTL::Buffer* in, uint32_t count) {
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     auto end = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record("ops::cast_u32_to_f32", "cast",
@@ -1458,7 +1496,7 @@ std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vecto
     if (numAggs == 0 || numAggs > 16) return std::nullopt;
     if (aggInputsF32.size() < numAggs) return std::nullopt;
 
-    uint32_t cap = nextPow2(std::max<uint32_t>(1024u, rowCount * 2u));
+    uint32_t cap = nextPow2(std::max<uint32_t>(128u, rowCount * 2u));
     // Stride increased from 4 to 8, size is cap * 8 * sizeof(uint32_t)
     auto htKeys = store.device()->newBuffer(static_cast<size_t>(cap) * 8 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     auto htAggs = store.device()->newBuffer(static_cast<size_t>(cap) * 16 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -1563,8 +1601,8 @@ std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vecto
     agg_types_buf->release();
 
     GroupByHashTable g;
-    g.htKeys = htKeys;
-    g.htAggs = htAggs;
+    g.htKeys.reset(htKeys);
+    g.htAggs.reset(htAggs);
     g.capacity = cap;
     return g;
 }
@@ -1657,8 +1695,8 @@ std::optional<GroupByExtractResult> GpuOps::extractGroupByHT(
     result.rowCount = totalCount;
     result.keyCols.resize(numKeys);
     result.aggWords.resize(numAggsTotal);
-    result.keyColsGPU.resize(numKeys, nullptr);
-    result.aggColsGPU.resize(numAggsTotal, nullptr);
+    result.keyColsGPU.resize(numKeys);
+    result.aggColsGPU.resize(numAggsTotal);
 
     auto* keyPtr = reinterpret_cast<const uint32_t*>(outKeysBuf->contents());
     auto* aggPtr = reinterpret_cast<const uint32_t*>(outAggsBuf->contents());
@@ -1667,15 +1705,15 @@ std::optional<GroupByExtractResult> GpuOps::extractGroupByHT(
         result.keyCols[k].resize(totalCount);
         std::memcpy(result.keyCols[k].data(), keyPtr + k * totalCount, totalCount * sizeof(uint32_t));
         // Create per-column GPU buffer from SoA slice (avoids re-upload downstream)
-        result.keyColsGPU[k] = store.device()->newBuffer(
-            keyPtr + k * totalCount, totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        result.keyColsGPU[k].reset(store.device()->newBuffer(
+            keyPtr + k * totalCount, totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     }
     for (uint32_t a = 0; a < numAggsTotal; ++a) {
         result.aggWords[a].resize(totalCount);
         std::memcpy(result.aggWords[a].data(), aggPtr + a * totalCount, totalCount * sizeof(uint32_t));
         // Create per-column GPU buffer from SoA slice
-        result.aggColsGPU[a] = store.device()->newBuffer(
-            aggPtr + a * totalCount, totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        result.aggColsGPU[a].reset(store.device()->newBuffer(
+            aggPtr + a * totalCount, totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     }
 
     markBuf->release();
@@ -1687,8 +1725,6 @@ std::optional<GroupByExtractResult> GpuOps::extractGroupByHT(
 }
 
 void GpuOps::release(GroupByHashTable& g) {
-    if (g.htKeys) g.htKeys->release();
-    if (g.htAggs) g.htAggs->release();
     g.htKeys = nullptr;
     g.htAggs = nullptr;
     g.capacity = 0;
@@ -1733,8 +1769,10 @@ std::optional<FilterResult> GpuOps::filterColColU32(
     if (!p_filter || !p_compact) return std::nullopt;
 
     auto mask = store.device()->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    
-    // Filter
+    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    *(uint32_t*)outCnt->contents() = 0;
+
     {
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
@@ -1745,25 +1783,14 @@ std::optional<FilterResult> GpuOps::filterColColU32(
         enc->setBytes(&count, sizeof(count), 3);
         dispatch1D(enc, count);
         enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-
-    // Compact
-    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
-
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&count, sizeof(count), 3);
-        dispatch1D(enc, count);
-        enc->endEncoding();
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(outIdx, 0, 1);
+        enc2->setBuffer(outCnt, 0, 2);
+        enc2->setBytes(&count, sizeof(count), 3);
+        dispatch1D(enc2, count);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
@@ -1771,7 +1798,7 @@ std::optional<FilterResult> GpuOps::filterColColU32(
     mask->release();
 
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
     outCnt->release();
     return res;
@@ -1802,8 +1829,10 @@ std::optional<FilterResult> GpuOps::filterColColF32(
     if (!p_filter || !p_compact) return std::nullopt;
 
     auto mask = store.device()->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    
-    // Filter
+    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    *(uint32_t*)outCnt->contents() = 0;
+
     {
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
@@ -1814,25 +1843,14 @@ std::optional<FilterResult> GpuOps::filterColColF32(
         enc->setBytes(&count, sizeof(count), 3);
         dispatch1D(enc, count);
         enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-
-    // Compact
-    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
-
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&count, sizeof(count), 3);
-        dispatch1D(enc, count);
-        enc->endEncoding();
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_compact);
+        enc2->setBuffer(mask, 0, 0);
+        enc2->setBuffer(outIdx, 0, 1);
+        enc2->setBuffer(outCnt, 0, 2);
+        enc2->setBytes(&count, sizeof(count), 3);
+        dispatch1D(enc2, count);
+        enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
@@ -1840,7 +1858,7 @@ std::optional<FilterResult> GpuOps::filterColColF32(
     mask->release();
 
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
     outCnt->release();
     return res;
@@ -2089,69 +2107,57 @@ std::optional<FilterResult> GpuOps::hashJoinSemiU32(MTL::Buffer* leftKey,
     std::memset(ht_head->contents(), 0, cap * sizeof(uint32_t));
     if (rightCount > 0) std::memset(next->contents(), 0, static_cast<size_t>(rightCount) * sizeof(uint32_t));
 
-    // BUILD
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_build);
-        enc->setBuffer(rightKey, 0, 0);
-        enc->setBuffer(htKeys, 0, 1);
-        enc->setBuffer(ht_head, 0, 2);
-        enc->setBuffer(next, 0, 3);
-        enc->setBytes(&cap, sizeof(cap), 4);
-        enc->setBytes(&rightCount, sizeof(rightCount), 5);
-        dispatch1D(enc, rightCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    ht_head->release();
-    next->release();
-
-    // PROBE -> MASK
+    // Fused: BUILD → PROBE → COMPACT in one command buffer (3 encoders)
     auto mask = store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_probe);
-        enc->setBuffer(leftKey, 0, 0);
-        enc->setBuffer(htKeys, 0, 1);
-        enc->setBytes(&cap, sizeof(cap), 2);
-        enc->setBytes(&leftCount, sizeof(leftCount), 3);
-        enc->setBuffer(mask, 0, 4);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-    htKeys->release();
-
-    // COMPACT
     auto outIdx = store.device()->newBuffer(leftCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
     *(uint32_t*)outCnt->contents() = 0;
 
     {
         auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&leftCount, sizeof(leftCount), 3);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
+        // Encoder 1: BUILD
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_build);
+        enc1->setBuffer(rightKey, 0, 0);
+        enc1->setBuffer(htKeys, 0, 1);
+        enc1->setBuffer(ht_head, 0, 2);
+        enc1->setBuffer(next, 0, 3);
+        enc1->setBytes(&cap, sizeof(cap), 4);
+        enc1->setBytes(&rightCount, sizeof(rightCount), 5);
+        dispatch1D(enc1, rightCount);
+        enc1->endEncoding();
+        // Encoder 2: PROBE → mask
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_probe);
+        enc2->setBuffer(leftKey, 0, 0);
+        enc2->setBuffer(htKeys, 0, 1);
+        enc2->setBytes(&cap, sizeof(cap), 2);
+        enc2->setBytes(&leftCount, sizeof(leftCount), 3);
+        enc2->setBuffer(mask, 0, 4);
+        dispatch1D(enc2, leftCount);
+        enc2->endEncoding();
+        // Encoder 3: COMPACT
+        auto enc3 = cmd->computeCommandEncoder();
+        enc3->setComputePipelineState(p_compact);
+        enc3->setBuffer(mask, 0, 0);
+        enc3->setBuffer(outIdx, 0, 1);
+        enc3->setBuffer(outCnt, 0, 2);
+        enc3->setBytes(&leftCount, sizeof(leftCount), 3);
+        dispatch1D(enc3, leftCount);
+        enc3->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
+    ht_head->release();
+    next->release();
+    htKeys->release();
     mask->release();
     
     uint32_t validCount = *(uint32_t*)outCnt->contents();
     outCnt->release();
     
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = validCount;
     return res;
 }
@@ -2166,7 +2172,10 @@ std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
     // If no right rows, every left row is unmatched
     if (rightCount == 0) {
         auto idx = iotaU32(leftCount);
-        return FilterResult{idx, leftCount};
+        FilterResult res;
+        res.indices.reset(idx);
+        res.count = leftCount;
+        return res;
     }
 
     auto p_build   = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
@@ -2184,80 +2193,64 @@ std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
     std::memset(ht_head->contents(), 0, cap * sizeof(uint32_t));
     if (rightCount > 0) std::memset(next->contents(), 0, static_cast<size_t>(rightCount) * sizeof(uint32_t));
 
-    // BUILD
+    // Fused: BUILD → PROBE → FLIP → COMPACT in one command buffer (4 encoders)
+    auto mask = store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
+    auto outIdx = store.device()->newBuffer(leftCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    *(uint32_t*)outCnt->contents() = 0;
+
     {
         auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_build);
-        enc->setBuffer(rightKey, 0, 0);
-        enc->setBuffer(htKeys, 0, 1);
-        enc->setBuffer(ht_head, 0, 2);
-        enc->setBuffer(next, 0, 3);
-        enc->setBytes(&cap, sizeof(cap), 4);
-        enc->setBytes(&rightCount, sizeof(rightCount), 5);
-        dispatch1D(enc, rightCount);
-        enc->endEncoding();
+        // Encoder 1: BUILD
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_build);
+        enc1->setBuffer(rightKey, 0, 0);
+        enc1->setBuffer(htKeys, 0, 1);
+        enc1->setBuffer(ht_head, 0, 2);
+        enc1->setBuffer(next, 0, 3);
+        enc1->setBytes(&cap, sizeof(cap), 4);
+        enc1->setBytes(&rightCount, sizeof(rightCount), 5);
+        dispatch1D(enc1, rightCount);
+        enc1->endEncoding();
+        // Encoder 2: PROBE → mask (1 = matched)
+        auto enc2 = cmd->computeCommandEncoder();
+        enc2->setComputePipelineState(p_probe);
+        enc2->setBuffer(leftKey, 0, 0);
+        enc2->setBuffer(htKeys, 0, 1);
+        enc2->setBytes(&cap, sizeof(cap), 2);
+        enc2->setBytes(&leftCount, sizeof(leftCount), 3);
+        enc2->setBuffer(mask, 0, 4);
+        dispatch1D(enc2, leftCount);
+        enc2->endEncoding();
+        // Encoder 3: FLIP mask (1→0 matched, 0→1 unmatched)
+        auto enc3 = cmd->computeCommandEncoder();
+        enc3->setComputePipelineState(p_flip);
+        enc3->setBuffer(mask, 0, 0);
+        enc3->setBytes(&leftCount, sizeof(leftCount), 1);
+        dispatch1D(enc3, leftCount);
+        enc3->endEncoding();
+        // Encoder 4: COMPACT
+        auto enc4 = cmd->computeCommandEncoder();
+        enc4->setComputePipelineState(p_compact);
+        enc4->setBuffer(mask, 0, 0);
+        enc4->setBuffer(outIdx, 0, 1);
+        enc4->setBuffer(outCnt, 0, 2);
+        enc4->setBytes(&leftCount, sizeof(leftCount), 3);
+        dispatch1D(enc4, leftCount);
+        enc4->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
     }
     ht_head->release();
     next->release();
-
-    // PROBE → u8 mask (1 = matched)
-    auto mask = store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_probe);
-        enc->setBuffer(leftKey, 0, 0);
-        enc->setBuffer(htKeys, 0, 1);
-        enc->setBytes(&cap, sizeof(cap), 2);
-        enc->setBytes(&leftCount, sizeof(leftCount), 3);
-        enc->setBuffer(mask, 0, 4);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
     htKeys->release();
-
-    // FLIP mask: 1→0 (matched→discard), 0→1 (unmatched→keep)
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_flip);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBytes(&leftCount, sizeof(leftCount), 1);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
-
-    // COMPACT
-    auto outIdx = store.device()->newBuffer(leftCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
-    {
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(p_compact);
-        enc->setBuffer(mask, 0, 0);
-        enc->setBuffer(outIdx, 0, 1);
-        enc->setBuffer(outCnt, 0, 2);
-        enc->setBytes(&leftCount, sizeof(leftCount), 3);
-        dispatch1D(enc, leftCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-    }
     mask->release();
 
     uint32_t validCount = *(uint32_t*)outCnt->contents();
     outCnt->release();
 
     FilterResult res;
-    res.indices = outIdx;
+    res.indices.reset(outIdx);
     res.count = validCount;
     return res;
 }
@@ -2368,11 +2361,16 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
 
     // Edge case: no matches → every row is unmatched
     if (matchedCount == 0) {
-        auto idx = iotaU32(totalRows);
-        return {idx, totalRows};
+        FilterResult res;
+        res.indices.reset(iotaU32(totalRows));
+        res.count = totalRows;
+        return res;
     }
     if (totalRows == 0) {
-        return {store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared), 0};
+        FilterResult res;
+        res.indices.reset(store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared));
+        res.count = 0;
+        return res;
     }
 
     auto p_scatter = makePSO(store.device(), store.library(), "ops::scatter_one_u8");
@@ -2384,52 +2382,46 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
     std::memset(mask->contents(), 0, totalRows * sizeof(uint8_t));
 
     if (p_scatter && p_flip && p_compact) {
-        // GPU: scatter 1 at matched indices
-        {
-            auto cmd = store.queue()->commandBuffer();
-            auto enc = cmd->computeCommandEncoder();
-            enc->setComputePipelineState(p_scatter);
-            enc->setBuffer(matchedIndices, 0, 0);
-            enc->setBuffer(mask, 0, 1);
-            enc->setBytes(&matchedCount, sizeof(matchedCount), 2);
-            dispatch1D(enc, matchedCount);
-            enc->endEncoding();
-            cmd->commit();
-            cmd->waitUntilCompleted();
-        }
-        // GPU: flip mask (1→0 matched, 0→1 unmatched)
-        {
-            auto cmd = store.queue()->commandBuffer();
-            auto enc = cmd->computeCommandEncoder();
-            enc->setComputePipelineState(p_flip);
-            enc->setBuffer(mask, 0, 0);
-            enc->setBytes(&totalRows, sizeof(totalRows), 1);
-            dispatch1D(enc, totalRows);
-            enc->endEncoding();
-            cmd->commit();
-            cmd->waitUntilCompleted();
-        }
-        // GPU: compact
+        // Fused: SCATTER → FLIP → COMPACT in one command buffer (3 encoders)
         auto outIdx = store.device()->newBuffer(totalRows * sizeof(uint32_t), MTL::ResourceStorageModeShared);
         auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
         *(uint32_t*)outCnt->contents() = 0;
         {
             auto cmd = store.queue()->commandBuffer();
-            auto enc = cmd->computeCommandEncoder();
-            enc->setComputePipelineState(p_compact);
-            enc->setBuffer(mask, 0, 0);
-            enc->setBuffer(outIdx, 0, 1);
-            enc->setBuffer(outCnt, 0, 2);
-            enc->setBytes(&totalRows, sizeof(totalRows), 3);
-            dispatch1D(enc, totalRows);
-            enc->endEncoding();
+            // Encoder 1: scatter 1 at matched indices
+            auto enc1 = cmd->computeCommandEncoder();
+            enc1->setComputePipelineState(p_scatter);
+            enc1->setBuffer(matchedIndices, 0, 0);
+            enc1->setBuffer(mask, 0, 1);
+            enc1->setBytes(&matchedCount, sizeof(matchedCount), 2);
+            dispatch1D(enc1, matchedCount);
+            enc1->endEncoding();
+            // Encoder 2: flip mask (1→0 matched, 0→1 unmatched)
+            auto enc2 = cmd->computeCommandEncoder();
+            enc2->setComputePipelineState(p_flip);
+            enc2->setBuffer(mask, 0, 0);
+            enc2->setBytes(&totalRows, sizeof(totalRows), 1);
+            dispatch1D(enc2, totalRows);
+            enc2->endEncoding();
+            // Encoder 3: compact
+            auto enc3 = cmd->computeCommandEncoder();
+            enc3->setComputePipelineState(p_compact);
+            enc3->setBuffer(mask, 0, 0);
+            enc3->setBuffer(outIdx, 0, 1);
+            enc3->setBuffer(outCnt, 0, 2);
+            enc3->setBytes(&totalRows, sizeof(totalRows), 3);
+            dispatch1D(enc3, totalRows);
+            enc3->endEncoding();
             cmd->commit();
             cmd->waitUntilCompleted();
         }
         mask->release();
         uint32_t cnt = *(uint32_t*)outCnt->contents();
         outCnt->release();
-        return {outIdx, cnt};
+        FilterResult res;
+        res.indices.reset(outIdx);
+        res.count = cnt;
+        return res;
     }
 
     // CPU fallback
@@ -2448,7 +2440,10 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
         result.empty() ? sizeof(uint32_t) : result.size() * sizeof(uint32_t),
         MTL::ResourceStorageModeShared);
     if (!result.empty()) std::memcpy(outIdx->contents(), result.data(), result.size() * sizeof(uint32_t));
-    return {outIdx, cnt};
+    FilterResult fRes;
+    fRes.indices.reset(outIdx);
+    fRes.count = cnt;
+    return fRes;
 }
 
 // ── GPU arithAddConstU32: out[i] = in[i] + val ──
@@ -2469,7 +2464,7 @@ MTL::Buffer* GpuOps::arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t co
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2491,7 +2486,7 @@ MTL::Buffer* GpuOps::nonNullIndicatorF32(MTL::Buffer* in, uint32_t count) {
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2513,7 +2508,7 @@ MTL::Buffer* GpuOps::arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uin
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2535,7 +2530,7 @@ MTL::Buffer* GpuOps::arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2557,7 +2552,7 @@ MTL::Buffer* GpuOps::arithDivF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uin
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2579,7 +2574,7 @@ MTL::Buffer* GpuOps::arithDivF32ColScalar(MTL::Buffer* colA, float valB, uint32_
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2601,7 +2596,7 @@ MTL::Buffer* GpuOps::arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2623,7 +2618,7 @@ MTL::Buffer* GpuOps::arithSubF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uin
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2645,7 +2640,7 @@ MTL::Buffer* GpuOps::arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2667,7 +2662,7 @@ MTL::Buffer* GpuOps::arithSubF32ScalarCol(float valA, MTL::Buffer* colB, uint32_
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -2682,12 +2677,22 @@ MTL::Buffer* GpuOps::createBuffer(const void* data, size_t size) {
     }
 }
 
+// Cached 4-byte output buffer for reduce operations (avoids repeated alloc/release)
+static MTL::Buffer* getReduceOutBuf() {
+    static MTL::Buffer* s_reduceOut = nullptr;
+    if (!s_reduceOut) {
+        auto& store = GpuColumnStore::instance();
+        s_reduceOut = store.device()->newBuffer(sizeof(float), MTL::ResourceStorageModeShared);
+    }
+    return s_reduceOut;
+}
+
 float GpuOps::reduceSumF32(MTL::Buffer* in, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto p = makePSO(store.device(), store.library(), "ops::reduce_sum_f32");
     if (!p) return 0.0f;
 
-    auto out = store.device()->newBuffer(sizeof(float), MTL::ResourceStorageModeShared);
+    auto out = getReduceOutBuf();
     std::memset(out->contents(), 0, sizeof(float));
 
     {
@@ -2704,7 +2709,6 @@ float GpuOps::reduceSumF32(MTL::Buffer* in, uint32_t count) {
     }
     
     float res = *(float*)out->contents();
-    out->release();
     return res;
 }
 
@@ -2713,7 +2717,7 @@ float GpuOps::reduceMinF32(MTL::Buffer* in, uint32_t count) {
     auto p = makePSO(store.device(), store.library(), "ops::reduce_min_f32");
     if (!p) return 0.0f;
 
-    auto out = store.device()->newBuffer(sizeof(float), MTL::ResourceStorageModeShared);
+    auto out = getReduceOutBuf();
     float init = std::numeric_limits<float>::max();
     std::memcpy(out->contents(), &init, sizeof(float));
 
@@ -2731,7 +2735,6 @@ float GpuOps::reduceMinF32(MTL::Buffer* in, uint32_t count) {
     }
     
     float res = *(float*)out->contents();
-    out->release();
     return res;
 }
 
@@ -2740,7 +2743,7 @@ float GpuOps::reduceMaxF32(MTL::Buffer* in, uint32_t count) {
     auto p = makePSO(store.device(), store.library(), "ops::reduce_max_f32");
     if (!p) return 0.0f;
 
-    auto out = store.device()->newBuffer(sizeof(float), MTL::ResourceStorageModeShared);
+    auto out = getReduceOutBuf();
     float init = std::numeric_limits<float>::lowest();
     std::memcpy(out->contents(), &init, sizeof(float));
 
@@ -2758,7 +2761,6 @@ float GpuOps::reduceMaxF32(MTL::Buffer* in, uint32_t count) {
     }
     
     float res = *(float*)out->contents();
-    out->release();
     return res;
 }
 
@@ -2785,7 +2787,7 @@ MTL::Buffer* GpuOps::extractYearU32(MTL::Buffer* dateCol, uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
+    if (!isBatchActive()) cmd->waitUntilCompleted();
 
     return outBuf;
 }
@@ -3119,7 +3121,7 @@ MTL::Buffer* GpuOps::arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uin
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -3141,7 +3143,7 @@ MTL::Buffer* GpuOps::arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }
@@ -3218,7 +3220,7 @@ MTL::Buffer* GpuOps::mathFloorF32(MTL::Buffer* col, uint32_t count) {
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
+        if (!isBatchActive()) cmd->waitUntilCompleted();
     }
     return out;
 }

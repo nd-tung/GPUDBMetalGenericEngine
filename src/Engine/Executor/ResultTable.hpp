@@ -1,12 +1,12 @@
 #pragma once
 
+#include "GpuBuffer.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_set>
 #include <vector>
-
-namespace MTL { class Buffer; }
 
 namespace engine {
 
@@ -37,10 +37,10 @@ struct TableResult {
 
     std::size_t rowCount = 0;
 
-    // GPU buffer mirrors — when available, downstream can skip CPU→GPU upload.
-    // Indexed in parallel with u32Cols/f32Cols (same order). nullptr = not available.
-    std::vector<MTL::Buffer*> u32ColsGPU;
-    std::vector<MTL::Buffer*> f32ColsGPU;
+    // GPU buffer mirrors (RAII — auto-retains on copy, auto-releases on destroy).
+    // Indexed in parallel with u32Cols/f32Cols (same order).
+    std::vector<GpuBuffer> u32ColsGPU;
+    std::vector<GpuBuffer> f32ColsGPU;
 
     double uploadMs = 0.0;
     double gpuMs = 0.0;

@@ -146,9 +146,8 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
              if (inputMask) inputMask->release();
              if (resultMask) resultMask->release();
              if (diffMask) diffMask->release();
-             if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
 
-             ctx.activeRowsGPU = diffIndices;
+             ctx.activeRowsGPU.reset(diffIndices);
              ctx.activeRowsCountGPU = diffCount;
              return true;
         }
@@ -275,15 +274,11 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                               
                               MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
                               
-                              if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                              if (res->indices) res->indices->release();
-                              if (joinRes.buildIndices) joinRes.buildIndices->release();
-                              if (joinRes.probeIndices) joinRes.probeIndices->release();
+                              ctx.activeRowsGPU.reset(newActive);
                               
-                              ctx.activeRowsGPU = newActive;
                               ctx.activeRowsCountGPU = joinRes.count;
                           } else {
-                              ctx.activeRowsGPU = res->indices;
+                              ctx.activeRowsGPU = std::move(res->indices);
                               ctx.activeRowsCountGPU = res->count;
                           }
                           return true;
@@ -321,8 +316,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
              if (leftRes) leftRes->retain();
 
              // 3. Restore Input for Right
-             if (ctx.activeRowsGPU) ctx.activeRowsGPU->release(); 
-             ctx.activeRowsGPU = inputIndices; 
+             ctx.activeRowsGPU.reset(inputIndices); 
              ctx.activeRowsCountGPU = inputCount;
              
              // 4. Run Right
@@ -350,9 +344,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
              if (leftMask) leftMask->release();
              if (rightMask) rightMask->release();
              if (unionMask) unionMask->release();
-             if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-
-             ctx.activeRowsGPU = unionIndices;
+             ctx.activeRowsGPU.reset(unionIndices);
              ctx.activeRowsCountGPU = unionCount;
              return true;
         }
@@ -396,8 +388,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                 return true; // Keep all rows
             } else {
                 // Clear all rows
-                if(ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                ctx.activeRowsGPU = GpuOps::createBuffer(nullptr, 4);
+                ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
                 ctx.activeRowsCountGPU = 0;
                 return true;
             }
@@ -493,12 +484,10 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                       if (ctx.activeRowsGPU) {
                            // Combine indices
                            MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
-                           if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                           if (res->indices) res->indices->release();
-                           ctx.activeRowsGPU = newActive;
+                           ctx.activeRowsGPU.reset(newActive);
                            ctx.activeRowsCountGPU = res->count;
                       } else {
-                           ctx.activeRowsGPU = res->indices;
+                           ctx.activeRowsGPU = std::move(res->indices);
                            ctx.activeRowsCountGPU = res->count;
                       }
                       return true;
@@ -566,15 +555,11 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                               auto joinRes = GpuOps::joinHash( ctx.activeRowsGPU, nullptr, ctx.activeRowsCountGPU, res->indices, nullptr, res->count);
                               MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
                               
-                              if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                              if (res->indices) res->indices->release();
-                              if (joinRes.buildIndices) joinRes.buildIndices->release();
-                              if (joinRes.probeIndices) joinRes.probeIndices->release();
+                              ctx.activeRowsGPU.reset(newActive);
                               
-                              ctx.activeRowsGPU = newActive;
                               ctx.activeRowsCountGPU = joinRes.count;
                           } else {
-                              ctx.activeRowsGPU = res->indices;
+                              ctx.activeRowsGPU = std::move(res->indices);
                               ctx.activeRowsCountGPU = res->count;
                           }
                           return true;
@@ -641,8 +626,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                      }
                      
                      if (res) {
-                         if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                         ctx.activeRowsGPU = res->indices;
+                         ctx.activeRowsGPU = std::move(res->indices);
                          ctx.activeRowsCountGPU = res->count;
                          return true;
                      }
@@ -655,8 +639,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
              const TypedExpr* leftExprRaw = unwrapExpr(cmp.left.get());
              if (cmp.inList.empty()) {
                   // IN () -> False / Empty
-                  if(ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                  ctx.activeRowsGPU = GpuOps::createBuffer(nullptr, 4);
+                  ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
                   ctx.activeRowsCountGPU = 0;
                   return true;
              }
@@ -718,8 +701,13 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                                      colName = "tmp_sub_" + baseCol;
                                      // Placeholder stringCols (correct size; content unused with flat buffers)
                                      ctx.stringCols[colName].resize(vec->size(), "");
-                                     ctx.flatStringCols[colName] = {fit->second.chars, newOff, newLen,
-                                                                    (uint32_t)vec->size(), fit->second.totalBytes};
+                                     FlatStringCol subFlat;
+                                     subFlat.chars = fit->second.chars;  // GpuBuffer copy auto-retains
+                                     subFlat.offsets.reset(newOff);      // takes ownership
+                                     subFlat.lengths.reset(newLen);      // takes ownership
+                                     subFlat.rowCount = (uint32_t)vec->size();
+                                     subFlat.totalBytes = fit->second.totalBytes;
+                                     ctx.flatStringCols[colName] = std::move(subFlat);
                                      isCol = true;
                                  }
                              }
@@ -934,11 +922,9 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
              if (res) {
                  if (ctx.activeRowsGPU) {
                       MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
-                      ctx.activeRowsGPU->release();
-                      ctx.activeRowsGPU = newActive;
-                      res->indices->release();
+                      ctx.activeRowsGPU.reset(newActive);
                  } else {
-                      ctx.activeRowsGPU = res->indices;
+                      ctx.activeRowsGPU = std::move(res->indices);
                  }
                  ctx.activeRowsCountGPU = res->count;
                  return true;
@@ -1009,11 +995,9 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                  if (ctx.activeRowsGPU) {
                       if (debug) std::cerr << "[Exec] Intersecting Generic with " << ctx.activeRowsCountGPU << " rows\n";
                       MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
-                      ctx.activeRowsGPU->release();
-                      ctx.activeRowsGPU = newActive;
-                      res->indices->release();
+                      ctx.activeRowsGPU.reset(newActive);
                  } else {
-                      ctx.activeRowsGPU = res->indices;
+                      ctx.activeRowsGPU = std::move(res->indices);
                  }
                  ctx.activeRowsCountGPU = res->count;
                  return true;
@@ -1058,15 +1042,11 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                       
                       MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
                       
-                      ctx.activeRowsGPU->release();
-                      res->indices->release();
-                      if (joinRes.buildIndices) joinRes.buildIndices->release();
-                      if (joinRes.probeIndices) joinRes.probeIndices->release();
+                      ctx.activeRowsGPU.reset(newActive);
                       
-                      ctx.activeRowsGPU = newActive;
                       ctx.activeRowsCountGPU = joinRes.count;
                   } else {
-                      ctx.activeRowsGPU = res->indices;
+                      ctx.activeRowsGPU = std::move(res->indices);
                       ctx.activeRowsCountGPU = res->count;
                   }
                   return true;
@@ -1142,8 +1122,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                     default: break;
                 }
                 if (!pass) {
-                    if(ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                    ctx.activeRowsGPU = GpuOps::createBuffer(nullptr, 4);
+                    ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
                     ctx.activeRowsCountGPU = 0;
                 }
                 return true;
@@ -1234,8 +1213,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                     default: break;
                 }
                 if (!pass) {
-                    if(ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                    ctx.activeRowsGPU = GpuOps::createBuffer(nullptr, 4);
+                    ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
                     ctx.activeRowsCountGPU = 0;
                 }
                 return true;
@@ -1259,8 +1237,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
         }
         
         if (res) {
-            if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-            ctx.activeRowsGPU = res->indices; // Transfer ownership
+            ctx.activeRowsGPU = std::move(res->indices); // Transfer ownership
             ctx.activeRowsCountGPU = res->count;
             if (debug && res->indices) {
                 uint32_t* idx = (uint32_t*)res->indices->contents();
@@ -1327,8 +1304,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                      pass = (v != 0);
                  }
                  if (!pass) {
-                    if(ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                    ctx.activeRowsGPU = GpuOps::createBuffer(nullptr, 4);
+                    ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
                     ctx.activeRowsCountGPU = 0;
                  }
                  return true;
@@ -1344,8 +1320,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
              }
              
              if (res) {
-                if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                ctx.activeRowsGPU = res->indices;
+                ctx.activeRowsGPU = std::move(res->indices);
                 ctx.activeRowsCountGPU = res->count;
                 return true;
              }
@@ -1395,15 +1370,11 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
                               );
                               MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
                               
-                              if (ctx.activeRowsGPU) ctx.activeRowsGPU->release();
-                              if (res->indices) res->indices->release();
-                              if (joinRes.buildIndices) joinRes.buildIndices->release();
-                              if (joinRes.probeIndices) joinRes.probeIndices->release();
+                              ctx.activeRowsGPU.reset(newActive);
                               
-                              ctx.activeRowsGPU = newActive;
                               ctx.activeRowsCountGPU = joinRes.count;
                           } else {
-                              ctx.activeRowsGPU = res->indices;
+                              ctx.activeRowsGPU = std::move(res->indices);
                               ctx.activeRowsCountGPU = res->count;
                           }
                           return true;
@@ -1423,6 +1394,19 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
 // ============================================================================
 
 MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx) {
+    // RAII guard: batch GPU arithmetic ops within expression evaluation.
+    // Top-level call enables batching; nested recursive calls are no-ops.
+    // On top-level destructor, flushes the GPU queue so all results are ready.
+    struct BatchGuard {
+        bool topLevel;
+        BatchGuard() : topLevel(!GpuOps::isBatchActive()) {
+            if (topLevel) GpuOps::beginBatch();
+        }
+        ~BatchGuard() {
+            if (topLevel) GpuOps::endBatch();
+        }
+    } batchGuard;
+
     if (!expr) return nullptr;
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
 
@@ -1731,8 +1715,7 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
         }
 
         // Evaluate predicate and cast to float (1.0 for true, 0.0 for false)
-        EvalContext subCtx = ctx; 
-        if (ctx.activeRowsGPU) ctx.activeRowsGPU->retain();
+        EvalContext subCtx = ctx; // GpuBuffer copy ctor auto-retains activeRowsGPU
 
         if (executeFilterRecursive(std::const_pointer_cast<TypedExpr>(expr), subCtx)) {
             // subCtx.activeRowsGPU matches condition
@@ -1743,12 +1726,10 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
                  GpuOps::scatterConstantF32(outBuf, subCtx.activeRowsGPU, subCtx.activeRowsCountGPU, 1.0f);
             }
             
-            if (subCtx.activeRowsGPU) subCtx.activeRowsGPU->release();
             return outBuf;
         } else {
             // Filter eval failed -> return nullptr
             if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] Eval Compare: executeFilterRecursive failed\n";
-            if (subCtx.activeRowsGPU) subCtx.activeRowsGPU->release();
             return nullptr;
         }
     }
@@ -1916,9 +1897,7 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
              }
              
              // Clone context to isolate filter effects
-             EvalContext subCtx = ctx; 
-             // Retain activeRowsGPU as subCtx takes ownership of a reference
-             if (ctx.activeRowsGPU) ctx.activeRowsGPU->retain(); 
+             EvalContext subCtx = ctx; // GpuBuffer copy ctor auto-retains activeRowsGPU
              
              if (executeFilterRecursive(w.when, subCtx)) {
                  // subCtx.activeRowsGPU now holds the indices where condition is true.
@@ -1944,19 +1923,16 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
                          } else {
                              // If evaluation fails (e.g. error function), and we have active rows, we can't proceed on GPU
                              if (debug) std::cerr << "[Exec] CASE THEN non-literal GPU eval failed\n";
-                             if (subCtx.activeRowsGPU) subCtx.activeRowsGPU->release();
                              outBuf->release();
                              return nullptr;
                          }
                      }
                  }
                  
-                 // Cleanup subCtx result
-                 if (subCtx.activeRowsGPU) subCtx.activeRowsGPU->release();
+                 // subCtx goes out of scope here; GpuBuffer destructor releases activeRowsGPU
              } else {
                  if (debug) std::cerr << "[Exec] CASE condition eval failed on GPU\n";
-                 // Cleanup original reference
-                 if (subCtx.activeRowsGPU) subCtx.activeRowsGPU->release();
+                 // subCtx goes out of scope; GpuBuffer destructor releases activeRowsGPU
                  outBuf->release(); 
                  return nullptr;
              }

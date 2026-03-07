@@ -44,7 +44,9 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
                 // Update CPU vector from gathered GPU buffer (shared memory)
                 table.u32Cols[i].resize(newCount);
                 std::memcpy(table.u32Cols[i].data(), gathered->contents(), newCount * sizeof(uint32_t));
-                if (i < table.u32ColsGPU.size()) table.u32ColsGPU[i] = gathered;
+                if (i < table.u32ColsGPU.size()) {
+                    table.u32ColsGPU[i].reset(gathered);
+                }
                 continue;
             }
         }
@@ -61,7 +63,9 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
             if (gathered) {
                 table.f32Cols[i].resize(newCount);
                 std::memcpy(table.f32Cols[i].data(), gathered->contents(), newCount * sizeof(float));
-                if (i < table.f32ColsGPU.size()) table.f32ColsGPU[i] = gathered;
+                if (i < table.f32ColsGPU.size()) {
+                    table.f32ColsGPU[i].reset(gathered);
+                }
                 continue;
             }
         }

@@ -2,15 +2,15 @@
 
 #include <cstdint>
 
-#include <Metal/Metal.hpp>
+#include "GpuBuffer.hpp"
 
 namespace engine {
 
 // For each output row: left row index and right row index.
 // Note: indices are into the *base* column buffers (after selection remap).
 struct GpuJoinMap {
-    MTL::Buffer* leftRow = nullptr;
-    MTL::Buffer* rightRow = nullptr;
+    GpuBuffer leftRow;
+    GpuBuffer rightRow;
     uint32_t count = 0;
 };
 

@@ -1,21 +1,10 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: r_regionkey
-[Planner] Proj: r_name
-[Planner] Proj: r_comment
 DEBUG: Scan table determined as: 'region'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=region
-[Planner] Generating Scan: region at index 0 Plan: 6124300648
-[Planner] Node SEQ_SCAN  output projections: r_regionkey, r_name, r_comment, 
-[Planner] plan.outputColumns from SQL:
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -26,11 +15,11 @@ r_regionkey|r_comment|r_name|
 3|ly final courts cajole furiously final excuse|EUROPE|
 4|uickly special accounts cajole carefully blithely close requests. carefully final asymptotes haggle furiousl|MIDDLE EAST|
 ---------------------------------------------------
-Planning time: 18.06 ms
-Data Load Time (Disk+Upload): 22.08 ms
+Planning time: 0.31 ms
+Data Load Time (Disk+Upload): 22.50 ms
 GPU kernels time: 0.00 ms
 CPU postprocess time: 0.02 ms
-Total Internal Pipeline time: 22.10 ms
-Total Host Execution time: 22.11 ms
-Total Wall time (Plan+Exec): 40.18 ms
+Total Internal Pipeline time: 22.52 ms
+Total Host Execution time: 22.54 ms
+Total Wall time (Plan+Exec): 22.85 ms
 ---------------------------------------------------

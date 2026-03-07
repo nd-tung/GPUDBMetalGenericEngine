@@ -1,50 +1,8 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'total_acctbal' -> 'sum(s_acctbal)'
-[Planner]   'sum(s_acctbal)' -> 'total_acctbal'
-[Planner]   'supplier_count' -> 'count(*)'
-[Planner]   'count(*)' -> 'supplier_count'
-[Planner] Traversing node: TOP_N
-[Planner] Traversing: TOP_N
-[Planner] Entering children traversal block. Name: top_n Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table nation
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: n_nationkey
-[Planner] Proj: n_name
 DEBUG: Scan table determined as: 'nation'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=nation
-[Planner] Generating Scan: nation at index 0 Plan: 6164048912
-[Planner] Node SEQ_SCAN  output projections: n_nationkey, n_name, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: s_nationkey
-[Planner] Proj: s_acctbal
 DEBUG: Scan table determined as: 'supplier'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
-[Planner] Generating Scan: supplier at index 0 Plan: 6164064616
-[Planner] Node SEQ_SCAN  output projections: s_nationkey, s_acctbal, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'nation'
 [Planner] Pre-resolved Condition: 's_nationkey = n_nationkey'
 [Planner] ChildProjs size: 4
@@ -54,75 +12,89 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=supplier
   #3: n_name
 [Planner] Resolved Condition: 's_nationkey = n_nationkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='nation'
-[Planner] Join Key Analysis: l => supplier, r => nation
-[Planner] Captured RHS Table: nation
-[Planner] RHS Tables: nation, 
-[Planner] Checking matchesRHS: supplier
-[Planner] Checking matchesRHS: nation
-[Planner] Node HASH_JOIN output projections: s_nationkey, s_acctbal, n_nationkey, n_name, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: s_nationkey
-[Planner] Proj: s_acctbal
-[Planner] Forcing keep of global column: n_nationkey
-[Planner] Forcing keep of global column: n_name
-[Planner] Node PROJECTION output projections: s_nationkey, s_acctbal, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: n_name
-[Planner] Proj: s_acctbal
-[Planner] Forcing keep of global column: s_nationkey
-[Planner] Node PROJECTION output projections: n_name, s_acctbal, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: supplier_count
-[Planner] Pushing spec with outputName='supplier_count'
-[Planner] Parsing agg string: 'sum(#1)'
-[Planner] Resolved agg: sum(s_acctbal)
-[Planner] inputExpr 's_acctbal' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(s_acctbal)'
-[Planner] Found alias for agg: total_acctbal
-[Planner] Pushing spec with outputName='total_acctbal'
-[Planner] Node HASH_GROUP_BY output projections: n_name, supplier_count, total_acctbal, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: n_name
-[Planner] Proj: supplier_count
-[Planner] Proj: total_acctbal
-[Planner] Node PROJECTION output projections: n_name, supplier_count, total_acctbal, 
-[Planner] ORDER BY looking up alias: 'count_star()'
-[Planner] Node TOP_N output projections: n_name, supplier_count, total_acctbal, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'n_name'
-[Planner]   'supplier_count'
-[Planner]   'total_acctbal'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 10000
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=21 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=12 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 21 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=24 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=23 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=4 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=3 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=6 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=5 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=0 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=12 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=11 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=14 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=13 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=8 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=7 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=10 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=9 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=20 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=19 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=22 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=21 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=16 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=15 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=18 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=17 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 25 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 supplier_count|total_acctbal|n_name|
+438.00|2022868.12|IRAQ|
+421.00|1972070.50|PERU|
+420.00|1813080.50|ALGERIA|
+415.00|1805131.50|EGYPT|
+415.00|1858708.62|INDIA|
+413.00|1814336.50|ARGENTINA|
+412.00|2041622.25|CANADA|
+411.00|1787877.75|SAUDI ARABIA|
+407.00|1712028.00|CHINA|
+406.00|1667102.25|MOZAMBIQUE|
 ---------------------------------------------------
-Planning time: 18.78 ms
-Data Load Time (Disk+Upload): 29.25 ms
-GPU kernels time: 0.50 ms
-CPU postprocess time: 5.53 ms
-Total Internal Pipeline time: 35.28 ms
-Total Host Execution time: 35.29 ms
-Total Wall time (Plan+Exec): 54.07 ms
+Planning time: 0.76 ms
+Data Load Time (Disk+Upload): 25.64 ms
+GPU kernels time: 3.65 ms
+CPU postprocess time: 11.70 ms
+Total Internal Pipeline time: 40.99 ms
+Total Host Execution time: 41.01 ms
+Total Wall time (Plan+Exec): 41.77 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  gather         :    0.283 ms (56.204%) [1 calls]
-  hash_join_probe_u32:    0.220 ms (43.796%) [1 calls]
+  cast           :    0.191 ms (5.230%) [1 calls]
+  gather         :    0.543 ms (14.893%) [3 calls]
+  groupby        :    1.947 ms (53.374%) [3 calls]
+  hash_join_probe_u32:    0.769 ms (21.069%) [1 calls]
+  sort           :    0.198 ms (5.434%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 0.503 ms
-  Kernel invocations: 2
+  TOTAL GPU TIME: 3.648 ms
+  Kernel invocations: 10
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi          0.220          10000         45.394
-ops::gather_col_u32                  0.283          10000         35.372
+hash_join_probe_write_multi          0.769          10000         13.010
+ops::groupby_agg_multi_key_ty        0.950          10000         10.522
+ops::ht_mark_valid                   0.811          32768         40.404
+ops::ht_extract_compact              0.186             25          0.135
+ops::cast_u32_to_f32                 0.191             25          0.131
+block_sort_kv_u64                    0.000             25          0.000
+orderby_gpu_gather                   0.198             50          0.252
+ops::gather_col_u32                  0.180             25          0.139
+ops::gather_col_f32                  0.184             10          0.054
+ops::gather_col_f32                  0.179             10          0.056
 ─────────────────────────────────────────────────────────────────
-TOTAL: 0.503 ms
+TOTAL: 3.648 ms

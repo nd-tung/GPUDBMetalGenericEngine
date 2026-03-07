@@ -17,13 +17,13 @@ namespace engine {
 enum class GpuFilterOp { LT, LE, GT, GE, EQ, NE, LIKE_PATTERN = 999 };
 
 struct FilterResult {
-    MTL::Buffer* indices = nullptr; // u32 indices, length == count
+    GpuBuffer indices;    // u32 indices, length == count
     uint32_t count = 0;
 };
 
 struct GroupByHashTable {
-    MTL::Buffer* htKeys = nullptr;  // capacity * 4 u32
-    MTL::Buffer* htAggs = nullptr;  // capacity * 8 u32 (float bits)
+    GpuBuffer htKeys;   // capacity * 4 u32
+    GpuBuffer htAggs;   // capacity * 8 u32 (float bits)
     uint32_t capacity = 0;
 };
 
@@ -33,21 +33,28 @@ struct GroupByExtractResult {
     std::vector<std::vector<uint32_t>> aggWords; // [aggSlot][row], raw u32
     // GPU buffers for each key/agg column (per-column slices of the SoA output).
     // These stay alive so downstream can avoid re-uploading CPU vectors to GPU.
-    std::vector<MTL::Buffer*> keyColsGPU;        // [keyIdx] -> MTL::Buffer*
-    std::vector<MTL::Buffer*> aggColsGPU;        // [aggSlot] -> MTL::Buffer*
+    std::vector<GpuBuffer> keyColsGPU;           // [keyIdx] -> GpuBuffer
+    std::vector<GpuBuffer> aggColsGPU;           // [aggSlot] -> GpuBuffer
     uint32_t rowCount = 0;
 };
 
 
 struct JoinResult {
-    MTL::Buffer* buildIndices = nullptr;
-    MTL::Buffer* probeIndices = nullptr;
+    GpuBuffer buildIndices;
+    GpuBuffer probeIndices;
     uint32_t count = 0;
 };
 
 // Reusable GPU operator helpers.
 class GpuOps {
 public:
+    // GPU Arithmetic Batch Mode: when active, arithmetic ops skip
+    // waitUntilCompleted() — the serial command queue guarantees ordering.
+    // Call endBatch() to flush all pending GPU work (commits + waits).
+    static void beginBatch();
+    static void endBatch();
+    static bool isBatchActive();
+
     static JoinResult joinHash(
         MTL::Buffer* buildKeys, 
         MTL::Buffer* buildIndices, // Optional: if null, implied 0..N

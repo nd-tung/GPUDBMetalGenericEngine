@@ -1,113 +1,59 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'total_revenue' -> 'sum(o_totalprice)'
-[Planner]   'sum(o_totalprice)' -> 'total_revenue'
-[Planner]   'num_orders' -> 'count(*)'
-[Planner]   'count(*)' -> 'num_orders'
-[Planner]   'order_year' -> 'extract(year from o_orderdate)'
-[Planner]   'extract(yearfromo_orderdate)' -> 'order_year'
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PERFECT_HASH_GROUP_BY
-[Planner] Traversing: PERFECT_HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: perfect_hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_orderdate
-[Planner] Proj: o_totalprice
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 0 Plan: 6165277032
-[Planner] Node SEQ_SCAN  output projections: o_orderdate, o_totalprice, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: "year"(o_orderdate)
-[Planner] Proj: o_totalprice
-[Planner] Forcing keep of global column: o_orderdate
-[Planner] Node PROJECTION output projections: "year"(o_orderdate), o_totalprice, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: num_orders
-[Planner] Pushing spec with outputName='num_orders'
-[Planner] Parsing agg string: 'sum_no_overflow(#1)'
-[Planner] Resolved agg: sum_no_overflow(o_totalprice)
-[Planner] inputExpr 'o_totalprice' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(o_totalprice)'
-[Planner] Found alias for agg: total_revenue
-[Planner] Pushing spec with outputName='total_revenue'
-[Planner] Node PERFECT_HASH_GROUP_BY output projections: "year"(o_orderdate), num_orders, total_revenue, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: "year"(o_orderdate)
-[Planner] Proj: num_orders
-[Planner] Proj: total_revenue
-[Planner] Node PROJECTION output projections: "year"(o_orderdate), num_orders, total_revenue, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: "year"(o_orderdate)
-[Planner] Proj: num_orders
-[Planner] Proj: total_revenue
-[Planner] Node PROJECTION output projections: "year"(o_orderdate), num_orders, total_revenue, 
-[Planner] ORDER BY looking up alias: 'date_part('year',o_orderdate)'
-[Planner] Node ORDER_BY output projections: "year"(o_orderdate), num_orders, total_revenue, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: "year"(o_orderdate)
-[Planner] Proj: num_orders
-[Planner] Proj: total_revenue
-[Planner] Node PROJECTION output projections: "year"(o_orderdate), num_orders, total_revenue, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'order_year'
-[Planner]   'num_orders'
-[Planner]   'total_revenue'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 1500000
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=1997 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=1995 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 1997 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=1996 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1995 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1998 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1997 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1992 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1994 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1993 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 7 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 num_orders|total_revenue|
-228626.00|34609278976.00|
-228637.00|34546257920.00|
-133623.00|20212738048.00|
-227783.00|34373615616.00|
-227089.00|34330740736.00|
-227597.00|34416304128.00|
-226645.00|34340272128.00|
+228626.00|34609274880.00|
+228637.00|34546237440.00|
+133623.00|20212762624.00|
+227783.00|34373562368.00|
+227089.00|34330830848.00|
+227597.00|34416316416.00|
+226645.00|34340304896.00|
 ---------------------------------------------------
-Planning time: 18.01 ms
-Data Load Time (Disk+Upload): 965.11 ms
-GPU kernels time: 36.19 ms
-CPU postprocess time: 44.75 ms
-Total Internal Pipeline time: 1046.04 ms
-Total Host Execution time: 1046.06 ms
-Total Wall time (Plan+Exec): 1064.07 ms
+Planning time: 0.70 ms
+Data Load Time (Disk+Upload): 514.77 ms
+GPU kernels time: 38.71 ms
+CPU postprocess time: 55.97 ms
+Total Internal Pipeline time: 609.45 ms
+Total Host Execution time: 609.46 ms
+Total Wall time (Plan+Exec): 610.16 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  groupby        :   36.185 ms (100.000%) [3 calls]
+  cast           :    0.188 ms (0.487%) [1 calls]
+  groupby        :   38.519 ms (99.513%) [3 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 36.185 ms
-  Kernel invocations: 3
+  TOTAL GPU TIME: 38.708 ms
+  Kernel invocations: 4
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty       35.023        1500000         42.829
-ops::ht_mark_valid                   0.837        4194304       5012.859
-ops::ht_extract_compact              0.326              7          0.022
+ops::groupby_agg_multi_key_ty       37.052        1500000         40.483
+ops::ht_mark_valid                   1.135        4194304       3696.914
+ops::ht_extract_compact              0.332              7          0.021
+ops::cast_u32_to_f32                 0.188              7          0.037
 ─────────────────────────────────────────────────────────────────
-TOTAL: 36.185 ms
+TOTAL: 38.708 ms

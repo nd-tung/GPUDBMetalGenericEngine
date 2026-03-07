@@ -1,233 +1,184 @@
 #include "DuckDBAdapter.hpp"
 #include "EnvUtil.hpp"
-#include <cstdio>
-#include <array>
-#include <memory>
-#include <string>
-#include <sstream>
-#include <cstdlib>
+
+// DuckDB C++ API – linked via -lduckdb
+#include <duckdb.hpp>
+
 #include <iostream>
+#include <sstream>
+#include <string>
 #include <sys/stat.h>
 
 namespace engine {
 
-static std::string runCmdCapture(const std::string& cmd) {
-    std::array<char, 4096> buf{};
-    std::string out;
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) return out;
-    while (fgets(buf.data(), buf.size(), pipe)) { out.append(buf.data()); }
-    pclose(pipe);
-    return out;
-}
+// ── static member definitions ──
+std::unique_ptr<duckdb::DuckDB>     DuckDBAdapter::s_db;
+std::unique_ptr<duckdb::Connection> DuckDBAdapter::s_con;
+std::string                         DuckDBAdapter::s_datasetPath;
+bool                                DuckDBAdapter::s_ready = false;
 
-static std::string escapeShellArg(std::string s) {
-    // This string will be embedded inside a shell double-quoted argument.
-    // Escape backslashes and double-quotes to preserve the SQL.
-    std::string out;
-    out.reserve(s.size() + 16);
-    for (char c : s) {
-        if (c == '\\') out += "\\\\";
-        else if (c == '"') out += "\\\"";
-        else if (c == '$') out += "\\$"; // avoid accidental env expansion
-        else if (c == '`') out += "\\`"; // avoid command substitution
-        else if (c == '\n' || c == '\r' || c == '\t') out += ' ';
-        else out += c;
-    }
-    return out;
-}
+// ── helpers ──
 
-static std::string stripSqlComments(std::string s) {
-    // Remove SQL single-line comments (-- ...)
+static std::string stripSqlComments(const std::string& s) {
     std::string out;
     out.reserve(s.size());
     size_t i = 0;
     while (i < s.size()) {
-        // Check for -- comment
-        if (i + 1 < s.size() && s[i] == '-' && s[i+1] == '-') {
-            // Skip until end of line
-            while (i < s.size() && s[i] != '\n' && s[i] != '\r') i++;
-            // Add a space to preserve separation
+        if (i + 1 < s.size() && s[i] == '-' && s[i + 1] == '-') {
+            while (i < s.size() && s[i] != '\n' && s[i] != '\r') ++i;
             out += ' ';
         } else {
             out += s[i];
-            i++;
+            ++i;
         }
     }
     return out;
 }
 
+static bool fileExists(const std::string& path) {
+    struct stat buf;
+    return stat(path.c_str(), &buf) == 0;
+}
 
+// ── public API ──
+
+void DuckDBAdapter::init(const std::string& datasetPath) {
+    s_datasetPath = datasetPath;
+    if (!s_datasetPath.empty() && s_datasetPath.back() != '/')
+        s_datasetPath.push_back('/');
+    ensureReady();
+}
+
+void DuckDBAdapter::shutdown() {
+    s_con.reset();
+    s_db.reset();
+    s_ready = false;
+}
+
+void DuckDBAdapter::ensureReady() {
+    if (s_ready) return;
+
+    // Resolve dataset path from env if not set via init()
+    if (s_datasetPath.empty()) {
+        if (const char* p = std::getenv("GPUDB_DATASET_PATH")) {
+            s_datasetPath = p;
+        } else {
+            s_datasetPath = "data/SF-1/";
+        }
+        if (!s_datasetPath.empty() && s_datasetPath.back() != '/')
+            s_datasetPath.push_back('/');
+    }
+
+    const std::string dbPath = s_datasetPath + "data.duckdb";
+
+    if (fileExists(dbPath)) {
+        // Open persistent database (read-only to avoid lock contention)
+        duckdb::DBConfig config;
+        config.options.access_mode = duckdb::AccessMode::READ_ONLY;
+        s_db  = std::make_unique<duckdb::DuckDB>(dbPath, &config);
+        s_con = std::make_unique<duckdb::Connection>(*s_db);
+    } else {
+        // In-memory with views over the .tbl files
+        s_db  = std::make_unique<duckdb::DuckDB>(nullptr);   // :memory:
+        s_con = std::make_unique<duckdb::Connection>(*s_db);
+
+        // TPC-H table definitions  (null_padding=true for trailing '|')
+        struct TblDef { const char* name; const char* cols; };
+        static const TblDef defs[] = {
+            {"lineitem",
+             "'l_orderkey':'INTEGER','l_partkey':'INTEGER','l_suppkey':'INTEGER',"
+             "'l_linenumber':'INTEGER','l_quantity':'DECIMAL(15,2)','l_extendedprice':'DECIMAL(15,2)',"
+             "'l_discount':'DECIMAL(15,2)','l_tax':'DECIMAL(15,2)','l_returnflag':'VARCHAR',"
+             "'l_linestatus':'VARCHAR','l_shipdate':'DATE','l_commitdate':'DATE',"
+             "'l_receiptdate':'DATE','l_shipinstruct':'VARCHAR','l_shipmode':'VARCHAR',"
+             "'l_comment':'VARCHAR'"},
+            {"orders",
+             "'o_orderkey':'INTEGER','o_custkey':'INTEGER','o_orderstatus':'VARCHAR',"
+             "'o_totalprice':'DECIMAL(15,2)','o_orderdate':'DATE','o_orderpriority':'VARCHAR',"
+             "'o_clerk':'VARCHAR','o_shippriority':'INTEGER','o_comment':'VARCHAR'"},
+            {"customer",
+             "'c_custkey':'INTEGER','c_name':'VARCHAR','c_address':'VARCHAR',"
+             "'c_nationkey':'INTEGER','c_phone':'VARCHAR','c_acctbal':'DECIMAL(15,2)',"
+             "'c_mktsegment':'VARCHAR','c_comment':'VARCHAR'"},
+            {"supplier",
+             "'s_suppkey':'INTEGER','s_name':'VARCHAR','s_address':'VARCHAR',"
+             "'s_nationkey':'INTEGER','s_phone':'VARCHAR','s_acctbal':'DECIMAL(15,2)',"
+             "'s_comment':'VARCHAR'"},
+            {"nation",
+             "'n_nationkey':'INTEGER','n_name':'VARCHAR','n_regionkey':'INTEGER',"
+             "'n_comment':'VARCHAR'"},
+            {"region",
+             "'r_regionkey':'INTEGER','r_name':'VARCHAR','r_comment':'VARCHAR'"},
+            {"part",
+             "'p_partkey':'INTEGER','p_name':'VARCHAR','p_mfgr':'VARCHAR',"
+             "'p_brand':'VARCHAR','p_type':'VARCHAR','p_size':'INTEGER',"
+             "'p_container':'VARCHAR','p_retailprice':'DECIMAL(15,2)','p_comment':'VARCHAR'"},
+            {"partsupp",
+             "'ps_partkey':'INTEGER','ps_suppkey':'INTEGER','ps_availqty':'INTEGER',"
+             "'ps_supplycost':'DECIMAL(15,2)','ps_comment':'VARCHAR'"},
+        };
+
+        for (auto& d : defs) {
+            std::string tblFile = s_datasetPath + d.name + ".tbl";
+            if (!fileExists(tblFile)) continue;
+
+            std::ostringstream sql;
+            sql << "CREATE OR REPLACE VIEW " << d.name
+                << " AS SELECT * FROM read_csv('" << tblFile
+                << "', delim='|', header=false, null_padding=true, columns={"
+                << d.cols << "})";
+
+            auto res = s_con->Query(sql.str());
+            if (res->HasError()) {
+                std::cerr << "[DuckDBAdapter] view creation error for "
+                          << d.name << ": " << res->GetError() << "\n";
+            }
+        }
+    }
+
+    // Disable deliminator optimizer to match the planner's expectations
+    s_con->Query("PRAGMA disabled_optimizers='deliminator'");
+
+    s_ready = true;
+}
 
 std::string DuckDBAdapter::explainJSON(const std::string& sql) {
-    // Use persistent DuckDB database to preserve correct predicate semantics
-    // (:memory: with views incorrectly transforms >= AND < into BETWEEN).
-    const std::string q = escapeShellArg(stripSqlComments(sql));
+    ensureReady();
 
-    std::string datasetPath = "data/SF-1/";
-    if (const char* p = std::getenv("GPUDB_DATASET_PATH")) {
-        datasetPath = p;
-    }
-    if (!datasetPath.empty() && datasetPath.back() != '/') datasetPath.push_back('/');
-    
-    // Check if persistent database exists
-    std::string dbPath = datasetPath + "data.duckdb";
-    struct stat buffer;
-    bool dbExists = (stat(dbPath.c_str(), &buffer) == 0);
-    
-    if (dbExists) {
-        // Use persistent database - correct predicate semantics
-        std::ostringstream oss;
-        // Disable deliminator optimizer to avoid unsupported Delim Joins
-        oss << "duckdb \"" << dbPath << "\" -json "
-            << "-c \"PRAGMA disabled_optimizers='deliminator'; EXPLAIN (FORMAT JSON) " << q << ";\" 2>&1";
-        
-        if (env_truthy("GPUDB_DEBUG_DUCKDB_CMD")) {
-            std::cerr << "[DuckDBAdapter] cmd: " << oss.str() << "\n";
-        }
-        
-        return runCmdCapture(oss.str());
-    }
-    
-    // Fallback to :memory: with views (may have BETWEEN transformation issue)
-
-    // TPC-H table paths
-    const std::string lineitemPath = datasetPath + "lineitem.tbl";
-    const std::string ordersPath = datasetPath + "orders.tbl";
-    const std::string customerPath = datasetPath + "customer.tbl";
-    const std::string supplierPath = datasetPath + "supplier.tbl";
-    const std::string nationPath = datasetPath + "nation.tbl";
-    const std::string regionPath = datasetPath + "region.tbl";
-    const std::string partPath = datasetPath + "part.tbl";
-    const std::string partsuppPath = datasetPath + "partsupp.tbl";
-
-    // Note: null_padding=true is important because TPC-H .tbl has a trailing '|'.
-    std::string view_lineitem =
-        "CREATE OR REPLACE VIEW lineitem AS "
-        "SELECT * FROM read_csv('" + lineitemPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'l_orderkey':'INTEGER',"
-            "'l_partkey':'INTEGER',"
-            "'l_suppkey':'INTEGER',"
-            "'l_linenumber':'INTEGER',"
-            "'l_quantity':'DECIMAL(15,2)',"
-            "'l_extendedprice':'DECIMAL(15,2)',"
-            "'l_discount':'DECIMAL(15,2)',"
-            "'l_tax':'DECIMAL(15,2)',"
-            "'l_returnflag':'VARCHAR',"
-            "'l_linestatus':'VARCHAR',"
-            "'l_shipdate':'DATE',"
-            "'l_commitdate':'DATE',"
-            "'l_receiptdate':'DATE',"
-            "'l_shipinstruct':'VARCHAR',"
-            "'l_shipmode':'VARCHAR',"
-            "'l_comment':'VARCHAR'"
-        "});";
-
-    std::string view_orders =
-        "CREATE OR REPLACE VIEW orders AS "
-        "SELECT * FROM read_csv('" + ordersPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'o_orderkey':'INTEGER',"
-            "'o_custkey':'INTEGER',"
-            "'o_orderstatus':'VARCHAR',"
-            "'o_totalprice':'DECIMAL(15,2)',"
-            "'o_orderdate':'DATE',"
-            "'o_orderpriority':'VARCHAR',"
-            "'o_clerk':'VARCHAR',"
-            "'o_shippriority':'INTEGER',"
-            "'o_comment':'VARCHAR'"
-        "});";
-
-    std::string view_customer =
-        "CREATE OR REPLACE VIEW customer AS "
-        "SELECT * FROM read_csv('" + customerPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'c_custkey':'INTEGER',"
-            "'c_name':'VARCHAR',"
-            "'c_address':'VARCHAR',"
-            "'c_nationkey':'INTEGER',"
-            "'c_phone':'VARCHAR',"
-            "'c_acctbal':'DECIMAL(15,2)',"
-            "'c_mktsegment':'VARCHAR',"
-            "'c_comment':'VARCHAR'"
-        "});";
-
-    std::string view_supplier =
-        "CREATE OR REPLACE VIEW supplier AS "
-        "SELECT * FROM read_csv('" + supplierPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'s_suppkey':'INTEGER',"
-            "'s_name':'VARCHAR',"
-            "'s_address':'VARCHAR',"
-            "'s_nationkey':'INTEGER',"
-            "'s_phone':'VARCHAR',"
-            "'s_acctbal':'DECIMAL(15,2)',"
-            "'s_comment':'VARCHAR'"
-        "});";
-
-    std::string view_nation =
-        "CREATE OR REPLACE VIEW nation AS "
-        "SELECT * FROM read_csv('" + nationPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'n_nationkey':'INTEGER',"
-            "'n_name':'VARCHAR',"
-            "'n_regionkey':'INTEGER',"
-            "'n_comment':'VARCHAR'"
-        "});";
-
-    std::string view_region =
-        "CREATE OR REPLACE VIEW region AS "
-        "SELECT * FROM read_csv('" + regionPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'r_regionkey':'INTEGER',"
-            "'r_name':'VARCHAR',"
-            "'r_comment':'VARCHAR'"
-        "});";
-
-    std::string view_part =
-        "CREATE OR REPLACE VIEW part AS "
-        "SELECT * FROM read_csv('" + partPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'p_partkey':'INTEGER',"
-            "'p_name':'VARCHAR',"
-            "'p_mfgr':'VARCHAR',"
-            "'p_brand':'VARCHAR',"
-            "'p_type':'VARCHAR',"
-            "'p_size':'INTEGER',"
-            "'p_container':'VARCHAR',"
-            "'p_retailprice':'DECIMAL(15,2)',"
-            "'p_comment':'VARCHAR'"
-        "});";
-
-    std::string view_partsupp =
-        "CREATE OR REPLACE VIEW partsupp AS "
-        "SELECT * FROM read_csv('" + partsuppPath + "', delim='|', header=false, null_padding=true, "
-        "columns={"
-            "'ps_partkey':'INTEGER',"
-            "'ps_suppkey':'INTEGER',"
-            "'ps_availqty':'INTEGER',"
-            "'ps_supplycost':'DECIMAL(15,2)',"
-            "'ps_comment':'VARCHAR'"
-        "});";
-
-    std::ostringstream oss;
-    oss << "duckdb :memory: "
-        << "-c \"" << view_lineitem << "\" "
-        << "-c \"" << view_orders << "\" "
-        << "-c \"" << view_customer << "\" "
-        << "-c \"" << view_supplier << "\" "
-        << "-c \"" << view_nation << "\" "
-        << "-c \"" << view_region << "\" "
-        << "-c \"" << view_part << "\" "
-        << "-c \"" << view_partsupp << "\" "
-        << "-c \"EXPLAIN (FORMAT JSON) " << q << ";\" 2>&1";
+    const std::string cleaned = stripSqlComments(sql);
+    const std::string stmt = "EXPLAIN (FORMAT JSON) " + cleaned;
 
     if (env_truthy("GPUDB_DEBUG_DUCKDB_CMD")) {
-        std::cerr << "[DuckDBAdapter] cmd: " << oss.str() << "\n";
+        std::cerr << "[DuckDBAdapter] embedded query: " << stmt << "\n";
     }
 
-    return runCmdCapture(oss.str());
+    auto result = s_con->Query(stmt);
+    if (result->HasError()) {
+        std::cerr << "[DuckDBAdapter] EXPLAIN error: " << result->GetError() << "\n";
+        return {};
+    }
+
+    // The result is a single-column, single-row table containing the JSON string.
+    if (result->RowCount() == 0 || result->ColumnCount() == 0) {
+        std::cerr << "[DuckDBAdapter] EXPLAIN returned empty result\n";
+        return {};
+    }
+
+    // EXPLAIN (FORMAT JSON) returns a table with columns: explain_key | explain_value
+    // The physical plan JSON is in the "explain_value" column (index 1) of the
+    // row whose explain_key is "physical_plan".
+    // If only one column exists, fall back to column 0.
+    idx_t jsonCol = (result->ColumnCount() >= 2) ? 1 : 0;
+
+    for (idx_t r = 0; r < result->RowCount(); ++r) {
+        auto key = result->GetValue(0, r).ToString();
+        if (key == "physical_plan") {
+            return result->GetValue(jsonCol, r).ToString();
+        }
+    }
+
+    // Fallback: return the first cell
+    return result->GetValue(jsonCol, 0).ToString();
 }
 
 } // namespace engine

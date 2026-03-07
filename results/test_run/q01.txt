@@ -1,239 +1,70 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'count(*)' -> 'count_order'
-[Planner]   'avg_price' -> 'avg(l_extendedprice)'
-[Planner]   'sum(l_quantity)' -> 'sum_qty'
-[Planner]   'avg_qty' -> 'avg(l_quantity)'
-[Planner]   'avg(l_quantity)' -> 'avg_qty'
-[Planner]   'sum_charge' -> 'sum(l_extendedprice * (1 - l_discount) * (1 + l_tax))'
-[Planner]   'sum(l_extendedprice*(1-l_discount)*(1+l_tax))' -> 'sum_charge'
-[Planner]   'sum_base_price' -> 'sum(l_extendedprice)'
-[Planner]   'count_order' -> 'count(*)'
-[Planner]   'sum(l_extendedprice)' -> 'sum_base_price'
-[Planner]   'avg(l_extendedprice)' -> 'avg_price'
-[Planner]   'avg(l_discount)' -> 'avg_disc'
-[Planner]   'sum_qty' -> 'sum(l_quantity)'
-[Planner]   'sum_disc_price' -> 'sum(l_extendedprice * (1 - l_discount))'
-[Planner]   'avg_disc' -> 'avg(l_discount)'
-[Planner]   'sum(l_extendedprice*(1-l_discount))' -> 'sum_disc_price'
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PERFECT_HASH_GROUP_BY
-[Planner] Traversing: PERFECT_HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: perfect_hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_quantity
-[Planner] Proj: l_extendedprice
-[Planner] Proj: l_discount
-[Planner] Proj: l_tax
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6159100280
-[Planner] Node SEQ_SCAN  output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, l_discount, l_tax, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_quantity
-[Planner] Proj: l_extendedprice
-[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
-[Planner] Proj: l_tax
-[Planner] Proj: l_discount
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, (l_extendedprice * (1.00 - l_discount)), l_tax, l_discount, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_quantity
-[Planner] Proj: l_extendedprice
-[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
-[Planner] Proj: l_tax
-[Planner] Proj: l_discount
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, (l_extendedprice * (1.00 - l_discount)), l_tax, l_discount, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_quantity
-[Planner] Proj: l_extendedprice
-[Planner] Proj: (l_extendedprice * (1.00 - l_discount))
-[Planner] Proj: ((l_extendedprice * (1.00 - l_discount)) * (1.00 + l_tax))
-[Planner] Proj: l_quantity
-[Planner] Proj: l_extendedprice
-[Planner] Proj: l_discount
-[Planner] Forcing keep of global column: l_tax
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_quantity, l_extendedprice, (l_extendedprice * (1.00 - l_discount)), ((l_extendedprice * (1.00 - l_discount)) * (1.00 + l_tax)), l_quantity, l_extendedprice, l_discount, 
-[Planner] Parsing agg string: 'sum_no_overflow(#2)'
-[Planner] Resolved agg: sum_no_overflow(l_quantity)
-[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(l_quantity)'
-[Planner] Found alias for agg: sum_qty
-[Planner] Pushing spec with outputName='sum_qty'
-[Planner] Parsing agg string: 'sum_no_overflow(#3)'
-[Planner] Resolved agg: sum_no_overflow(l_extendedprice)
-[Planner] inputExpr 'l_extendedprice' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(l_extendedprice)'
-[Planner] Found alias for agg: sum_base_price
-[Planner] Pushing spec with outputName='sum_base_price'
-[Planner] Parsing agg string: 'sum_no_overflow(#4)'
-[Planner] Resolved agg: sum_no_overflow((l_extendedprice * (1.00 - l_discount)))
-[Planner] inputExpr '(l_extendedprice * (1.00 - l_discount))' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum((l_extendedprice*(1-l_discount)))'
-[Planner] Found alias with reduced parens: 'sum(l_extendedprice*(1-l_discount))'
-[Planner] Found alias for agg: sum_disc_price
-[Planner] Pushing spec with outputName='sum_disc_price'
-[Planner] Parsing agg string: 'sum_no_overflow(#5)'
-[Planner] Resolved agg: sum_no_overflow(((l_extendedprice * (1.00 - l_discount)) * (1.00 + l_tax)))
-[Planner] inputExpr '((l_extendedprice * (1.00 - l_discount)) * (1.00 + l_tax))' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(((l_extendedprice*(1-l_discount))*(1+l_tax)))'
-[Planner] Found alias via stripped comparison: 'sum_charge'
-[Planner] Found alias for agg: sum_charge
-[Planner] Pushing spec with outputName='sum_charge'
-[Planner] Parsing agg string: 'avg(#6)'
-[Planner] Resolved agg: avg(l_quantity)
-[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'avg(l_quantity)'
-[Planner] Found alias for agg: avg_qty
-[Planner] Pushing spec with outputName='avg_qty'
-[Planner] Parsing agg string: 'avg(#7)'
-[Planner] Resolved agg: avg(l_extendedprice)
-[Planner] inputExpr 'l_extendedprice' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'avg(l_extendedprice)'
-[Planner] Found alias for agg: avg_price
-[Planner] Pushing spec with outputName='avg_price'
-[Planner] Parsing agg string: 'avg(#8)'
-[Planner] Resolved agg: avg(l_discount)
-[Planner] inputExpr 'l_discount' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'avg(l_discount)'
-[Planner] Found alias for agg: avg_disc
-[Planner] Pushing spec with outputName='avg_disc'
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: count_order
-[Planner] Pushing spec with outputName='count_order'
-[Planner] Node PERFECT_HASH_GROUP_BY output projections: l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: sum_qty
-[Planner] Proj: sum_base_price
-[Planner] Proj: sum_disc_price
-[Planner] Proj: sum_charge
-[Planner] Proj: avg_qty
-[Planner] Proj: avg_price
-[Planner] Proj: avg_disc
-[Planner] Proj: count_order
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: sum_qty
-[Planner] Proj: sum_base_price
-[Planner] Proj: sum_disc_price
-[Planner] Proj: sum_charge
-[Planner] Proj: avg_qty
-[Planner] Proj: avg_price
-[Planner] Proj: avg_disc
-[Planner] Proj: count_order
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order, 
-[Planner] Node ORDER_BY output projections: l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: sum_qty
-[Planner] Proj: sum_base_price
-[Planner] Proj: sum_disc_price
-[Planner] Proj: sum_charge
-[Planner] Proj: avg_qty
-[Planner] Proj: avg_price
-[Planner] Proj: avg_disc
-[Planner] Proj: count_order
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'l_returnflag'
-[Planner]   'l_linestatus'
-[Planner]   'sum_qty'
-[Planner]   'sum_base_price'
-[Planner]   'sum_disc_price'
-[Planner]   'sum_charge'
-[Planner]   'avg_qty'
-[Planner]   'avg_price'
-[Planner]   'avg_disc'
-[Planner]   'count_order'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 5916591
+[Exec] GroupBy VERIFY: agg mismatches = 0 / 5916591
+[Exec] GroupBy VERIFY: CPU grand total = 150921317.00
+[Exec] GroupBy VERIFY: GPU grand total = 150922265.00
+[Exec] GroupBy VERIFY: difference = 948.00
+[Exec] GroupBy VERIFY: CPU max key=78 val=75467457.00
+[Exec] GroupBy VERIFY: GPU max key=78 val=74476576.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 78 = 74476576.00
+[Exec] GroupBy VERIFY: 0 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|l_linestatus|sum_qty|sum_base_price|sum_disc_price|sum_charge|avg_qty|avg_price|avg_disc|count_order|
-A|F|37734036.00|56587431936.00|53758238720.00|55908532224.00|25.52|38273.74|0.05|1478493.00|
-N|F|991417.00|1487505280.00|1413081088.00|1469652096.00|25.52|38284.48|0.05|38854.00|
-N|O|74476448.00|111701172224.00|106119159808.00|110366851072.00|25.50|38248.91|0.05|2920374.00|
-R|F|37719772.00|56567869440.00|53741879296.00|55889084416.00|25.51|38250.74|0.05|1478870.00|
+A|F|37734640.00|56586694656.00|53757878272.00|55909175296.00|25.52|38273.15|0.05|1478493.00|
+N|F|991417.00|1487504768.00|1413086336.00|1469652864.00|25.52|38284.48|0.05|38854.00|
+N|O|74476576.00|111701139456.00|106118217728.00|110367522816.00|25.50|38248.93|0.05|2920374.00|
+R|F|37719632.00|56568033280.00|53740908544.00|55888990208.00|25.51|38250.86|0.05|1478870.00|
 ---------------------------------------------------
-Planning time: 19.76 ms
-Data Load Time (Disk+Upload): 14761.63 ms
-GPU kernels time: 317.46 ms
-CPU postprocess time: 260.16 ms
-Total Internal Pipeline time: 15339.25 ms
-Total Host Execution time: 15339.27 ms
-Total Wall time (Plan+Exec): 15359.03 ms
+Planning time: 1.35 ms
+Data Load Time (Disk+Upload): 2966.49 ms
+GPU kernels time: 310.76 ms
+CPU postprocess time: 374.47 ms
+Total Internal Pipeline time: 3651.72 ms
+Total Host Execution time: 3653.32 ms
+Total Wall time (Plan+Exec): 3654.66 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.978 ms (0.308%) [1 calls]
-  filter         :    9.233 ms (2.908%) [1 calls]
-  gather         :   18.702 ms (5.891%) [11 calls]
-  groupby        :  281.685 ms (88.732%) [3 calls]
-  sort           :    6.860 ms (2.161%) [2 calls]
+  cast           :    0.839 ms (0.270%) [4 calls]
+  filter         :   10.413 ms (3.351%) [1 calls]
+  gather         :   19.364 ms (6.231%) [11 calls]
+  groupby        :  273.140 ms (87.894%) [3 calls]
+  sort           :    7.006 ms (2.254%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 317.458 ms
-  Kernel invocations: 18
+  TOTAL GPU TIME: 310.762 ms
+  Kernel invocations: 21
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_le_u32                   9.233        6001215        650.001
-ops::compact_indices                 0.978        6001215       6137.260
-ops::gather_col_u32                  1.938        5916591       3053.067
-ops::gather_col_u32                  1.985        5916591       2981.275
-ops::gather_col_f32                  1.996        5916591       2963.977
-ops::gather_col_f32                  1.939        5916591       3051.231
-ops::gather_col_f32                  1.665        5916591       3552.798
-ops::gather_col_f32                  1.260        5916591       4694.619
-ops::gather_col_f32                  1.915        5916591       3089.065
-ops::gather_col_f32                  1.692        5916591       3497.407
-ops::gather_col_f32                  1.853        5916591       3193.267
-ops::gather_col_f32                  1.325        5916591       4465.072
-ops::gather_col_f32                  1.134        5916591       5219.178
-ops::groupby_agg_multi_key_ty      278.431        5916591         21.250
-ops::ht_mark_valid                   2.432       16777216       6897.579
-ops::ht_extract_compact              0.822              4          0.005
+ops::filter_le_u32                  10.413        6001215        576.317
+ops::gather_col_u32                  2.017        5916591       2933.787
+ops::gather_col_u32                  1.883        5916591       3141.622
+ops::gather_col_f32                  1.910        5916591       3097.894
+ops::gather_col_f32                  1.890        5916591       3130.609
+ops::gather_col_f32                  1.620        5916591       3651.371
+ops::gather_col_f32                  1.278        5916591       4628.364
+ops::gather_col_f32                  1.964        5916591       3013.224
+ops::gather_col_f32                  1.640        5916591       3607.952
+ops::gather_col_f32                  1.908        5916591       3101.277
+ops::gather_col_f32                  1.048        5916591       5647.402
+ops::gather_col_f32                  2.207        5916591       2680.879
+ops::groupby_agg_multi_key_ty      269.157        5916591         21.982
+ops::ht_mark_valid                   2.839       16777216       5909.639
+ops::ht_extract_compact              1.144              4          0.003
+ops::cast_u32_to_f32                 0.208              4          0.019
+ops::cast_u32_to_f32                 0.217              4          0.018
+ops::cast_u32_to_f32                 0.202              4          0.020
+ops::cast_u32_to_f32                 0.212              4          0.019
 block_sort_kv_u64                    0.000              4          0.000
-orderby_gpu_gather                   6.860             40          0.006
+orderby_gpu_gather                   7.006             40          0.006
 ─────────────────────────────────────────────────────────────────
-TOTAL: 317.458 ms
+TOTAL: 310.762 ms

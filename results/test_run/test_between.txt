@@ -1,37 +1,8 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner] Traversing node: TOP_N
-[Planner] Traversing: TOP_N
-[Planner] Entering children traversal block. Name: top_n Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table orders
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_orderkey
-[Planner] Proj: o_orderdate
-[Planner] Proj: o_totalprice
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 0 Plan: 6128781888
-[Planner] Node SEQ_SCAN  output projections: o_orderkey, o_orderdate, o_totalprice, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_orderkey
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6128789864
-[Planner] Node SEQ_SCAN  output projections: l_orderkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
 [Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
 [Planner] ChildProjs size: 4
@@ -41,27 +12,10 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
   #3: o_totalprice
 [Planner] Resolved Condition: 'l_orderkey = o_orderkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
-[Planner] Join Key Analysis: l => lineitem, r => orders
-[Planner] Captured RHS Table: orders
-[Planner] RHS Tables: orders, 
-[Planner] Checking matchesRHS: lineitem
-[Planner] Checking matchesRHS: orders
-[Planner] Node HASH_JOIN output projections: l_orderkey, o_orderkey, o_orderdate, o_totalprice, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_orderkey
-[Planner] Proj: o_totalprice
-[Planner] Proj: o_orderdate
-[Planner] Forcing keep of global column: o_orderkey
-[Planner] Node PROJECTION output projections: l_orderkey, o_totalprice, o_orderdate, 
-[Planner] Node TOP_N output projections: l_orderkey, o_totalprice, o_orderdate, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'l_orderkey'
-[Planner]   'o_totalprice'
-[Planner]   'o_orderdate'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -87,54 +41,39 @@ l_orderkey|o_orderdate|o_totalprice|
 4329030|1995-04-13|425562.72|
 4486118|1995-01-25|425196.75|
 ---------------------------------------------------
-Planning time: 19.07 ms
-Data Load Time (Disk+Upload): 7322.87 ms
-GPU kernels time: 19.30 ms
-CPU postprocess time: 34.56 ms
-Total Internal Pipeline time: 7376.73 ms
-Total Host Execution time: 7376.75 ms
-Total Wall time (Plan+Exec): 7395.82 ms
+Planning time: 1.02 ms
+Data Load Time (Disk+Upload): 2830.00 ms
+GPU kernels time: 15.67 ms
+CPU postprocess time: 25.07 ms
+Total Internal Pipeline time: 2870.74 ms
+Total Host Execution time: 2870.77 ms
+Total Wall time (Plan+Exec): 2871.79 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    2.998 ms (15.532%) [6 calls]
-  filter         :   11.260 ms (58.338%) [6 calls]
-  gather         :    4.356 ms (22.568%) [12 calls]
-  hash_join_probe_u32:    0.372 ms (1.928%) [1 calls]
-  sort           :    0.315 ms (1.633%) [2 calls]
+  filter         :   14.056 ms (89.695%) [6 calls]
+  gather         :    0.826 ms (5.270%) [4 calls]
+  hash_join_probe_u32:    0.429 ms (2.740%) [1 calls]
+  sort           :    0.360 ms (2.295%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 19.301 ms
-  Kernel invocations: 27
+  TOTAL GPU TIME: 15.671 ms
+  Kernel invocations: 13
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_f32                   9.083        6001215        660.678
-ops::compact_indices                 0.962        6001215       6237.725
-ops::filter_le_f32_indexed           0.536        3722913       6940.877
-ops::compact_indices_indexed         0.578        3722913       6439.177
-ops::filter_ge_f32_indexed           0.598        1320726       2209.647
-ops::compact_indices_indexed         0.398        1320726       3321.888
-ops::filter_le_f32_indexed           0.336         719217       2138.140
-ops::compact_indices_indexed         0.328         719217       2195.801
-ops::filter_ge_u32                   0.411        1500000       3650.381
-ops::compact_indices                 0.404        1500000       3710.575
-ops::filter_le_u32_indexed           0.295         818669       2775.544
-ops::compact_indices_indexed         0.328         818669       2493.722
-ops::gather_col_u32                  0.548         359553        655.620
-ops::gather_col_f32                  0.300         359553       1199.010
-ops::gather_col_f32                  0.282         359553       1274.635
-ops::gather_col_u32                  0.426         359553        843.115
-ops::gather_col_f32                  0.450         359553        798.416
-ops::gather_col_f32                  0.595         359553        604.037
-ops::gather_col_u32                  0.341         113623        333.369
-ops::gather_col_u32                  0.245         113623        463.531
-ops::gather_col_f32                  0.315         113623        361.091
-ops::gather_col_u32                  0.285         113623        398.036
-ops::gather_col_u32                  0.284         113623        399.553
-ops::gather_col_f32                  0.283         113623        401.435
-hash_join_probe_write_multi          0.372         359553        965.998
+ops::filter_ge_f32                  10.222        6001215        587.083
+ops::filter_le_f32_indexed           1.229        3722913       3029.941
+ops::filter_ge_f32_indexed           0.799        1320726       1653.576
+ops::filter_le_f32_indexed           0.437         719217       1646.276
+ops::filter_ge_u32                   0.602        1500000       2490.490
+ops::filter_le_u32_indexed           0.768         818669       1066.611
+hash_join_probe_write_multi          0.429         359553        837.223
 radix_sort_u64                       0.000          27166          0.000
-orderby_gpu_gather                   0.315         108664        344.782
+orderby_gpu_gather                   0.360         108664        302.194
+ops::gather_col_u32                  0.205             20          0.098
+ops::gather_col_u32                  0.207             20          0.096
+ops::gather_col_u32                  0.211             20          0.095
+ops::gather_col_f32                  0.203             20          0.099
 ─────────────────────────────────────────────────────────────────
-TOTAL: 19.301 ms
+TOTAL: 15.671 ms

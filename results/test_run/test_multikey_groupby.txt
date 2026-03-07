@@ -1,79 +1,32 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'sum(l_quantity)' -> 'total_qty'
-[Planner]   'cnt' -> 'count(*)'
-[Planner]   'total_qty' -> 'sum(l_quantity)'
-[Planner]   'count(*)' -> 'cnt'
-[Planner] Traversing node: TOP_N
-[Planner] Traversing: TOP_N
-[Planner] Entering children traversal block. Name: top_n Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_quantity
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6125349208
-[Planner] Node SEQ_SCAN  output projections: l_returnflag, l_linestatus, l_shipmode, l_quantity, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_quantity
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_shipmode, l_quantity, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_quantity
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_shipmode, l_quantity, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: cnt
-[Planner] Pushing spec with outputName='cnt'
-[Planner] Parsing agg string: 'sum_no_overflow(#3)'
-[Planner] Resolved agg: sum_no_overflow(l_quantity)
-[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(l_quantity)'
-[Planner] Found alias for agg: total_qty
-[Planner] Pushing spec with outputName='total_qty'
-[Planner] Node HASH_GROUP_BY output projections: l_returnflag, l_linestatus, l_shipmode, cnt, total_qty, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_linestatus
-[Planner] Proj: l_shipmode
-[Planner] Proj: cnt
-[Planner] Proj: total_qty
-[Planner] Node PROJECTION output projections: l_returnflag, l_linestatus, l_shipmode, cnt, total_qty, 
-[Planner] ORDER BY looking up alias: 'count_star()'
-[Planner] Node TOP_N output projections: l_returnflag, l_linestatus, l_shipmode, cnt, total_qty, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'l_returnflag'
-[Planner]   'l_linestatus'
-[Planner]   'l_shipmode'
-[Planner]   'cnt'
-[Planner]   'total_qty'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 909455
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=65 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=82 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 65 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 14 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -93,41 +46,47 @@ A|F|64713.00|1648753.00|AIR|
 A|F|64699.00|1658872.00|SHIP|
 R|F|64621.00|1641302.00|MAIL|
 ---------------------------------------------------
-Planning time: 18.61 ms
-Data Load Time (Disk+Upload): 11146.03 ms
-GPU kernels time: 37.17 ms
-CPU postprocess time: 93.86 ms
-Total Internal Pipeline time: 11277.05 ms
-Total Host Execution time: 11277.69 ms
-Total Wall time (Plan+Exec): 11296.30 ms
+Planning time: 0.78 ms
+Data Load Time (Disk+Upload): 2915.16 ms
+GPU kernels time: 35.18 ms
+CPU postprocess time: 162.93 ms
+Total Internal Pipeline time: 3113.28 ms
+Total Host Execution time: 3124.20 ms
+Total Wall time (Plan+Exec): 3124.98 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    1.529 ms (4.115%) [2 calls]
-  filter         :    2.294 ms (6.173%) [2 calls]
-  gather         :    4.696 ms (12.634%) [5 calls]
-  groupby        :   27.599 ms (74.257%) [3 calls]
-  sort           :    1.048 ms (2.821%) [2 calls]
+  cast           :    0.821 ms (2.332%) [1 calls]
+  filter         :    4.239 ms (12.047%) [2 calls]
+  gather         :    7.737 ms (21.989%) [12 calls]
+  groupby        :   21.198 ms (60.247%) [3 calls]
+  sort           :    1.191 ms (3.385%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 37.166 ms
-  Kernel invocations: 14
+  TOTAL GPU TIME: 35.185 ms
+  Kernel invocations: 20
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                   1.740        6001215       3448.891
-ops::compact_indices                 0.920        6001215       6525.720
-ops::filter_lt_u32_indexed           0.554        4336142       7821.677
-ops::compact_indices_indexed         0.610        4336142       7112.802
-ops::gather_col_u32                  1.307         909455        695.989
-ops::gather_col_u32                  0.645         909455       1409.645
-ops::gather_col_f32                  1.242         909455        732.496
-ops::gather_col_u32                  1.320         909455        689.090
-ops::groupby_agg_multi_key_ty       26.777         909455         33.965
-ops::ht_mark_valid                   0.554        2097152       3787.462
-ops::ht_extract_compact              0.268             14          0.052
+ops::filter_ge_u32                   2.930        6001215       2048.342
+ops::filter_lt_u32_indexed           1.309        4336142       3312.457
+ops::gather_col_u32                  1.363         909455        667.204
+ops::gather_col_u32                  0.674         909455       1348.755
+ops::gather_col_f32                  1.263         909455        720.170
+ops::gather_col_u32                  1.115         909455        815.929
+ops::gather_col_u32                  0.376         909455       2419.297
+ops::gather_col_f32                  1.074         909455        846.628
+ops::gather_col_u32                  0.986         909455        922.368
+ops::groupby_agg_multi_key_ty       19.339         909455         47.027
+ops::ht_mark_valid                   0.953        2097152       2199.811
+ops::ht_extract_compact              0.905             14          0.015
+ops::cast_u32_to_f32                 0.821             14          0.017
 block_sort_kv_u64                    0.000             14          0.000
-orderby_gpu_gather                   1.048             56          0.053
-ops::gather_col_u32                  0.182             14          0.077
+orderby_gpu_gather                   1.191             56          0.047
+ops::gather_col_u32                  0.173             14          0.081
+ops::gather_col_u32                  0.169             14          0.083
+ops::gather_col_u32                  0.170             14          0.082
+ops::gather_col_f32                  0.202             14          0.069
+ops::gather_col_f32                  0.171             14          0.082
 ─────────────────────────────────────────────────────────────────
-TOTAL: 37.166 ms
+TOTAL: 35.185 ms

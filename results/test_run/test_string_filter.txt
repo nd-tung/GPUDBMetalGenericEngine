@@ -1,39 +1,8 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner] Traversing node: TOP_N
-[Planner] Traversing: TOP_N
-[Planner] Entering children traversal block. Name: top_n Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Skipping capture for 'part' table to force full Traversal
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: p_partkey
-[Planner] Proj: p_type
-[Planner] Proj: p_name
 DEBUG: Scan table determined as: 'part'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=part
-[Planner] Generating Scan: part at index 0 Plan: 6165047656
-[Planner] Node SEQ_SCAN  output projections: p_partkey, p_type, p_name, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_partkey
-[Planner] Proj: l_extendedprice
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 2 Plan: 6165047656
-[Planner] Node SEQ_SCAN  output projections: l_partkey, l_extendedprice, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_1'
 [Planner] Pre-resolved Condition: 'l_partkey = p_partkey'
 [Planner] ChildProjs size: 5
@@ -44,29 +13,10 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
   #4: p_name
 [Planner] Resolved Condition: 'l_partkey = p_partkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_1'
-[Planner] Join Key Analysis: l => lineitem, r => part
-[Planner] Captured RHS Table: tmpl_join_1
-[Planner] RHS Tables: tmpl_join_1, 
-[Planner] Checking matchesRHS: lineitem
-[Planner] Checking matchesRHS: part
-[Planner] Node HASH_JOIN output projections: l_partkey, l_extendedprice, p_partkey, p_type, p_name, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: p_partkey
-[Planner] Proj: p_name
-[Planner] Proj: p_type
-[Planner] Proj: l_extendedprice
-[Planner] Forcing keep of global column: l_partkey
-[Planner] Node PROJECTION output projections: p_partkey, p_name, p_type, l_extendedprice, 
-[Planner] Node TOP_N output projections: p_partkey, p_name, p_type, l_extendedprice, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'p_partkey'
-[Planner]   'p_name'
-[Planner]   'p_type'
-[Planner]   'l_extendedprice'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -92,58 +42,40 @@ p_partkey|l_extendedprice|p_name|p_type|
 191923|100746.00|chocolate lace burnished violet beige|PROMO BURNISHED NICKEL|
 184968|100595.04|light midnight chiffon spring blue|PROMO PLATED COPPER|
 ---------------------------------------------------
-Planning time: 19.11 ms
-Data Load Time (Disk+Upload): 6623.96 ms
-GPU kernels time: 13.15 ms
-CPU postprocess time: 92.01 ms
-Total Internal Pipeline time: 6729.12 ms
-Total Host Execution time: 6744.55 ms
-Total Wall time (Plan+Exec): 6763.65 ms
+Planning time: 0.87 ms
+Data Load Time (Disk+Upload): 2551.43 ms
+GPU kernels time: 9.20 ms
+CPU postprocess time: 98.93 ms
+Total Internal Pipeline time: 2659.56 ms
+Total Host Execution time: 2675.16 ms
+Total Wall time (Plan+Exec): 2676.02 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    2.071 ms (15.752%) [4 calls]
-  filter         :    3.308 ms (25.161%) [4 calls]
-  gather         :    6.941 ms (52.798%) [19 calls]
-  hash_join_probe_u32:    0.522 ms (3.967%) [2 calls]
-  sort           :    0.305 ms (2.322%) [2 calls]
+  filter         :    5.389 ms (58.601%) [4 calls]
+  gather         :    1.772 ms (19.272%) [6 calls]
+  hash_join_probe_u32:    1.759 ms (19.122%) [2 calls]
+  sort           :    0.276 ms (3.006%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 13.146 ms
-  Kernel invocations: 31
+  TOTAL GPU TIME: 9.196 ms
+  Kernel invocations: 14
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_ge                0.955         200000        209.525
-ops::compact_indices                 0.278         200000        718.347
-ops::filter_string_lt                0.263         200000        761.905
-ops::compact_indices                 0.275         200000        726.612
-hash_join_probe_write_multi          0.245         132994        542.649
-ops::gather_col_u32                  0.224          33174        148.071
-ops::filter_ge_u32                   1.614        6001215       3717.458
-ops::compact_indices                 0.961        6001215       6244.761
-ops::filter_lt_u32_indexed           0.476        3426687       7195.143
-ops::compact_indices_indexed         0.556        3426687       6162.641
-ops::gather_col_u32                  0.910         225253        247.429
-ops::gather_col_u32                  0.587         225253        383.546
-ops::gather_col_f32                  0.502         225253        449.047
-ops::gather_col_u32                  0.391         225253        576.525
-ops::gather_col_u32                  0.426         225253        528.660
-ops::gather_col_f32                  0.995         225253        226.328
-ops::gather_col_u32                  0.268          33174        123.611
-ops::gather_col_u32                  0.228          33174        145.606
-ops::gather_col_u32                  0.222          33174        149.180
-ops::gather_col_u32                  0.234          33174        141.719
-ops::gather_col_u32                  0.242          33174        136.847
-ops::gather_col_u32                  0.228          33174        145.820
-ops::gather_col_u32                  0.239          33174        138.973
-ops::gather_col_u32                  0.242          33174        137.012
-hash_join_probe_write_multi          0.276         225253        814.782
-ops::gather_col_u32                  0.307          37110        120.765
-ops::gather_col_u32                  0.220          37110        168.778
+ops::filter_string_ge                0.906         200000        220.730
+ops::filter_string_lt                0.743         200000        269.164
+hash_join_probe_write_multi          0.800         132994        166.199
+ops::gather_col_u32                  0.736          33174         45.086
+ops::filter_ge_u32                   2.299        6001215       2610.359
+ops::filter_lt_u32_indexed           1.441        3426687       2377.992
+hash_join_probe_write_multi          0.958         225253        235.057
 radix_sort_u64                       0.000          37110          0.000
-orderby_gpu_gather                   0.305         111330        364.668
-ops::gather_col_u32                  0.236          37110        157.024
-ops::gather_col_u32                  0.238          37110        155.652
+orderby_gpu_gather                   0.276         111330        402.761
+ops::gather_col_u32                  0.233          37110        159.584
+ops::gather_col_u32                  0.239          37110        155.137
+ops::gather_col_u32                  0.214             20          0.093
+ops::gather_col_u32                  0.171             20          0.117
+ops::gather_col_f32                  0.180             20          0.111
 ─────────────────────────────────────────────────────────────────
-TOTAL: 13.146 ms
+TOTAL: 9.196 ms

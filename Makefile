@@ -21,6 +21,11 @@ MACOSX_MIN ?= 14.0
 # Use -O2 instead of -O3 to avoid Apple clang optimizer bug causing segfault
 CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -mmacosx-version-min=$(MACOSX_MIN)
 
+# DuckDB (embedded library via Homebrew)
+DUCKDB_PREFIX ?= $(shell brew --prefix duckdb 2>/dev/null || echo /opt/homebrew)
+DUCKDB_INCLUDE = -I$(DUCKDB_PREFIX)/include
+DUCKDB_LIB     = -L$(DUCKDB_PREFIX)/lib -lduckdb
+
 # Include paths
 INCLUDES = -I$(METAL_CPP_DIR) \
            -Ithird_party \
@@ -29,7 +34,8 @@ INCLUDES = -I$(METAL_CPP_DIR) \
            -I$(SOURCE_DIR)/Engine/Storage \
            -I$(SOURCE_DIR)/Engine/Storage/CPU \
            -I$(SOURCE_DIR)/Engine/Storage/GPU \
-           -I$(SOURCE_DIR)/Engine/Utils
+           -I$(SOURCE_DIR)/Engine/Utils \
+           $(DUCKDB_INCLUDE)
 
 
 # Framework flags for macOS
@@ -66,7 +72,7 @@ endif
 # Create target executable
 $(TARGET): $(OBJECTS) | $(BIN_DIR)
 	@echo "Linking $(PROJECT_NAME)..."
-	$(CXX) $(CXXFLAGS) $(OBJECTS) $(FRAMEWORKS) -o $@
+	$(CXX) $(CXXFLAGS) $(OBJECTS) $(FRAMEWORKS) $(DUCKDB_LIB) -o $@
 	@echo "Build complete: $@"
 
 # Build Metal kernels (only when metal CLI is available)

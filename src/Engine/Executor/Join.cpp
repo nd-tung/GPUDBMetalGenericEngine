@@ -413,8 +413,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         for (uint32_t i = 0; i < std::min(expectedSize, 5u); i++) std::cerr << " " << p[i];
                         std::cerr << "\n";
                     }
-                    ctx.u32ColsGPU[col] = compactedBuf;
-                    // Don't release 'existing' - it may be shared by other contexts
+                    ctx.u32ColsGPU[col].reset(compactedBuf);
                     return compactedBuf;
                 }
             }
@@ -430,13 +429,13 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                      auto compactedBuf = GpuOps::gatherU32(fullBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
                      fullBuf->release();
                      if (compactedBuf) {
-                         ctx.u32ColsGPU[col] = compactedBuf;
+                         ctx.u32ColsGPU[col].reset(compactedBuf);
                          return compactedBuf;
                      }
                  }
              }
              auto buf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-             ctx.u32ColsGPU[col] = buf;
+             ctx.u32ColsGPU[col].reset(buf);
              return buf;
         }
         return nullptr;
@@ -453,13 +452,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             for (auto& [name, vec] : ctx.u32Cols) vec.clear();
             for (auto& [name, vec] : ctx.f32Cols) vec.clear();
             for (auto& [name, vec] : ctx.stringCols) vec.clear();
-            for (auto& [name, buf] : ctx.u32ColsGPU) {
-                // Don't release — may be shared; just null out
-                buf = nullptr;
-            }
-            for (auto& [name, buf] : ctx.f32ColsGPU) {
-                buf = nullptr;
-            }
+            ctx.u32ColsGPU.clear();
+            ctx.f32ColsGPU.clear();
             ctx.activeRowsGPU = nullptr;
             ctx.activeRowsCountGPU = 0;
             ctx.activeRows.clear();
@@ -467,30 +461,54 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             return;
         }
         
-        // Compact GPU u32 columns
+        // Compact GPU u32 columns (async — no per-column sync)
         for (auto& [name, buf] : ctx.u32ColsGPU) {
             if (!buf) continue;
             uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
             if (bufRows > count) {
-                MTL::Buffer* compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count, true);
+                MTL::Buffer* compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count, false);
                 if (compacted) {
-                    // Don't release old buf — may be shared
-                    buf = compacted;
+                    buf.reset(compacted);
                 }
             }
         }
-        // Compact GPU f32 columns
+        // Compact GPU f32 columns (async — no per-column sync)
         for (auto& [name, buf] : ctx.f32ColsGPU) {
             if (!buf) continue;
             uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
             if (bufRows > count) {
-                MTL::Buffer* compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, count, true);
+                MTL::Buffer* compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, count, false);
                 if (compacted) {
-                    buf = compacted;
+                    buf.reset(compacted);
                 }
             }
         }
-        // Compact CPU u32 columns via GPU gather
+        // GPU-native dict compaction: gather dict IDs on GPU (async)
+        for (auto& [name, dict] : ctx.dictCols) {
+            if (dict.idsGPU) {
+                uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
+                if (bufRows > count) {
+                    MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, false);
+                    if (compacted) {
+                        dict.idsGPU.reset(compacted);
+                        dict.rowCount = count;
+                        dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
+                    }
+                }
+            } else if (dict.ids.size() > count) {
+                // CPU-only fallback (no GPU buffer) — needs sync first
+                GpuOps::sync();
+                uint32_t* indices2 = (uint32_t*)ctx.activeRowsGPU->contents();
+                std::vector<uint32_t> c;
+                c.reserve(count);
+                for (uint32_t i = 0; i < count; ++i)
+                    c.push_back(indices2[i] < (uint32_t)dict.ids.size() ? dict.ids[indices2[i]] : 0u);
+                dict.ids = std::move(c);
+                dict.rowCount = count;
+            }
+        }
+        // Sync all async GPU gathers before reading results on CPU
+        GpuOps::sync();
         {
             auto& s = GpuColumnStore::instance();
             for (auto& [name, vec] : ctx.u32Cols) {
@@ -526,29 +544,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                 }
             }
         }
-        // GPU-native dict compaction: gather dict IDs on GPU, invalidate CPU stringCols
-        for (auto& [name, dict] : ctx.dictCols) {
-            if (dict.idsGPU) {
-                uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
-                if (bufRows > count) {
-                    MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, true);
-                    if (compacted) {
-                        dict.idsGPU = compacted;
-                        dict.rowCount = count;
-                        dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
-                    }
-                }
-            } else if (dict.ids.size() > count) {
-                // CPU-only fallback (no GPU buffer)
-                uint32_t* indices2 = (uint32_t*)ctx.activeRowsGPU->contents();
-                std::vector<uint32_t> c;
-                c.reserve(count);
-                for (uint32_t i = 0; i < count; ++i)
-                    c.push_back(indices2[i] < (uint32_t)dict.ids.size() ? dict.ids[indices2[i]] : 0u);
-                dict.ids = std::move(c);
-                dict.rowCount = count;
-            }
-        }
         // Compact CPU string columns: prefer invalidation if dictCol exists, else GPU/CPU gather
         {
             for (auto& [name, vec] : ctx.stringCols) {
@@ -568,11 +563,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                             vec.resize(count);
                             for (uint32_t i = 0; i < count; ++i) vec[i].assign(ch + offs[i], lens[i]);
                             // Update flatStringCols to compacted version
-                            fit->second.chars = r.chars;
-                            fit->second.offsets = r.offsets;
-                            fit->second.lengths = r.lengths;
-                            fit->second.rowCount = r.rowCount;
-                            fit->second.totalBytes = r.totalBytes;
+                            fit->second.takeFrom(r.chars, r.offsets, r.lengths,
+                                                 r.rowCount, r.totalBytes);
                             continue;
                         }
                     }
@@ -593,8 +585,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                     auto r = GpuOps::gatherFlatString(flat.chars, flat.offsets, flat.lengths,
                                                        ctx.activeRowsGPU, count, true);
                     if (r.chars) {
-                        flat.chars = r.chars; flat.offsets = r.offsets; flat.lengths = r.lengths;
-                        flat.rowCount = r.rowCount; flat.totalBytes = r.totalBytes;
+                        flat.takeFrom(r.chars, r.offsets, r.lengths,
+                                      r.rowCount, r.totalBytes);
                     }
                 }
             }
@@ -629,8 +621,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                 totalCount = UINT32_MAX;
             }
             jRes.count = (uint32_t)totalCount;
-            jRes.probeIndices = device->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-            jRes.buildIndices = device->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            jRes.probeIndices.reset(device->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+            jRes.buildIndices.reset(device->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
             
             // Get or create left/right index buffers on GPU
             MTL::Buffer* lIndicesGPU = leftCtx.activeRowsGPU;
@@ -704,9 +696,9 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                     auto antiRes = GpuOps::hashJoinAntiU32(rBuf, rCount, lBuf, lCount);
                     if (!antiRes) throw std::runtime_error("GPU hashJoinAntiU32 failed");
                     jRes.count = antiRes->count;
-                    jRes.buildIndices = antiRes->indices;
-                    jRes.probeIndices = store.device()->newBuffer(
-                        std::max(antiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    jRes.buildIndices = std::move(antiRes->indices);
+                    jRes.probeIndices.reset(store.device()->newBuffer(
+                        std::max(antiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
                     std::memset(jRes.probeIndices->contents(), 0,
                                 std::max(antiRes->count, 1u) * sizeof(uint32_t));
                 } else {
@@ -714,9 +706,9 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                     auto antiRes = GpuOps::hashJoinAntiU32(lBuf, lCount, rBuf, rCount);
                     if (!antiRes) throw std::runtime_error("GPU hashJoinAntiU32 failed");
                     jRes.count = antiRes->count;
-                    jRes.probeIndices = antiRes->indices;
-                    jRes.buildIndices = store.device()->newBuffer(
-                        std::max(antiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    jRes.probeIndices = std::move(antiRes->indices);
+                    jRes.buildIndices.reset(store.device()->newBuffer(
+                        std::max(antiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
                     std::memset(jRes.buildIndices->contents(), 0,
                                 std::max(antiRes->count, 1u) * sizeof(uint32_t));
                 }
@@ -727,11 +719,11 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                 auto semiRes = GpuOps::hashJoinSemiU32(lBuf, lCount, rBuf, rCount);
                 if (!semiRes) throw std::runtime_error("GPU hashJoinSemiU32 failed");
                 jRes.count = semiRes->count;
-                jRes.probeIndices = semiRes->indices;
+                jRes.probeIndices = std::move(semiRes->indices);
                 // Build indices: use iota as placeholder (not needed for semi-only output,
                 // but downstream might gather right columns for MARK join)
-                jRes.buildIndices = store.device()->newBuffer(
-                    std::max(semiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                jRes.buildIndices.reset(store.device()->newBuffer(
+                    std::max(semiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
                 std::memset(jRes.buildIndices->contents(), 0,
                             std::max(semiRes->count, 1u) * sizeof(uint32_t));
                 if (debug) std::cerr << "[Exec] GPU Semi Join (direct): " << jRes.count << " matched left rows\n";
@@ -752,15 +744,15 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
              
              if (leftCtx.activeRowsGPU) {
                  MTL::Buffer* src = leftCtx.activeRowsGPU;
-                 jRes.probeIndices = store.device()->newBuffer(src->contents(), src->length(), MTL::ResourceStorageModeShared);
+                 jRes.probeIndices.reset(store.device()->newBuffer(src->contents(), src->length(), MTL::ResourceStorageModeShared));
              } else {
                  std::vector<uint32_t> seq(lCount);
                  std::iota(seq.begin(), seq.end(), 0);
-                 jRes.probeIndices = store.device()->newBuffer(seq.data(), seq.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                 jRes.probeIndices.reset(store.device()->newBuffer(seq.data(), seq.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared));
              }
              
              // Placeholder build indices (required non-null)
-             jRes.buildIndices = store.device()->newBuffer(lCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+             jRes.buildIndices.reset(store.device()->newBuffer(lCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
              std::memset(jRes.buildIndices->contents(), 0, lCount * sizeof(uint32_t));
         } else {
             if (debug) std::cerr << "[Exec] GPU Join: Skipping (Build=" << rCount << ", Probe=" << lCount << ")\n";
@@ -796,10 +788,8 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             uniqueIdx->release();
             
             if (newProbe && newBuild) {
-                jRes.probeIndices->release();
-                jRes.buildIndices->release();
-                jRes.probeIndices = newProbe;
-                jRes.buildIndices = newBuild;
+                jRes.probeIndices.reset(newProbe);
+                jRes.buildIndices.reset(newBuild);
                 resCount = uniqueCount;
                 jRes.count = uniqueCount;
             }
@@ -826,12 +816,10 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             if (debug) std::cerr << "[Exec] Right Anti Join: " << antiCount << " non-matching right rows\n";
             
             // For RIGHT ANTI, we only gather from the RIGHT (build) side
-            jRes.buildIndices->release();
-            jRes.buildIndices = antiRes.indices;
+            jRes.buildIndices = std::move(antiRes.indices);
             
-            jRes.probeIndices->release();
-            jRes.probeIndices = store.device()->newBuffer(
-                std::max(antiCount, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+            jRes.probeIndices.reset(store.device()->newBuffer(
+                std::max(antiCount, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
             std::memset(jRes.probeIndices->contents(), 0, std::max(antiCount, 1u) * sizeof(uint32_t));
             
             resCount = antiCount;
@@ -846,12 +834,10 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         if (debug) std::cerr << "[Exec] Anti Join: " << antiCount << " non-matching rows\n";
         
         // Replace with anti-join result
-        jRes.probeIndices->release();
-        jRes.probeIndices = antiRes.indices;
+        jRes.probeIndices = std::move(antiRes.indices);
         
-        if (jRes.buildIndices) jRes.buildIndices->release();
-        jRes.buildIndices = store.device()->newBuffer(
-            std::max(antiCount, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        jRes.buildIndices.reset(store.device()->newBuffer(
+            std::max(antiCount, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
         std::memset(jRes.buildIndices->contents(), 0, std::max(antiCount, 1u) * sizeof(uint32_t));
         
         resCount = antiCount;
@@ -980,7 +966,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         MTL::Buffer* src = ensureGPU(leftCtx, name);
         if (src) {
              MTL::Buffer* gathered = GpuOps::gatherU32(src, jRes.probeIndices, resCount, false);
-             outCtx.u32ColsGPU[name] = gathered;
+             outCtx.u32ColsGPU[name].reset(gathered);
              outCtx.u32Cols[name].clear(); // Mark CPU side as invalid
         }
     }
@@ -991,12 +977,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         else if (leftCtx.f32Cols.count(name)) {
              const auto& vec = leftCtx.f32Cols.at(name);
              src = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-             leftCtx.f32ColsGPU[name] = src;
+             leftCtx.f32ColsGPU[name].reset(src);
         }
         
         if (src) {
              MTL::Buffer* gathered = GpuOps::gatherF32(src, jRes.probeIndices, resCount, false);
-             outCtx.f32ColsGPU[name] = gathered;
+             outCtx.f32ColsGPU[name].reset(gathered);
              outCtx.f32Cols[name].clear();
         }
     }
@@ -1013,7 +999,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             MTL::Buffer* src = ensureGPU(rightCtx, name);
             if (src) {
                  MTL::Buffer* gathered = GpuOps::gatherU32(src, jRes.buildIndices, resCount, false);
-                 outCtx.u32ColsGPU[outName] = gathered;
+                 outCtx.u32ColsGPU[outName].reset(gathered);
                  outCtx.u32Cols[outName].clear();
             }
         }
@@ -1025,12 +1011,12 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             else if (rightCtx.f32Cols.count(name)) {
                  const auto& vec = rightCtx.f32Cols.at(name);
                  src = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                 rightCtx.f32ColsGPU[name] = src;
+                 rightCtx.f32ColsGPU[name].reset(src);
             }
     
             if (src) {
                  MTL::Buffer* gathered = GpuOps::gatherF32(src, jRes.buildIndices, resCount, false);
-                 outCtx.f32ColsGPU[outName] = gathered;
+                 outCtx.f32ColsGPU[outName].reset(gathered);
                  outCtx.f32Cols[outName].clear();
             }
         }
@@ -1040,7 +1026,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
              std::string outName = getRightColumnName(name);
              MTL::Buffer* buf = store.device()->newBuffer(resCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
              std::memset(buf->contents(), 0, resCount * sizeof(uint32_t));
-             outCtx.u32ColsGPU[outName] = buf;
+             outCtx.u32ColsGPU[outName].reset(buf);
              std::vector<uint32_t> cpuVec(resCount, 0);
              outCtx.u32Cols[outName] = std::move(cpuVec);
         }
@@ -1048,7 +1034,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
              std::string outName = getRightColumnName(name);
              MTL::Buffer* buf = store.device()->newBuffer(resCount * sizeof(float), MTL::ResourceStorageModeShared);
              std::memset(buf->contents(), 0, resCount * sizeof(float));
-             outCtx.f32ColsGPU[outName] = buf;
+             outCtx.f32ColsGPU[outName].reset(buf);
              std::vector<float> cpuVec(resCount, 0.0f);
              outCtx.f32Cols[outName] = std::move(cpuVec);
         }
@@ -1097,14 +1083,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             if (dictIt == srcCtx.dictCols.end() || !dictIt->second.idsGPU) return false;
 
             const auto& srcDict = dictIt->second;
-            // GPU gather dict IDs
-            MTL::Buffer* gatheredIds = GpuOps::gatherU32(srcDict.idsGPU, indexBuf, resCount);
+            // GPU gather dict IDs (async — sync happens in overall gather loop)
+            MTL::Buffer* gatheredIds = GpuOps::gatherU32(srcDict.idsGPU, indexBuf, resCount, false);
             if (!gatheredIds) return false;
 
             // Propagate dict to outCtx (stringCols NOT rebuilt — lazy materialization)
             DictEncoded outDict;
             outDict.dictionary = srcDict.dictionary;
-            outDict.idsGPU = gatheredIds; // keep GPU buffer
+            outDict.idsGPU.reset(gatheredIds); // takes ownership of GPU buffer
             outDict.rowCount = resCount;
             outCtx.dictCols[outName] = std::move(outDict);
 
@@ -1128,7 +1114,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             if (!r.chars) return false;
             // Store compacted FlatStringCol in outCtx (stringCols materialized lazily via ensureStringCol)
             FlatStringCol outFlat;
-            outFlat.chars = r.chars; outFlat.offsets = r.offsets; outFlat.lengths = r.lengths;
+            outFlat.chars.reset(r.chars); outFlat.offsets.reset(r.offsets); outFlat.lengths.reset(r.lengths);
             outFlat.rowCount = r.rowCount; outFlat.totalBytes = r.totalBytes;
             outCtx.flatStringCols[outName] = outFlat;
             // Erase any stale stringCols — will be rebuilt on demand
@@ -1238,13 +1224,13 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
                                     g->contents(), unmatchedCount * sizeof(uint32_t));
                         if (leftSrcAllocated) leftSrc->release();
-                        buf->release(); g->release(); buf = combined;
+                        buf.reset(combined); g->release();
                     }
                 } else {
                     MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                     std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
                     std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    buf->release(); buf = combined;
+                    buf.reset(combined);
                 }
             }
             for (auto& [name, buf] : outCtx.f32ColsGPU) {
@@ -1264,13 +1250,13 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
                                     g->contents(), unmatchedCount * sizeof(float));
                         if (leftSrcAllocated) leftSrc->release();
-                        buf->release(); g->release(); buf = combined;
+                        g->release(); buf.reset(combined);
                     }
                 } else {
                     MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
                     std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
                     std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
-                    buf->release(); buf = combined;
+                    buf.reset(combined);
                 }
             }
 
@@ -1299,15 +1285,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                     std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
                     std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
                                 g->contents(), unmatchedCount * sizeof(uint32_t));
-                    dc.idsGPU->release(); g->release();
-                    dc.idsGPU = combined;
+                    g->release();
+                    dc.idsGPU.reset(combined);
                 } else {
                     // Right-side column: pad with sentinel (0) for unmatched left rows
                     MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                     std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
                     std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    dc.idsGPU->release();
-                    dc.idsGPU = combined;
+                    dc.idsGPU.reset(combined);
                 }
                 dc.ids.clear(); // invalidate CPU mirror
                 dc.rowCount = totalCount;
@@ -1373,7 +1358,6 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
             // Dict IDs already updated with unmatched rows above
             if (debug) std::cerr << "[Exec] Left Join: total output rows = " << totalCount << "\n";
         }
-        if (unmatchedBuf) unmatchedBuf->release();
     }
 
     // RIGHT JOIN: Append unmatched right (build) rows with NULL/0 for left columns
@@ -1420,18 +1404,18 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
                                     g->contents(), unmatchedCount * sizeof(uint32_t));
                         if (rightSrcAllocated) rightSrc->release();
-                        buf->release(); g->release(); buf = combined;
+                        buf.reset(combined); g->release();
                     } else {
                         MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                         std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
                         std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                        buf->release(); buf = combined;
+                        buf.reset(combined);
                     }
                 } else {
                     MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                     std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(uint32_t));
                     std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    buf->release(); buf = combined;
+                    buf.reset(combined);
                 }
             }
             for (auto& [name, buf] : outCtx.f32ColsGPU) {
@@ -1455,18 +1439,18 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                         std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(float),
                                     g->contents(), unmatchedCount * sizeof(float));
                         if (rightSrcAllocated) rightSrc->release();
-                        buf->release(); g->release(); buf = combined;
+                        g->release(); buf.reset(combined);
                     } else {
                         MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
                         std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
                         std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
-                        buf->release(); buf = combined;
+                        buf.reset(combined);
                     }
                 } else {
                     MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(float), MTL::ResourceStorageModeShared);
                     std::memcpy(combined->contents(), buf->contents(), resCount * sizeof(float));
                     std::memset((uint8_t*)combined->contents() + resCount * sizeof(float), 0, unmatchedCount * sizeof(float));
-                    buf->release(); buf = combined;
+                    buf.reset(combined);
                 }
             }
 
@@ -1501,15 +1485,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                     std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
                     std::memcpy((uint8_t*)combined->contents() + resCount * sizeof(uint32_t),
                                 g->contents(), unmatchedCount * sizeof(uint32_t));
-                    dc.idsGPU->release(); g->release();
-                    dc.idsGPU = combined;
+                    g->release();
+                    dc.idsGPU.reset(combined);
                 } else {
                     // Left-side column: pad with sentinel (0) for unmatched right rows
                     MTL::Buffer* combined = store.device()->newBuffer(totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
                     std::memcpy(combined->contents(), dc.idsGPU->contents(), resCount * sizeof(uint32_t));
                     std::memset((uint8_t*)combined->contents() + resCount * sizeof(uint32_t), 0, unmatchedCount * sizeof(uint32_t));
-                    dc.idsGPU->release();
-                    dc.idsGPU = combined;
+                    dc.idsGPU.reset(combined);
                 }
                 dc.ids.clear();
                 dc.rowCount = totalCount;
@@ -1584,18 +1567,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
                 }
             }
 
-            unmatchedBuf->release();
             outCtx.rowCount = totalCount;
             resCount = totalCount;
             // Dict IDs already updated with unmatched rows above
             if (debug) std::cerr << "[Exec] Right Join: total output rows = " << totalCount << "\n";
-        } else {
-            if (unmatchedBuf) unmatchedBuf->release();
         }
     }
 
-    jRes.buildIndices->release();
-    jRes.probeIndices->release();
+    // jRes goes out of scope — GpuBuffer handles release
     
     // If the right side had DELIM correlation columns that were renamed due to collision,
     // swap the data so the correlation columns keep their primary (un-suffixed) names.
@@ -1735,13 +1714,13 @@ bool GpuExecutor::executeJoin(const IRJoin& join, const std::string& /*datasetPa
         for (const auto& [name, vec] : outCtx.u32Cols) {
             if (!vec.empty() && outCtx.u32ColsGPU.find(name) == outCtx.u32ColsGPU.end()) {
                 MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
-                if (buf) outCtx.u32ColsGPU[name] = buf;
+                if (buf) outCtx.u32ColsGPU[name].reset(buf);
             }
         }
         for (const auto& [name, vec] : outCtx.f32Cols) {
             if (!vec.empty() && outCtx.f32ColsGPU.find(name) == outCtx.f32ColsGPU.end()) {
                 MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
-                if (buf) outCtx.f32ColsGPU[name] = buf;
+                if (buf) outCtx.f32ColsGPU[name].reset(buf);
             }
         }
         
@@ -2093,13 +2072,13 @@ bool GpuExecutor::executeJoinPipeline(
                     for (auto& [name, vec] : currentCtx.f32Cols) {
                         if (currentCtx.f32ColsGPU.find(name) == currentCtx.f32ColsGPU.end()) {
                             auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                            if (buf) currentCtx.f32ColsGPU[name] = buf;
+                            if (buf) currentCtx.f32ColsGPU[name].reset(buf);
                         }
                     }
                     for (auto& [name, vec] : currentCtx.u32Cols) {
                         if (currentCtx.u32ColsGPU.find(name) == currentCtx.u32ColsGPU.end()) {
                             auto buf = device->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                            if (buf) currentCtx.u32ColsGPU[name] = buf;
+                            if (buf) currentCtx.u32ColsGPU[name].reset(buf);
                         }
                     }
                     
@@ -2137,7 +2116,7 @@ bool GpuExecutor::executeJoinPipeline(
                             uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
                             if (bufRows > count) {
                                 auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, count, true);
-                                if (compacted) buf = compacted;
+                                if (compacted) buf.reset(compacted);
                             }
                         }
                         for (auto& [name, buf] : currentCtx.f32ColsGPU) {
@@ -2145,7 +2124,7 @@ bool GpuExecutor::executeJoinPipeline(
                             uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
                             if (bufRows > count) {
                                 auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, count, true);
-                                if (compacted) buf = compacted;
+                                if (compacted) buf.reset(compacted);
                             }
                         }
                         // Compact CPU columns: sync from GPU if possible, else CPU gather
@@ -2178,7 +2157,7 @@ bool GpuExecutor::executeJoinPipeline(
                             }
                         }
                         
-                        currentCtx.activeRowsGPU = nullptr;
+                        if (currentCtx.activeRowsGPU) { currentCtx.activeRowsGPU = nullptr; }
                         currentCtx.activeRowsCountGPU = 0;
                         currentCtx.activeRows.clear();
                         currentCtx.rowCount = count;
@@ -2374,7 +2353,7 @@ bool GpuExecutor::executeJoinPipeline(
                                 // Upload (Lazy)
                                 const auto& vec = it->second;
                                 colBuf = store.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                                dataCtx.f32ColsGPU[filterCol] = colBuf;
+                                dataCtx.f32ColsGPU[filterCol].reset(colBuf);
                             }
 
                             // Map Op
@@ -2415,31 +2394,29 @@ bool GpuExecutor::executeJoinPipeline(
                                 if (buf) {
                                     MTL::Buffer* newBuf = u32Replacements[buf];
                                     newBuf->retain(); 
-                                    buf = newBuf; 
+                                    buf.reset(newBuf); 
                                 }
                             }
-                            // Cleanup old buffers and consume creation ref of new buffers
-                            for (auto& [oldBuf, newBuf] : u32Replacements) {
-                                oldBuf->release(); 
+                            // Consume creation refs of new buffers (old buffers already released by GpuBuffer::reset)
+                            for (auto& [_, newBuf] : u32Replacements) {
                                 newBuf->release(); 
                             }
                             
                             // Safe Gather for F32
                             std::unordered_map<MTL::Buffer*, MTL::Buffer*> f32Replacements;
                             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
-                                if (buf && f32Replacements.find(buf) == f32Replacements.end()) {
-                                    f32Replacements[buf] = GpuOps::gatherF32(buf, indices, newCount);
+                                if (buf && f32Replacements.find(buf.get()) == f32Replacements.end()) {
+                                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount);
                                 }
                             }
                             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
                                 if (buf) {
-                                    MTL::Buffer* newBuf = f32Replacements[buf];
+                                    MTL::Buffer* newBuf = f32Replacements[buf.get()];
                                     newBuf->retain();
-                                    buf = newBuf;
+                                    buf.reset(newBuf);
                                 }
                             }
-                            for (auto& [oldBuf, newBuf] : f32Replacements) {
-                                oldBuf->release();
+                            for (auto& [_, newBuf] : f32Replacements) {
                                 newBuf->release();
                             }
                             
@@ -2469,8 +2446,6 @@ bool GpuExecutor::executeJoinPipeline(
                             // Clear CPU vectors to enforce GPU usage
                             for(auto& [n, v] : dataCtx.u32Cols) v.clear(); 
                             for(auto& [n, v] : dataCtx.f32Cols) v.clear();
-                            
-                            indices->release();
                         }
                         
                         // Switch currentCtx to the filtered data table
@@ -2715,7 +2690,7 @@ bool GpuExecutor::executeJoinPipeline(
                                                     } else if (!currentCtx.f32Cols[filterCol].empty()) {
                                                         auto& vec = currentCtx.f32Cols[filterCol];
                                                         filterColGPU = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
-                                                        currentCtx.f32ColsGPU[filterCol] = filterColGPU;
+                                                        currentCtx.f32ColsGPU[filterCol].reset(filterColGPU);
                                                     }
                                                     if (!filterColGPU) {
                                                         if (debug) std::cerr << "[Exec] Join: SUBQUERY GPU filter: no GPU buffer for '" << filterCol << "'\n";
@@ -2759,16 +2734,14 @@ bool GpuExecutor::executeJoinPipeline(
                                                         for (auto& [name, buf] : currentCtx.u32ColsGPU) {
                                                             if (buf) {
                                                                 MTL::Buffer* gathered = GpuOps::gatherU32(buf, keepIndicesGPU, keepCount, false);
-                                                                buf->release();
-                                                                buf = gathered;
+                                                                buf.reset(gathered);
                                                             }
                                                         }
                                                         // GPU gather for f32 columns
                                                         for (auto& [name, buf] : currentCtx.f32ColsGPU) {
                                                             if (buf) {
                                                                 MTL::Buffer* gathered = GpuOps::gatherF32(buf, keepIndicesGPU, keepCount, false);
-                                                                buf->release();
-                                                                buf = gathered;
+                                                                buf.reset(gathered);
                                                             }
                                                         }
                                                         GpuOps::sync();
@@ -2819,7 +2792,6 @@ bool GpuExecutor::executeJoinPipeline(
                                                             }
                                                         }
 
-                                                        keepIndicesGPU->release();
                                                         currentCtx.activeRows.clear();
                                                         currentCtx.activeRowsGPU = nullptr;
                                                         currentCtx.rowCount = keepCount;
@@ -3297,7 +3269,7 @@ bool GpuExecutor::executeJoinPipeline(
                                     if (rightCtx.u32Cols.count(name) && rightCtx.u32Cols.at(name).size() == rightCtx.rowCount) {
                                         MTL::Buffer* buf = GpuOps::createBuffer(rightCtx.u32Cols[name].data(),
                                                                                 rightCtx.rowCount * sizeof(uint32_t));
-                                        rightCtx.u32ColsGPU[name] = buf;
+                                        rightCtx.u32ColsGPU[name].reset(buf);
                                         resolvedKeys.push_back(name);
                                         gpuKeys.push_back(buf);
                                         return true;
@@ -3381,7 +3353,8 @@ bool GpuExecutor::executeJoinPipeline(
                                         else ++it2;
                                     }
                                     for (auto it2 = rightCtx.u32ColsGPU.begin(); it2 != rightCtx.u32ColsGPU.end(); ) {
-                                        if (keepU32.find(it2->first) == keepU32.end()) it2 = rightCtx.u32ColsGPU.erase(it2);
+                                        if (keepU32.find(it2->first) == keepU32.end())
+                                            it2 = rightCtx.u32ColsGPU.erase(it2);
                                         else ++it2;
                                     }
                                     for (auto it2 = rightCtx.f32Cols.begin(); it2 != rightCtx.f32Cols.end(); ) {

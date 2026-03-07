@@ -37,7 +37,7 @@ uint32_t deduplicateContext(EvalContext& ctx,
             if (cit != ctx.u32Cols.end() && cit->second.size() >= ctx.rowCount) {
                 MTL::Buffer* buf = GpuOps::createBuffer(cit->second.data(), ctx.rowCount * sizeof(uint32_t));
                 if (buf) {
-                    ctx.u32ColsGPU[col] = buf;
+                    ctx.u32ColsGPU[col].reset(buf);
                     gpuKeys.push_back(buf);
                 } else {
                     return 0;
@@ -63,14 +63,14 @@ uint32_t deduplicateContext(EvalContext& ctx,
     for (auto& [name, buf] : ctx.u32ColsGPU) {
         if (buf) {
             auto compacted = GpuOps::gatherU32(buf, uniqueIdx, uniqueCount);
-            if (compacted) buf = compacted;
+            if (compacted) buf.reset(compacted);
         }
     }
     // GPU gather f32 columns
     for (auto& [name, buf] : ctx.f32ColsGPU) {
         if (buf) {
             auto compacted = GpuOps::gatherF32(buf, uniqueIdx, uniqueCount);
-            if (compacted) buf = compacted;
+            if (compacted) buf.reset(compacted);
         }
     }
 
@@ -92,7 +92,7 @@ uint32_t deduplicateContext(EvalContext& ctx,
                 MTL::Buffer* dst = GpuOps::gatherU32(src, uniqueIdx, uniqueCount);
                 if (dst) {
                     // Promote to GPU buffer — no need for CPU mirror
-                    ctx.u32ColsGPU[name] = dst;
+                    ctx.u32ColsGPU[name].reset(dst);
                     col.clear();
                 }
                 src->release();
@@ -104,7 +104,7 @@ uint32_t deduplicateContext(EvalContext& ctx,
                 MTL::Buffer* dst = GpuOps::gatherF32(src, uniqueIdx, uniqueCount);
                 if (dst) {
                     // Promote to GPU buffer — no need for CPU mirror
-                    ctx.f32ColsGPU[name] = dst;
+                    ctx.f32ColsGPU[name].reset(dst);
                     col.clear();
                 }
                 src->release();
@@ -116,7 +116,7 @@ uint32_t deduplicateContext(EvalContext& ctx,
         if (dict.idsGPU) {
             auto compacted = GpuOps::gatherU32(dict.idsGPU, uniqueIdx, uniqueCount);
             if (compacted) {
-                dict.idsGPU = compacted;
+                dict.idsGPU.reset(compacted);
                 dict.rowCount = uniqueCount;
                 dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
             }
@@ -343,8 +343,15 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     // Build execution contexts for each table
     std::unordered_map<std::string, EvalContext> tableContexts;
 
+    // Execute operators in pipeline order
+    EvalContext currentCtx;
+    TableResult tableResult;
+
+    // Save previous pipeline contexts for multi-pipeline query merges
+    std::vector<EvalContext> savedPipelines;
+
     IRGpuLoader::loadTables(tableColsMap, scanInstanceMap, datasetPath, tableContexts, result, debug);
-    if (!result.error.empty()) return result;
+    if (!result.error.empty()) { return result; }
     
     auto loadEnd = std::chrono::high_resolution_clock::now();
 
@@ -353,17 +360,11 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                   << result.table.uploadMs << "ms\n";
     }
 
-    // Execute operators in pipeline order
-    EvalContext currentCtx;
-    TableResult tableResult;
-
     // Track which tables have been joined into the current context
     std::set<std::string> joinedTables;
     
     bool hasPipeline = false;
-    
-    // Save previous pipeline contexts for multi-pipeline query merges
-    std::vector<EvalContext> savedPipelines;
+
     std::vector<std::set<std::string>> savedPipelineTables;
 
     // Pre-scan: extract DELIM correlation columns from self-comparison join conditions
@@ -785,9 +786,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                 if (debug) std::cerr << "[Exec] Patch: Aliasing ps_partkey -> p_partkey in " << currentCtx.currentTable << "\n";
                                 currentCtx.u32Cols["p_partkey"] = currentCtx.u32Cols["ps_partkey"];
                                 if (currentCtx.u32ColsGPU.count("ps_partkey")) {
-                                    MTL::Buffer* buf = currentCtx.u32ColsGPU["ps_partkey"];
-                                    currentCtx.u32ColsGPU["p_partkey"] = buf;
-                                    buf->retain(); 
+                                    currentCtx.u32ColsGPU["p_partkey"] = currentCtx.u32ColsGPU["ps_partkey"]; // GpuBuffer copy retains
                                 }
                             } else if (!hasP && !hasPS) {
                                 // Inject p_partkey from global 'part' table as placeholder
@@ -805,7 +804,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                      }
                                      
                                      currentCtx.u32Cols["p_partkey"] = dummy;
-                                     currentCtx.u32ColsGPU["p_partkey"] = GpuOps::createBuffer(dummy.data(), dummy.size() * sizeof(uint32_t));
+                                     currentCtx.u32ColsGPU["p_partkey"].reset(GpuOps::createBuffer(dummy.data(), dummy.size() * sizeof(uint32_t)));
                                 }
                             }
                         }
@@ -979,13 +978,13 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     for (auto& [name, buf] : currentCtx.u32ColsGPU) {
                         if (buf) {
                             auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, compactCount);
-                            if (compacted) { buf = compacted; }
+                            if (compacted) { buf.reset(compacted); }
                         }
                     }
                     for (auto& [name, buf] : currentCtx.f32ColsGPU) {
                         if (buf) {
                             auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, compactCount);
-                            if (compacted) { buf = compacted; }
+                            if (compacted) { buf.reset(compacted); }
                         }
                     }
 
@@ -1004,7 +1003,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                     MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, compactCount);
                                     col.resize(compactCount);
                                     std::memcpy(col.data(), dst->contents(), compactCount * sizeof(uint32_t));
-                                    currentCtx.u32ColsGPU[name] = dst; // promote to GPU
+                                    currentCtx.u32ColsGPU[name].reset(dst); // promote to GPU
                                     src->release();
                                 }
                             }
@@ -1020,7 +1019,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                                     MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, compactCount);
                                     col.resize(compactCount);
                                     std::memcpy(col.data(), dst->contents(), compactCount * sizeof(float));
-                                    currentCtx.f32ColsGPU[name] = dst; // promote to GPU
+                                    currentCtx.f32ColsGPU[name].reset(dst); // promote to GPU
                                     src->release();
                                 }
                             }
@@ -1098,35 +1097,25 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 currentCtx.activeRows.clear();
 
                 if (debug) std::cerr << "[Exec] DEBUG: Clearing activeRowsGPU\n";
-                if (currentCtx.activeRowsGPU) {
-                    currentCtx.activeRowsGPU->release();
+                // Release old GPU buffers with dedup (multiple map keys may alias same buffer)
+                {
+                    std::unordered_set<MTL::Buffer*> released;
+                    if (currentCtx.activeRowsGPU)
+                        released.insert(currentCtx.activeRowsGPU);  // track for dedup, RAII releases
                     currentCtx.activeRowsGPU = nullptr;
-                }
-                currentCtx.activeRowsCountGPU = 0;
+                    currentCtx.activeRowsCountGPU = 0;
 
-                if (debug) std::cerr << "[Exec] DEBUG: Clearing u32ColsGPU\n";
-                {
-                    std::set<MTL::Buffer*> released;
-                    for(auto& [n, b] : currentCtx.u32ColsGPU) {
-                        if(b && released.find(b) == released.end()) {
-                            b->release();
-                            released.insert(b);
-                        }
+                    if (debug) std::cerr << "[Exec] DEBUG: Clearing u32ColsGPU\n";
+                    // u32ColsGPU uses GpuBuffer RAII — clearing triggers destructors.
+                    for (auto& [_, buf] : currentCtx.u32ColsGPU) {
+                        if (buf) released.insert(buf.get());  // track for f32 dedup
                     }
-                }
-                currentCtx.u32ColsGPU.clear();
+                    currentCtx.u32ColsGPU.clear();
 
-                if (debug) std::cerr << "[Exec] DEBUG: Clearing f32ColsGPU\n";
-                {
-                    std::set<MTL::Buffer*> released;
-                    for(auto& [n, b] : currentCtx.f32ColsGPU) {
-                        if(b && released.find(b) == released.end()) {
-                            b->release();
-                            released.insert(b);
-                        }
-                    }
+                    if (debug) std::cerr << "[Exec] DEBUG: Clearing f32ColsGPU\n";
+                    // f32ColsGPU uses GpuBuffer RAII — clearing triggers destructors.
+                    currentCtx.f32ColsGPU.clear();
                 }
-                currentCtx.f32ColsGPU.clear();
                 
                 currentCtx.u32Cols.clear();
                 currentCtx.f32Cols.clear();
@@ -1212,22 +1201,20 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     if (restoredToF32) continue;
                     
                     // Transfer GPU buffer from TableResult (or create if missing)
-                    MTL::Buffer* buf = (i < tableResult.u32ColsGPU.size()) ? tableResult.u32ColsGPU[i] : nullptr;
+                    MTL::Buffer* buf = (i < tableResult.u32ColsGPU.size()) ? tableResult.u32ColsGPU[i].detach() : nullptr;
                     if (!buf && !tableResult.u32Cols[i].empty()) {
                         buf = GpuOps::createBuffer(tableResult.u32Cols[i].data(),
                                                    tableResult.u32Cols[i].size() * sizeof(uint32_t));
                     }
                     if (buf) {
-                        currentCtx.u32ColsGPU[name] = buf;
-                        // Positional key shares the same buffer
+                        currentCtx.u32ColsGPU[name].reset(buf);  // GpuBuffer takes ownership
+                        // Positional key shares the same buffer (GpuBuffer copy retains)
                         std::string posKey = "#" + std::to_string(i);
-                        buf->retain();
-                        currentCtx.u32ColsGPU[posKey] = buf;
-                        // Aliases share the same buffer
+                        currentCtx.u32ColsGPU[posKey] = currentCtx.u32ColsGPU[name];
+                        // Aliases share the same buffer (GpuBuffer copy retains)
                         for (const auto& [alias, canonical] : currentCtx.columnAliases) {
                             if (canonical == name) {
-                                buf->retain();
-                                currentCtx.u32ColsGPU[alias] = buf;
+                                currentCtx.u32ColsGPU[alias] = currentCtx.u32ColsGPU[name];
                             }
                         }
                     }
@@ -1237,22 +1224,20 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     const std::string& name = tableResult.f32Names[i];
                     
                     // Transfer GPU buffer from TableResult (or create if missing)
-                    MTL::Buffer* buf = (i < tableResult.f32ColsGPU.size()) ? tableResult.f32ColsGPU[i] : nullptr;
+                    MTL::Buffer* buf = (i < tableResult.f32ColsGPU.size()) ? tableResult.f32ColsGPU[i].detach() : nullptr;
                     if (!buf && !tableResult.f32Cols[i].empty()) {
                         buf = GpuOps::createBuffer(tableResult.f32Cols[i].data(),
                                                    tableResult.f32Cols[i].size() * sizeof(float));
                     }
                     if (buf) {
-                        currentCtx.f32ColsGPU[name] = buf;
+                        currentCtx.f32ColsGPU[name].reset(buf);
                         // Positional key shares the same buffer
                         std::string posKey = "#" + std::to_string(i + u32RegisteredCount);
-                        buf->retain();
-                        currentCtx.f32ColsGPU[posKey] = buf;
+                        currentCtx.f32ColsGPU[posKey] = currentCtx.f32ColsGPU[name];  // GpuBuffer copy auto-retains
                         // Aliases share the same buffer
                         for (const auto& [alias, canonical] : currentCtx.columnAliases) {
                             if (canonical == name) {
-                                buf->retain();
-                                currentCtx.f32ColsGPU[alias] = buf;
+                                currentCtx.f32ColsGPU[alias] = currentCtx.f32ColsGPU[name];  // GpuBuffer copy auto-retains
                             }
                         }
                     }
@@ -1304,11 +1289,8 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                     currentCtx.isScalarResult = true;
                     currentCtx.rowCount = 1;
                     // Clear stale activeRowsGPU so projections use rowCount=1
-                    if (currentCtx.activeRowsGPU) {
-                        currentCtx.activeRowsGPU->release();
-                        currentCtx.activeRowsGPU = nullptr;
-                        currentCtx.activeRowsCountGPU = 0;
-                    }
+                    currentCtx.activeRowsGPU = nullptr;
+                    currentCtx.activeRowsCountGPU = 0;
                     if (debug) std::cerr << "[Exec] Aggregate: isLastAgg=true, setting rowCount=1 (scalar result)\n";
                 }
                 
@@ -1321,19 +1303,17 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 
                 // Create GPU buffer for the scalar result
                 MTL::Buffer* aggBuf = GpuOps::createBuffer(currentCtx.f32Cols[posKey].data(), sizeof(float));
-                currentCtx.f32ColsGPU[posKey] = aggBuf;
+                currentCtx.f32ColsGPU[posKey].reset(aggBuf);
                 // No extra retain needed — createBuffer returns refcount=1 which covers the posKey map entry
                 
                 // Also store by name
                 if (!name.empty()) {
                     currentCtx.f32Cols[name] = std::vector<float>{static_cast<float>(value)};
-                    currentCtx.f32ColsGPU[name] = aggBuf;
-                    aggBuf->retain(); // +1 for name map entry
+                    currentCtx.f32ColsGPU[name] = currentCtx.f32ColsGPU[posKey]; // GpuBuffer copy auto-retains
                 }
                 if (!agg.exprStr.empty() && agg.exprStr != name) {
                      currentCtx.f32Cols[agg.exprStr] = std::vector<float>{static_cast<float>(value)};
-                     currentCtx.f32ColsGPU[agg.exprStr] = aggBuf;
-                     aggBuf->retain(); // +1 for exprStr map entry
+                     currentCtx.f32ColsGPU[agg.exprStr] = currentCtx.f32ColsGPU[posKey]; // GpuBuffer copy auto-retains
                 }
                 if (debug) {
                     std::cerr << "[Exec] Aggregate " << name << ": " << value 
@@ -1377,7 +1357,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         }
                         tableResult.u32Names.push_back(name);
                         tableResult.u32Cols.push_back(currentCtx.u32Cols[name]);
-                        tableResult.u32ColsGPU.push_back(buf);  // pass GPU buffer to OrderBy
+                        tableResult.u32ColsGPU.push_back(buf);
                     }
                     for (auto& [name, buf] : currentCtx.f32ColsGPU) {
                         if (!buf) continue;
@@ -1392,7 +1372,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         }
                         tableResult.f32Names.push_back(name);
                         tableResult.f32Cols.push_back(currentCtx.f32Cols[name]);
-                        tableResult.f32ColsGPU.push_back(buf);  // pass GPU buffer to OrderBy
+                        tableResult.f32ColsGPU.push_back(buf);
                     }
                     // Also pick up CPU-only columns that have no GPU buffer
                     for (const auto& [name, vec] : currentCtx.u32Cols) {
@@ -1402,7 +1382,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         if (currentCtx.u32ColsGPU.count(name)) continue;  // already handled above
                         tableResult.u32Names.push_back(name);
                         tableResult.u32Cols.push_back(vec);
-                        tableResult.u32ColsGPU.push_back(nullptr);
+                        tableResult.u32ColsGPU.emplace_back();  // null GpuBuffer
                     }
                     for (const auto& [name, vec] : currentCtx.f32Cols) {
                         if (vec.empty()) continue;
@@ -1410,7 +1390,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                         if (currentCtx.f32ColsGPU.count(name)) continue;  // already handled above
                         tableResult.f32Names.push_back(name);
                         tableResult.f32Cols.push_back(vec);
-                        tableResult.f32ColsGPU.push_back(nullptr);
+                        tableResult.f32ColsGPU.emplace_back();  // null GpuBuffer
                     }
                     for (const auto& [name, vec] : currentCtx.stringCols) {
                         if (!vec.empty()) {
@@ -1517,26 +1497,9 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
                 if (debug) {
                     std::cerr << "[Exec] Save: storing " << currentCtx.rowCount << " rows into " << node.asSave().name << "\n";
                 }
+                // Save: copy currentCtx into tableContexts.
+                // All GPU buffer types (GpuBuffer, FlatStringCol, DictEncoded) auto-retain on copy.
                 tableContexts[node.asSave().name] = currentCtx;
-                // Retain GPU buffers so the saved copy owns its own references.
-                // Without this, shallow copies share raw GPU pointers, and if
-                // another copy's DELIM dedup releases a buffer, this saved copy
-                // ends up with dangling pointers (e.g., Q21 crash).
-                {
-                    auto& saved = tableContexts[node.asSave().name];
-                    for (auto& [n, buf] : saved.u32ColsGPU)
-                        if (buf) buf->retain();
-                    for (auto& [n, buf] : saved.f32ColsGPU)
-                        if (buf) buf->retain();
-                    for (auto& [n, dc] : saved.dictCols)
-                        if (dc.idsGPU) dc.idsGPU->retain();
-                    for (auto& [n, fc] : saved.flatStringCols) {
-                        if (fc.offsets) fc.offsets->retain();
-                        if (fc.chars) fc.chars->retain();
-                        if (fc.lengths) fc.lengths->retain();
-                    }
-                    if (saved.activeRowsGPU) saved.activeRowsGPU->retain();
-                }
                 break;
             }
 

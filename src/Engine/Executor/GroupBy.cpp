@@ -1288,12 +1288,12 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     out.u32Cols.clear();
                     out.u32Cols.resize(keyVecs.size());
                     out.u32ColsGPU.clear();
-                    out.u32ColsGPU.resize(keyVecs.size(), nullptr);
+                    out.u32ColsGPU.resize(keyVecs.size());
                     out.u32Names = keyNames;
                     out.f32Cols.clear();
                     out.f32Cols.resize(aggFuncs.size());
                     out.f32ColsGPU.clear();
-                    out.f32ColsGPU.resize(aggFuncs.size(), nullptr);
+                    out.f32ColsGPU.resize(aggFuncs.size());
                     out.f32Names = aggNames;
                     out.stringCols.clear();
                     out.stringNames.clear();
@@ -1312,8 +1312,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                         // Move extracted keys directly into output columns + GPU buffers
                         for (size_t k = 0; k < keyVecs.size(); ++k) {
                             out.u32Cols[k] = std::move(extractResult->keyCols[k]);
-                            out.u32ColsGPU[k] = extractResult->keyColsGPU[k];  // transfer ownership
-                            extractResult->keyColsGPU[k] = nullptr;
+                            out.u32ColsGPU[k] = std::move(extractResult->keyColsGPU[k]);
                         }
 
                         // Process raw aggregate words with correct type conversion
@@ -1323,7 +1322,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                         size_t avgCount = 0;
                         for (size_t a = 0; a < aggFuncs.size(); ++a) {
                             uint32_t rc = extractResult->rowCount;
-                            MTL::Buffer* aggGPU = (a < extractResult->aggColsGPU.size()) ? extractResult->aggColsGPU[a] : nullptr;
+                            MTL::Buffer* aggGPU = (a < extractResult->aggColsGPU.size()) ? extractResult->aggColsGPU[a].get() : nullptr;
                             
                             if (aggFuncs[a] == AggFunc::CountStar) {
                                 // Integer count → f32 cast on GPU
@@ -1331,8 +1330,8 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                     MTL::Buffer* f32Buf = GpuOps::castU32ToF32(aggGPU, rc);
                                     if (f32Buf) {
                                         std::memcpy(out.f32Cols[a].data(), f32Buf->contents(), rc * sizeof(float));
-                                        out.f32ColsGPU[a] = f32Buf; // keep GPU buffer
-                                        extractResult->aggColsGPU[a] = nullptr; // ownership transferred via f32Buf using raw data
+                                        out.f32ColsGPU[a].reset(f32Buf); // keep GPU buffer
+                                        extractResult->aggColsGPU[a] = nullptr; // release original input
                                     }
                                 } else {
                                     const auto& rawWords = extractResult->aggWords[a];
@@ -1342,7 +1341,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             } else if (aggFuncs[a] == AggFunc::Avg) {
                                 // AVG = sum / count; sum is f32 bits in u32, count is u32
                                 size_t countIdx = aggFuncs.size() + avgCount;
-                                MTL::Buffer* countGPU = (countIdx < extractResult->aggColsGPU.size()) ? extractResult->aggColsGPU[countIdx] : nullptr;
+                                MTL::Buffer* countGPU = (countIdx < extractResult->aggColsGPU.size()) ? extractResult->aggColsGPU[countIdx].get() : nullptr;
                                 if (aggGPU && countGPU) {
                                     // GPU path: cast count u32→f32, then divide sum/count
                                     MTL::Buffer* countF32 = GpuOps::castU32ToF32(countGPU, rc);
@@ -1352,7 +1351,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                         countF32->release();
                                         if (avgBuf) {
                                             std::memcpy(out.f32Cols[a].data(), avgBuf->contents(), rc * sizeof(float));
-                                            out.f32ColsGPU[a] = avgBuf;
+                                            out.f32ColsGPU[a].reset(avgBuf);
                                         }
                                     }
                                 } else {
@@ -1372,9 +1371,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                 if (aggGPU) {
                                     // Raw bits are f32 — use GPU buffer directly
                                     std::memcpy(out.f32Cols[a].data(), aggGPU->contents(), rc * sizeof(float));
-                                    out.f32ColsGPU[a] = aggGPU;
-                                    aggGPU->retain();
-                                    extractResult->aggColsGPU[a] = nullptr;
+                                    out.f32ColsGPU[a] = std::move(extractResult->aggColsGPU[a]);
                                 } else {
                                     const auto& rawWords = extractResult->aggWords[a];
                                     for (uint32_t r = 0; r < rc; ++r) {
@@ -1386,9 +1383,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                                 // SUM/MIN/MAX: raw bits are f32 — use GPU buffer directly
                                 if (aggGPU) {
                                     std::memcpy(out.f32Cols[a].data(), aggGPU->contents(), rc * sizeof(float));
-                                    out.f32ColsGPU[a] = aggGPU;
-                                    aggGPU->retain();
-                                    extractResult->aggColsGPU[a] = nullptr;
+                                    out.f32ColsGPU[a] = std::move(extractResult->aggColsGPU[a]);
                                 } else {
                                     const auto& rawWords = extractResult->aggWords[a];
                                     for (uint32_t r = 0; r < rc; ++r) {
@@ -1401,18 +1396,12 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                         // Create GPU buffers for aggregates that don't already have one
                         for (size_t a = 0; a < aggFuncs.size(); ++a) {
                             if (!out.f32ColsGPU[a] && !out.f32Cols[a].empty()) {
-                                out.f32ColsGPU[a] = GpuOps::createBuffer(
+                                out.f32ColsGPU[a].reset(GpuOps::createBuffer(
                                     out.f32Cols[a].data(),
-                                    out.f32Cols[a].size() * sizeof(float));
+                                    out.f32Cols[a].size() * sizeof(float)));
                             }
                         }
-                        // Release unused raw agg GPU buffers from extract
-                        for (size_t a = 0; a < extractResult->aggColsGPU.size(); ++a) {
-                            if (extractResult->aggColsGPU[a]) {
-                                extractResult->aggColsGPU[a]->release();
-                                extractResult->aggColsGPU[a] = nullptr;
-                            }
-                        }
+                        // GpuBuffer handles release of unused agg buffers when extractResult goes out of scope
                     }
                     
                     // Post-process string columns
@@ -1472,12 +1461,11 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                             if (debug) std::cerr << "[Exec] GroupBy: restoring f32 key " << out.u32Names[k] 
                                                  << " (" << restored.size() << " values)\n";
                             // Create GPU buffer for the restored f32 key (same bits as u32)
-                            MTL::Buffer* restoredGPU = out.u32ColsGPU[k];  // reuse — same bit pattern
-                            if (restoredGPU) restoredGPU->retain();  // shared ownership
+                            // GpuBuffer copy auto-retains (shared ownership with u32ColsGPU[k])
                             // Add to f32 output (prepend before aggregates)
                             out.f32Names.insert(out.f32Names.begin(), out.u32Names[k]);
                             out.f32Cols.insert(out.f32Cols.begin(), std::move(restored));
-                            out.f32ColsGPU.insert(out.f32ColsGPU.begin(), restoredGPU);
+                            out.f32ColsGPU.insert(out.f32ColsGPU.begin(), out.u32ColsGPU[k]);
                             // Mark u32 slot as converted (will be handled in order building)
                         }
                     }

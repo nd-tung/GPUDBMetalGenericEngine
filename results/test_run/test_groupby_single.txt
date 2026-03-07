@@ -1,116 +1,54 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'sum(l_quantity)' -> 'total_qty'
-[Planner]   'cnt' -> 'count(*)'
-[Planner]   'total_qty' -> 'sum(l_quantity)'
-[Planner]   'count(*)' -> 'cnt'
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PERFECT_HASH_GROUP_BY
-[Planner] Traversing: PERFECT_HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: perfect_hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_quantity
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6156675432
-[Planner] Node SEQ_SCAN  output projections: l_returnflag, l_quantity, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_quantity
-[Planner] Node PROJECTION output projections: l_returnflag, l_quantity, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: l_quantity
-[Planner] Node PROJECTION output projections: l_returnflag, l_quantity, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: cnt
-[Planner] Pushing spec with outputName='cnt'
-[Planner] Parsing agg string: 'sum_no_overflow(#1)'
-[Planner] Resolved agg: sum_no_overflow(l_quantity)
-[Planner] inputExpr 'l_quantity' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(l_quantity)'
-[Planner] Found alias for agg: total_qty
-[Planner] Pushing spec with outputName='total_qty'
-[Planner] Node PERFECT_HASH_GROUP_BY output projections: l_returnflag, cnt, total_qty, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: cnt
-[Planner] Proj: total_qty
-[Planner] Node PROJECTION output projections: l_returnflag, cnt, total_qty, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: cnt
-[Planner] Proj: total_qty
-[Planner] Node PROJECTION output projections: l_returnflag, cnt, total_qty, 
-[Planner] ORDER BY looking up alias: 'sum(l_quantity)'
-[Planner] Node ORDER_BY output projections: l_returnflag, cnt, total_qty, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_returnflag
-[Planner] Proj: cnt
-[Planner] Proj: total_qty
-[Planner] Node PROJECTION output projections: l_returnflag, cnt, total_qty, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'l_returnflag'
-[Planner]   'cnt'
-[Planner]   'total_qty'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 6001215
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=65 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=78 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 65 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=65 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=78 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=82 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 3 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|cnt|total_qty|
-N|3043852.00|77624792.00|
-A|1478493.00|37733872.00|
-R|1478870.00|37719536.00|
+N|3043852.00|77625248.00|
+A|1478493.00|37733916.00|
+R|1478870.00|37719596.00|
 ---------------------------------------------------
-Planning time: 18.99 ms
-Data Load Time (Disk+Upload): 4002.18 ms
-GPU kernels time: 161.70 ms
-CPU postprocess time: 129.63 ms
-Total Internal Pipeline time: 4293.52 ms
-Total Host Execution time: 4293.53 ms
-Total Wall time (Plan+Exec): 4312.52 ms
+Planning time: 0.54 ms
+Data Load Time (Disk+Upload): 2141.32 ms
+GPU kernels time: 154.03 ms
+CPU postprocess time: 177.99 ms
+Total Internal Pipeline time: 2473.34 ms
+Total Host Execution time: 2473.35 ms
+Total Wall time (Plan+Exec): 2473.89 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  groupby        :  156.565 ms (96.821%) [3 calls]
-  sort           :    5.140 ms (3.179%) [2 calls]
+  cast           :    0.190 ms (0.123%) [1 calls]
+  groupby        :  147.456 ms (95.733%) [3 calls]
+  sort           :    6.382 ms (4.144%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 161.705 ms
-  Kernel invocations: 5
+  TOTAL GPU TIME: 154.028 ms
+  Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty      153.430        6001215         39.114
-ops::ht_mark_valid                   2.376       16777216       7060.497
-ops::ht_extract_compact              0.759              3          0.004
+ops::groupby_agg_multi_key_ty      144.054        6001215         41.659
+ops::ht_mark_valid                   2.616       16777216       6412.902
+ops::ht_extract_compact              0.786              3          0.004
+ops::cast_u32_to_f32                 0.190              3          0.016
 block_sort_kv_u64                    0.000              3          0.000
-orderby_gpu_gather                   5.140              9          0.002
+orderby_gpu_gather                   6.382              9          0.001
 ─────────────────────────────────────────────────────────────────
-TOTAL: 161.705 ms
+TOTAL: 154.028 ms

@@ -187,10 +187,10 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             }
                             flatBuf.rowCount = rc;
                             flatBuf.totalBytes = static_cast<uint32_t>(totalChars);
-                            flatBuf.chars = GpuOps::createBuffer(chars.empty() ? (const void*)"\0" : chars.data(),
-                                                                  std::max(chars.size(), (size_t)1));
-                            flatBuf.offsets = GpuOps::createBuffer(offsets.data(), offsets.size() * sizeof(uint32_t));
-                            flatBuf.lengths = GpuOps::createBuffer(lengths.data(), lengths.size() * sizeof(uint32_t));
+                            flatBuf.chars.reset(GpuOps::createBuffer(chars.empty() ? (const void*)"\0" : chars.data(),
+                                                                  std::max(chars.size(), (size_t)1)));
+                            flatBuf.offsets.reset(GpuOps::createBuffer(offsets.data(), offsets.size() * sizeof(uint32_t)));
+                            flatBuf.lengths.reset(GpuOps::createBuffer(lengths.data(), lengths.size() * sizeof(uint32_t)));
                             tempFlat = true;
                         }
                     }
@@ -214,8 +214,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         if (subOffsets && subLengths) {
                             // Release temp input offsets/lengths (no longer needed after substring)
                             if (tempFlat) {
-                                flatBuf.offsets->release();
-                                flatBuf.lengths->release();
                                 flatBuf.offsets = nullptr;
                                 flatBuf.lengths = nullptr;
                             }
@@ -229,8 +227,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             if (encodedGPU) {
                                 std::memcpy(encoded.data(), encodedGPU->contents(), rc * sizeof(uint32_t));
                                 // Keep GPU buffer for downstream operators
-                                ctx.u32ColsGPU[outName] = encodedGPU;
-                                ctx.u32ColsGPU[posName] = encodedGPU;
+                                ctx.u32ColsGPU[outName].reset(encodedGPU);
+                                ctx.u32ColsGPU[posName] = ctx.u32ColsGPU[outName]; // GpuBuffer copy retains
                             }
                             
                             // Reconstruct CPU strings from flat buffers for downstream use
@@ -244,9 +242,9 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             
                             // Store FlatStringCol for the output under the new name
                             FlatStringCol outFlat;
-                            outFlat.chars     = flat.chars;   // shared — zero-copy
-                            outFlat.offsets   = subOffsets;
-                            outFlat.lengths   = subLengths;
+                            outFlat.chars     = flat.chars;   // GpuBuffer copy auto-retains
+                            outFlat.offsets.reset(subOffsets); // takes ownership
+                            outFlat.lengths.reset(subLengths); // takes ownership
                             outFlat.rowCount  = rc;
                             outFlat.totalBytes = flat.totalBytes; // conservative
                             ctx.flatStringCols[outName] = outFlat;
@@ -267,9 +265,7 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         }
                         // GPU path failed — clean up temp buffers and fall through to CPU
                         if (tempFlat) {
-                            if (flatBuf.chars) flatBuf.chars->release();
-                            if (flatBuf.offsets) flatBuf.offsets->release();
-                            if (flatBuf.lengths) flatBuf.lengths->release();
+                            flatBuf.release();
                         }
                     }
                     
@@ -317,8 +313,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                                 std::memcpy(encoded.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
                                 ctx.u32Cols[outName] = encoded;
                                 ctx.u32Cols[posName] = encoded;
-                                ctx.u32ColsGPU[outName] = hashBuf;  // reuse instead of re-computing
-                                ctx.u32ColsGPU[posName] = hashBuf;
+                                ctx.u32ColsGPU[outName].reset(hashBuf);  // GpuBuffer takes ownership
+                                ctx.u32ColsGPU[posName] = ctx.u32ColsGPU[outName]; // GpuBuffer copy retains
                                 out.u32Cols.push_back(std::move(encoded));
                                 out.u32Names.push_back(outName);
                             }
@@ -410,8 +406,8 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                         results.resize(gpuCount);
                         std::memcpy(results.data(), yearBuf->contents(), gpuCount * sizeof(uint32_t));
                         // Keep GPU buffer for downstream operators
-                        ctx.u32ColsGPU[outName] = yearBuf;
-                        ctx.u32ColsGPU[posName] = yearBuf;
+                        ctx.u32ColsGPU[outName].reset(yearBuf);
+                        ctx.u32ColsGPU[posName] = ctx.u32ColsGPU[outName]; // GpuBuffer copy retains
 
                         if (debug) std::cerr << "[Exec] Project: YEAR GPU-computed " << gpuCount << " results for " << outName << "\n";
                         return true;
@@ -1218,19 +1214,15 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             std::memcpy(res.data(), gathered->contents(), jRes.count * sizeof(float));
                             
                             ctx.f32Cols[posName] = res;
-                            ctx.f32ColsGPU[posName] = gathered;
-                            gathered->retain();
+                            ctx.f32ColsGPU[posName].reset(gathered);
                             if (!outName.empty()) {
                                 ctx.f32Cols[outName] = res;
-                                ctx.f32ColsGPU[outName] = gathered;
-                                gathered->retain();
+                                ctx.f32ColsGPU[outName] = ctx.f32ColsGPU[posName]; // GpuBuffer copy auto-retains
                             }
                             out.f32Cols.push_back(res);
-                            out.f32ColsGPU.push_back(gathered);
+                            out.f32ColsGPU.push_back(ctx.f32ColsGPU[posName]); // GpuBuffer copy auto-retains
                             out.f32Names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
-                            if (jRes.buildIndices) jRes.buildIndices->release();
-                            if (jRes.probeIndices) jRes.probeIndices->release();
                             continue;
                         } else if (sourceCtx->stringCols.count(neededCol)) {
                             // Strings: download buildIndices to CPU and gather strings
@@ -1255,8 +1247,6 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             out.u32Cols.push_back(encoded);
                             out.u32Names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
-                            if (jRes.buildIndices) jRes.buildIndices->release();
-                            if (jRes.probeIndices) jRes.probeIndices->release();
                             continue;
                         } else if (sourceCtx->u32Cols.count(neededCol) || sourceCtx->u32ColsGPU.count(neededCol)) {
                             MTL::Buffer* srcValsGPU = nullptr;
@@ -1275,25 +1265,19 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
                             std::memcpy(res.data(), gathered->contents(), jRes.count * sizeof(uint32_t));
                             
                             ctx.u32Cols[posName] = res;
-                            ctx.u32ColsGPU[posName] = gathered;
-                            gathered->retain();
+                            ctx.u32ColsGPU[posName].reset(gathered); // GpuBuffer takes ownership
                             if (!outName.empty()) {
                                 ctx.u32Cols[outName] = res;
-                                ctx.u32ColsGPU[outName] = gathered;
-                                gathered->retain();
+                                ctx.u32ColsGPU[outName] = ctx.u32ColsGPU[posName]; // GpuBuffer copy retains
                             }
                             out.u32Cols.push_back(res);
-                            out.u32ColsGPU.push_back(gathered);
+                            out.u32ColsGPU.push_back(ctx.u32ColsGPU[posName]); // GpuBuffer copy auto-retains
                             out.u32Names.push_back(outName.empty() ? neededCol : outName);
                             updateRowCount(res.size());
-                            if (jRes.buildIndices) jRes.buildIndices->release();
-                            if (jRes.probeIndices) jRes.probeIndices->release();
                             continue;
                         }
                         
                         // No matching value column found — release join result
-                        if (jRes.buildIndices) jRes.buildIndices->release();
-                        if (jRes.probeIndices) jRes.probeIndices->release();
                     }
                 }
             }
@@ -1365,10 +1349,10 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
             if (gpuBuf) {
                 if (debug) std::cerr << "[Exec] Project: computed expr[" << i << "] on GPU\n";
                 // Store in GPU context
+                ctx.f32ColsGPU[posName].reset(gpuBuf);
                 if (!outName.empty()) {
-                    ctx.f32ColsGPU[outName] = gpuBuf;
+                    ctx.f32ColsGPU[outName] = ctx.f32ColsGPU[posName]; // GpuBuffer copy auto-retains
                 }
-                ctx.f32ColsGPU[posName] = gpuBuf;
                 
                 // Sync to CPU for compatibility with downstream operators
                 uint32_t cnt = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
@@ -1520,13 +1504,13 @@ bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, Tab
     }
 
     // Populate GPU buffer mirrors in TableResult for downstream operators
-    out.u32ColsGPU.resize(out.u32Names.size(), nullptr);
+    out.u32ColsGPU.resize(out.u32Names.size());
     for (size_t i = 0; i < out.u32Names.size(); ++i) {
         if (ctx.u32ColsGPU.count(out.u32Names[i])) {
             out.u32ColsGPU[i] = ctx.u32ColsGPU[out.u32Names[i]];
         }
     }
-    out.f32ColsGPU.resize(out.f32Names.size(), nullptr);
+    out.f32ColsGPU.resize(out.f32Names.size());
     for (size_t i = 0; i < out.f32Names.size(); ++i) {
         if (ctx.f32ColsGPU.count(out.f32Names[i])) {
             out.f32ColsGPU[i] = ctx.f32ColsGPU[out.f32Names[i]];

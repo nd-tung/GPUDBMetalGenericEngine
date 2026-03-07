@@ -43,12 +43,12 @@ void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     flat.totalBytes = static_cast<uint32_t>(totalChars);
 
     if (!chars.empty())
-        flat.chars = store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared);
+        flat.chars.reset(store.device()->newBuffer(chars.data(), chars.size(), MTL::ResourceStorageModeShared));
     else
-        flat.chars = store.device()->newBuffer(1, MTL::ResourceStorageModeShared);
+        flat.chars.reset(store.device()->newBuffer(1, MTL::ResourceStorageModeShared));
 
-    flat.offsets = store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    flat.lengths = store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    flat.offsets.reset(store.device()->newBuffer(offsets.data(), offsets.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    flat.lengths.reset(store.device()->newBuffer(lengths.data(), lengths.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared));
 
     ctx.flatStringCols[colName] = flat;
 }
@@ -73,7 +73,7 @@ static void computeGpuHash(EvalContext& ctx, const std::string& colName) {
     auto hashBuf = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
     if (!hashBuf) return;
 
-    ctx.u32ColsGPU[colName] = hashBuf;
+    ctx.u32ColsGPU[colName].reset(hashBuf);
     // Download to CPU for compatibility with CPU-side consumers
     std::vector<uint32_t> hashCPU(flat.rowCount);
     memcpy(hashCPU.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
@@ -114,7 +114,7 @@ void buildDictCol(EvalContext& ctx, const std::string& colName) {
     dict.dictionary = std::move(uniq);
     dict.ids = ids;
     dict.rowCount = rowCount;
-    dict.idsGPU = store.device()->newBuffer(ids.data(), ids.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    dict.idsGPU.reset(store.device()->newBuffer(ids.data(), ids.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared));
 
     ctx.dictCols[colName] = std::move(dict);
 }
@@ -276,12 +276,10 @@ void IRGpuLoader::loadTables(
                         std::copy(ptr, ptr + rel.rowCount, data.begin());
                         if (inst.instanceNum == 1) {
                             ctx.u32Cols[name] = data;
-                            ctx.u32ColsGPU[name] = buf;
-                            buf->retain();
+                            ctx.u32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
                         }
                         ctx.u32Cols[name + "_" + std::to_string(inst.instanceNum)] = std::move(data);
-                        ctx.u32ColsGPU[name + "_" + std::to_string(inst.instanceNum)] = buf;
-                        buf->retain(); 
+                        ctx.u32ColsGPU[name + "_" + std::to_string(inst.instanceNum)] = buf;  // GpuBuffer copy auto-retains
                     }
                     for (const auto& [name, buf] : rel.f32cols) {
                         std::vector<float> data(rel.rowCount);
@@ -289,12 +287,10 @@ void IRGpuLoader::loadTables(
                         std::copy(ptr, ptr + rel.rowCount, data.begin());
                         if (inst.instanceNum == 1) {
                             ctx.f32Cols[name] = data;
-                            ctx.f32ColsGPU[name] = buf;
-                            buf->retain();
+                            ctx.f32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
                         }
                         ctx.f32Cols[name + "_" + std::to_string(inst.instanceNum)] = std::move(data);
-                        ctx.f32ColsGPU[name + "_" + std::to_string(inst.instanceNum)] = buf;
-                        buf->retain();
+                        ctx.f32ColsGPU[name + "_" + std::to_string(inst.instanceNum)] = buf;  // GpuBuffer copy auto-retains
                     }
                     
                     // Always load raw strings + flatten for ALL StringHash columns
@@ -350,16 +346,14 @@ void IRGpuLoader::loadTables(
                 const uint32_t* ptr = static_cast<const uint32_t*>(buf->contents());
                 std::copy(ptr, ptr + rel.rowCount, data.begin());
                 ctx.u32Cols[name] = std::move(data);
-                ctx.u32ColsGPU[name] = buf;
-                buf->retain();
+                ctx.u32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
             }
             for (const auto& [name, buf] : rel.f32cols) {
                 std::vector<float> data(rel.rowCount);
                 const float* ptr = static_cast<const float*>(buf->contents());
                 std::copy(ptr, ptr + rel.rowCount, data.begin());
                 ctx.f32Cols[name] = std::move(data);
-                ctx.f32ColsGPU[name] = buf;
-                buf->retain();
+                ctx.f32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
             }
             
             // Always load raw strings + flatten for ALL StringHash columns

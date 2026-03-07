@@ -1,119 +1,106 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'avg_bal' -> 'avg(c_acctbal)'
-[Planner]   'avg(c_acctbal)' -> 'avg_bal'
-[Planner]   'cnt' -> 'count(*)'
-[Planner]   'count(*)' -> 'cnt'
-[Planner]   'country_code' -> 'substring(c_phone from 1 for 2)'
-[Planner]   'substring(c_phonefrom1for2)' -> 'country_code'
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_acctbal
-[Planner] Proj: c_phone
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6130395496
-[Planner] Node SEQ_SCAN  output projections: c_acctbal, c_phone, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: "substring"(c_phone, 1, 2)
-[Planner] Proj: c_acctbal
-[Planner] Forcing keep of global column: c_phone
-[Planner] Node PROJECTION output projections: "substring"(c_phone, 1, 2), c_acctbal, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: cnt
-[Planner] Pushing spec with outputName='cnt'
-[Planner] Parsing agg string: 'avg(#1)'
-[Planner] Resolved agg: avg(c_acctbal)
-[Planner] inputExpr 'c_acctbal' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'avg(c_acctbal)'
-[Planner] Found alias for agg: avg_bal
-[Planner] Pushing spec with outputName='avg_bal'
-[Planner] Node HASH_GROUP_BY output projections: "substring"(c_phone, 1, 2), cnt, avg_bal, 
-[Planner] ORDER BY looking up alias: 'count_star()'
-[Planner] Node ORDER_BY output projections: "substring"(c_phone, 1, 2), cnt, avg_bal, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'country_code'
-[Planner]   'cnt'
-[Planner]   'avg_bal'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 136308
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=2314375987 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=350953279 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 2314375987 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=2331153606 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2515707415 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=401286136 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2381486463 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2247118416 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2314375987 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2297451273 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2364708844 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2347784130 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=350953279 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=451618993 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=501951850 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=434841374 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=485174231 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2498929796 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2415041701 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2347931225 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2398264082 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2297598368 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=468396612 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2280673654 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2263896035 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=418063755 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=334175660 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=518729469 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 25 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 avg_bal|cnt|
 5012.34|5626.00|
 4985.21|5559.00|
-5055.96|5540.00|
+5055.97|5540.00|
 4965.71|5516.00|
-4965.32|5509.00|
+4965.33|5509.00|
 4936.91|5501.00|
-5033.42|5478.00|
-5054.85|5473.00|
-4941.89|5466.00|
-4957.25|5463.00|
+5033.41|5478.00|
+5054.86|5473.00|
+4941.88|5466.00|
+4957.24|5463.00|
 5008.92|5460.00|
 5008.07|5453.00|
 5021.93|5451.00|
-5067.84|5443.00|
+5067.83|5443.00|
 5000.17|5434.00|
 4990.99|5433.00|
 4991.81|5424.00|
 5007.57|5424.00|
-5035.16|5422.00|
-4956.15|5415.00|
+5035.17|5422.00|
+4956.16|5415.00|
 4994.15|5386.00|
 4996.84|5380.00|
 4960.11|5364.00|
 4974.50|5347.00|
 5007.10|5341.00|
 ---------------------------------------------------
-Planning time: 18.58 ms
-Data Load Time (Disk+Upload): 168.83 ms
-GPU kernels time: 7.61 ms
-CPU postprocess time: 16.09 ms
-Total Internal Pipeline time: 192.53 ms
-Total Host Execution time: 192.79 ms
-Total Wall time (Plan+Exec): 211.37 ms
+Planning time: 0.65 ms
+Data Load Time (Disk+Upload): 113.49 ms
+GPU kernels time: 12.45 ms
+CPU postprocess time: 26.40 ms
+Total Internal Pipeline time: 152.34 ms
+Total Host Execution time: 152.75 ms
+Total Wall time (Plan+Exec): 153.41 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    0.271 ms (3.561%) [1 calls]
-  filter         :    0.909 ms (11.951%) [1 calls]
-  gather         :    1.513 ms (19.887%) [4 calls]
-  groupby        :    4.391 ms (57.722%) [3 calls]
-  sort           :    0.523 ms (6.879%) [2 calls]
+  cast           :    1.585 ms (12.730%) [2 calls]
+  filter         :    0.959 ms (7.700%) [1 calls]
+  gather         :    2.610 ms (20.961%) [4 calls]
+  groupby        :    6.756 ms (54.262%) [3 calls]
+  sort           :    0.541 ms (4.348%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 7.606 ms
-  Kernel invocations: 11
+  TOTAL GPU TIME: 12.450 ms
+  Kernel invocations: 12
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_f32                   0.909         150000        165.009
-ops::compact_indices                 0.271         150000        553.847
-ops::gather_col_f32                  0.262         136308        521.171
-ops::gather_col_u32                  0.758         136308        179.717
-ops::gather_col_u32                  0.269         136308        507.036
-ops::groupby_agg_multi_key_ty        3.810         136308         35.780
-ops::ht_mark_valid                   0.331         524288       1582.756
-ops::ht_extract_compact              0.250             25          0.100
+ops::filter_gt_f32                   0.959         150000        156.481
+ops::gather_col_f32                  0.709         136308        192.164
+ops::gather_col_u32                  0.854         136308        159.666
+ops::gather_col_u32                  0.816         136308        167.001
+ops::groupby_agg_multi_key_ty        5.077         136308         26.847
+ops::ht_mark_valid                   0.821         524288        638.435
+ops::ht_extract_compact              0.857             25          0.029
+ops::cast_u32_to_f32                 0.702             25          0.036
+ops::cast_u32_to_f32                 0.883             25          0.028
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.523             75          0.143
-ops::gather_col_u32                  0.224             25          0.112
+orderby_gpu_gather                   0.541             75          0.139
+ops::gather_col_u32                  0.230             25          0.109
 ─────────────────────────────────────────────────────────────────
-TOTAL: 7.606 ms
+TOTAL: 12.450 ms

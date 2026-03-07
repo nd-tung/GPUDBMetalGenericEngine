@@ -1,103 +1,8 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'cntrycode' -> 'substring(c_phone from 1 for 2)'
-[Planner]   'substring(c_phonefrom1for2)' -> 'cntrycode'
-[Planner]   'totacctbal' -> 'sum(c_acctbal)'
-[Planner]   'numcust' -> 'count(*)'
-[Planner]   'sum(c_acctbal)' -> 'totacctbal'
-[Planner]   'count(*)' -> 'numcust'
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: RIGHT_DELIM_JOIN
-[Planner] Traversing: RIGHT_DELIM_JOIN
-[Planner] [TraverseNode] Logic for JOIN: RIGHT_DELIM_JOIN
-[Planner] Entering children traversal block. Name: right_delim_join Children: 3
-[Planner] Checking LHS (kids[0]) for delim...
-[Planner] checkDelim visiting: nested_loop_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: ungrouped_aggregate
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: ungrouped_aggregate
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: seq_scan 
-[Planner] Result LHS: 0
-[Planner] Checking RHS (kids[1]) for delim...
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: projection
-[Planner] checkDelim visiting: hash_join
-[Planner] checkDelim visiting: seq_scan 
-[Planner] checkDelim visiting: delim_scan
-[Planner] checkDelim FOUND: delim_scan
-[Planner] Result RHS: 1
-[Planner] Processing DELIM_JOIN at node 0 Plan: 6157576568
-[Planner] Processing DELIM_JOIN. Children: 3 Swap: 0
-[Planner] Traversing node: NESTED_LOOP_JOIN
-[Planner] Traversing: NESTED_LOOP_JOIN
-[Planner] [TraverseNode] Logic for JOIN: NESTED_LOOP_JOIN
-[Planner] Checking RHS capture for Join NESTED_LOOP_JOIN
-[Planner] Inspecting RHS node PROJECTION
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: UNGROUPED_AGGREGATE
-[Planner] Traversing: UNGROUPED_AGGREGATE
-[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: UNGROUPED_AGGREGATE
-[Planner] Traversing: UNGROUPED_AGGREGATE
-[Planner] Entering children traversal block. Name: ungrouped_aggregate Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_acctbal
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 0 Plan: 6157576568
-[Planner] Node SEQ_SCAN  output projections: c_acctbal, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_acctbal
-[Planner] Node PROJECTION output projections: c_acctbal, 
-[Planner] Processing aggregate: 'avg(c_acctbal)'
-[Planner] Node UNGROUPED_AGGREGATE output projections: avg(c_acctbal), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: avg(c_acctbal)
-[Planner] Node PROJECTION output projections: avg(c_acctbal), 
-[Planner] Processing aggregate: '"first"(avg(c_acctbal))'
-[Planner] Processing aggregate: 'count_star()'
-[Planner] Node UNGROUPED_AGGREGATE output projections: "first"(avg(c_acctbal)), count_star(), 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Fixing split CASE projection. Appending next line.
-[Planner] Proj: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END
-[Planner] Node PROJECTION output projections: CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: c_phone
-[Planner] Proj: c_acctbal
-[Planner] Proj: c_custkey
 DEBUG: Scan table determined as: 'customer'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
-[Planner] Generating Scan: customer at index 8 Plan: 6157576568
-[Planner] Node SEQ_SCAN  output projections: c_phone, c_acctbal, c_custkey, 
 [Planner] Creating JOIN 'NESTED_LOOP_JOIN'. CapturedRightTable: 'tmpl_join_7'
 [Planner] Pre-resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
 [Planner] ChildProjs size: 4
@@ -108,205 +13,118 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=customer
 [Planner] Keeping SUBQUERY token (RHS is complex: 'CASE  WHEN ((count_star() > 1)) THEN ("e...')
 [Planner] Resolved Condition: 'CAST(c_acctbal AS DOUBLE) > SUBQUERY'
 DEBUG_JOIN_EMISSION: Node='NESTED_LOOP_JOIN' capturedRHS=true capturedRightTable='tmpl_join_7'
-[Planner] Node NESTED_LOOP_JOIN output projections: c_phone, c_acctbal, c_custkey, CASE  WHEN ((count_star() > 1)) THEN ("error"('More than one row returned by a subquery used as an expression - scalar subqueries can only return a single row. Use "SET scalar_subquery_error_on_multiple_rows=false" to revert to previous behavior of returning a random row.')) ELSE "first"(avg(c_acctbal)) END, 
-[Planner] Emitting SAVE for DELIM_JOIN LHS: tmpl_delim_lhs_10 at index 10 Plan: 6157576568
-[Planner] Created Save Node with type: 9
-[Planner] CONFIRMED: Back node is Save.
-[Planner] Post-Emit Size: 11
-[Planner] Pushed DELIM context: tmpl_delim_lhs_10 (stack size=1)
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node DUMMY_SCAN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: DUMMY_SCAN
-[Planner] Traversing: DUMMY_SCAN
-[Planner] Entering children traversal block. Name: dummy_scan Children: 0
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 11 Plan: 6157576568
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node DELIM_SCAN
-[Planner] RHS is complex (tryCapture failed). Using Traversal-First Strategy.
-[Planner] Traversing node: DELIM_SCAN
-[Planner] Traversing: DELIM_SCAN
-[Planner] Entering children traversal block. Name: delim_scan Children: 0
-[Planner] Generating Multi-Level DELIM_SCAN. Depth: 1
-[Planner] Generating Scan(DelimTop): tmpl_delim_lhs_10 at index 13 Plan: 6157576568
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_custkey
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 15 Plan: 6157576568
-[Planner] Node SEQ_SCAN  output projections: o_custkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_14'
 [Planner] Pre-resolved Condition: 'o_custkey = c_custkey'
 [Planner] ChildProjs size: 1
   #0: o_custkey
 [Planner] Resolved Condition: 'o_custkey = c_custkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_14'
-[Planner] Join Key Analysis: l => orders, r => customer
-[Planner] Captured RHS Table: tmpl_join_14
-[Planner] RHS Tables: tmpl_join_14, 
-[Planner] Checking matchesRHS: orders
-[Planner] Checking matchesRHS: customer
-[Planner] Node HASH_JOIN output projections: o_custkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: c_custkey
-[Planner] Forcing keep of global column: o_custkey
-[Planner] Node PROJECTION output projections: c_custkey, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'tmpl_join_12'
 [Planner] Pre-resolved Condition: 'c_custkey IS NOT DISTINCT FROM c_custkey'
 [Planner] ChildProjs size: 1
   #0: c_custkey
 [Planner] Resolved Condition: 'c_custkey IS NOT DISTINCT FROM c_custkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='tmpl_join_12'
-[Planner] Join Key Analysis: l => customer, r => customer
-[Planner] Captured RHS Table: tmpl_join_12
-[Planner] RHS Tables: tmpl_join_12, 
-[Planner] Checking matchesRHS: customer
-[Planner] Checking matchesRHS: customer
-[Planner] Node HASH_JOIN output projections: c_custkey, 
-[Planner] Popping DELIM context: tmpl_delim_lhs_10
-[Planner] DELIM_JOIN condition: c_custkey IS NOT DISTINCT FROM c_custkey
-[Planner] Refined DELIM_JOIN condition: c_custkey = c_custkey -> c_custkey = c_custkey
-[Planner] DELIM_JOIN read Join Type from plan: 'RIGHT_ANTI'
-[Planner] DELIM_JOIN emitting join type: 6 (0=Inner, 1=Left, 4=Semi, 5=Anti)
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: cntrycode
-[Planner] Proj: c_acctbal
-[Planner] Projection: resolving alias 'cntrycode' -> 'substring(c_phone from 1 for 2)'
-[Planner] Forcing keep of global column: c_custkey
-[Planner] Forcing keep of global column: c_phone
-[Planner] Node PROJECTION output projections: cntrycode, c_acctbal, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: cntrycode
-[Planner] Proj: c_acctbal
-[Planner] Node PROJECTION output projections: cntrycode, c_acctbal, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: numcust
-[Planner] Pushing spec with outputName='numcust'
-[Planner] Parsing agg string: 'sum(#1)'
-[Planner] Resolved agg: sum(c_acctbal)
-[Planner] inputExpr 'c_acctbal' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(c_acctbal)'
-[Planner] Found alias for agg: totacctbal
-[Planner] Pushing spec with outputName='totacctbal'
-[Planner] Node HASH_GROUP_BY output projections: cntrycode, numcust, totacctbal, 
-[Planner] Node ORDER_BY output projections: cntrycode, numcust, totacctbal, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'cntrycode'
-[Planner]   'numcust'
-[Planner]   'totacctbal'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 6384
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=2280673654 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=334175660 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 2280673654 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=2398264082 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2297451273 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2498929796 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=334175660 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=518729469 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=451618993 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2280673654 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 7 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 totacctbal|numcust|cntrycode|
-6737713.00|888.00|13|
-6460574.00|861.00|17|
-7236689.00|964.00|18|
-6701459.00|892.00|23|
-7158867.00|948.00|29|
-6808436.50|909.00|30|
-6806670.00|922.00|31|
+6737714.00|888.00|13|
+6460572.00|861.00|17|
+7236686.00|964.00|18|
+6701458.00|892.00|23|
+7158868.00|948.00|29|
+6808435.00|909.00|30|
+6806668.00|922.00|31|
 ---------------------------------------------------
-Planning time: 21.59 ms
-Data Load Time (Disk+Upload): 774.54 ms
-GPU kernels time: 13.80 ms
-CPU postprocess time: 57.81 ms
-Total Internal Pipeline time: 846.16 ms
-Total Host Execution time: 847.03 ms
-Total Wall time (Plan+Exec): 868.62 ms
+Planning time: 2.12 ms
+Data Load Time (Disk+Upload): 581.37 ms
+GPU kernels time: 15.09 ms
+CPU postprocess time: 49.21 ms
+Total Internal Pipeline time: 645.67 ms
+Total Host Execution time: 646.70 ms
+Total Wall time (Plan+Exec): 648.81 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    3.639 ms (26.371%) [16 calls]
-  filter         :    4.427 ms (32.078%) [16 calls]
-  gather         :    2.858 ms (20.713%) [13 calls]
-  groupby        :    0.685 ms (4.962%) [3 calls]
-  hash_join_probe_u32:    1.977 ms (14.330%) [8 calls]
-  sort           :    0.213 ms (1.547%) [4 calls]
+  cast           :    0.165 ms (1.091%) [1 calls]
+  filter         :    5.133 ms (34.009%) [16 calls]
+  gather         :    5.746 ms (38.077%) [14 calls]
+  groupby        :    0.693 ms (4.591%) [3 calls]
+  hash_join_probe_u32:    3.147 ms (20.852%) [8 calls]
+  sort           :    0.208 ms (1.380%) [3 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 13.799 ms
-  Kernel invocations: 60
+  TOTAL GPU TIME: 15.091 ms
+  Kernel invocations: 45
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_f32                   0.918         150000        163.391
-ops::compact_indices                 0.273         150000        550.376
-ops::filter_string_eq                0.257         150000        583.564
-ops::compact_indices                 0.249         150000        602.511
-hash_join_probe_write_multi          0.237           6020         25.365
-ops::gather_col_u32                  0.237           5453         23.037
-ops::filter_string_eq                0.260         150000        577.848
-ops::compact_indices                 0.253         150000        592.981
-hash_join_probe_write_multi          0.240           6008         25.038
-ops::gather_col_u32                  0.236           5460         23.181
-ops::filter_string_eq                0.244         150000        614.860
-ops::compact_indices                 0.245         150000        613.394
-hash_join_probe_write_multi          0.237           6033         25.411
-ops::gather_col_u32                  0.218           5501         25.210
-ops::filter_string_eq                0.255         150000        587.947
-ops::compact_indices                 0.246         150000        610.481
-hash_join_probe_write_multi          0.227           6100         26.862
-ops::gather_col_u32                  0.222           5540         24.969
-ops::filter_string_eq                0.253         150000        591.910
-ops::compact_indices                 0.245         150000        611.516
-hash_join_probe_write_multi          0.238           5904         24.846
-ops::gather_col_u32                  0.222           5341         24.099
-ops::filter_string_eq                0.247         150000        606.061
-ops::compact_indices                 0.240         150000        624.350
-hash_join_probe_write_multi          0.235           6042         25.720
-ops::gather_col_u32                  0.222           5478         24.717
-ops::filter_string_eq                0.251         150000        598.403
-ops::compact_indices                 0.244         150000        615.700
-hash_join_probe_write_multi          0.228           5908         25.946
-ops::gather_col_u32                  0.217           5347         24.617
-ops::gather_col_f32                  0.235          38120        162.069
-ops::gather_col_f32                  0.238          38120        160.478
-ops::filter_string_eq                0.259         150000        579.245
-ops::compact_indices                 0.233         150000        644.585
-ops::filter_string_eq                0.237         150000        633.245
-ops::compact_indices                 0.240         150000        625.868
-ops::filter_string_eq                0.236         150000        635.930
-ops::compact_indices                 0.234         150000        640.229
-ops::filter_string_eq                0.189         150000        794.879
-ops::compact_indices                 0.186         150000        807.176
-ops::filter_string_eq                0.203         150000        737.855
-ops::compact_indices                 0.184         150000        814.297
-ops::filter_string_eq                0.208         150000        720.288
-ops::compact_indices                 0.196         150000        765.142
-ops::filter_string_eq                0.207         150000        723.907
-ops::compact_indices                 0.189         150000        794.879
-ops::filter_gt_f32_indexed           0.202          42015        207.910
-ops::compact_indices_indexed         0.184          42015        228.705
-hash_join_probe_write_multi          0.335        1500000       4472.605
-ops::gather_col_u32                  0.222         190069        855.685
+ops::filter_gt_f32                   0.878         150000        170.908
+ops::filter_string_eq                0.285         150000        526.778
+hash_join_probe_write_multi          1.012           6020          5.946
+ops::gather_col_u32                  0.667           5453          8.174
+ops::filter_string_eq                0.843         150000        178.015
+hash_join_probe_write_multi          0.845           6008          7.114
+ops::gather_col_u32                  0.732           5460          7.459
+ops::filter_string_eq                0.250         150000        600.199
+hash_join_probe_write_multi          0.189           6033         31.949
+ops::gather_col_u32                  0.211           5501         26.076
+ops::filter_string_eq                0.240         150000        625.326
+hash_join_probe_write_multi          0.188           6100         32.519
+ops::gather_col_u32                  0.203           5540         27.291
+ops::filter_string_eq                0.243         150000        618.450
+hash_join_probe_write_multi          0.194           5904         30.374
+ops::gather_col_u32                  0.204           5341         26.187
+ops::filter_string_eq                0.239         150000        627.505
+hash_join_probe_write_multi          0.194           6042         31.178
+ops::gather_col_u32                  0.199           5478         27.574
+ops::filter_string_eq                0.239         150000        628.272
+hash_join_probe_write_multi          0.186           5908         31.678
+ops::gather_col_u32                  0.201           5347         26.597
+ops::gather_col_f32                  0.213          38120        178.617
+ops::gather_col_f32                  0.209          38120        182.392
+ops::filter_string_eq                0.241         150000        623.485
+ops::filter_string_eq                0.228         150000        656.576
+ops::filter_string_eq                0.234         150000        642.398
+ops::filter_string_eq                0.234         150000        639.888
+ops::filter_string_eq                0.227         150000        661.521
+ops::filter_string_eq                0.317         150000        473.186
+ops::filter_string_eq                0.231         150000        650.759
+ops::filter_gt_f32_indexed           0.206          42015        203.833
+ops::gather_col_u32                  0.212          19000         89.587
+ops::gather_flat_string              1.201          19000         15.819
+ops::gather_col_u32                  0.182          19000        104.134
+ops::gather_flat_string              1.141          19000         16.658
+hash_join_probe_write_multi          0.339        1500000       4428.593
 radix_sort_u32                       0.000          19000          0.000
-ops::gather_col_u32                  0.225           6384         28.410
-radix_sort_u32                       0.000           6384          0.000
-ops::gather_col_u32                  0.197           6384         32.351
-ops::groupby_agg_multi_key_ty        0.337           6384         18.951
-ops::ht_mark_valid                   0.175          16384         93.400
+ops::groupby_agg_multi_key_ty        0.337           6384         18.955
+ops::ht_mark_valid                   0.184          16384         89.165
 ops::ht_extract_compact              0.172              7          0.041
+ops::cast_u32_to_f32                 0.165              7          0.042
 block_sort_kv_u64                    0.000              7          0.000
-orderby_gpu_gather                   0.213             21          0.098
-ops::gather_col_u32                  0.169              7          0.042
+orderby_gpu_gather                   0.208             21          0.101
+ops::gather_col_u32                  0.171              7          0.041
 ─────────────────────────────────────────────────────────────────
-TOTAL: 13.799 ms
+TOTAL: 15.091 ms

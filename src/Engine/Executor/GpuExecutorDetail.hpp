@@ -42,37 +42,42 @@ namespace engine::config {
 
 namespace engine {
 
+// GpuBuffer RAII wrapper — defined in standalone header for use by ResultTable.hpp.
+#include "GpuBuffer.hpp"
+
 // Pre-flattened Arrow-style GPU string column buffers.
-// Standalone struct so it can be forward-declared in public headers.
+// Uses GpuBuffer RAII — compiler-generated copy/move/dtor handle retain/release.
 struct FlatStringCol {
-    MTL::Buffer* chars   = nullptr;  // raw character bytes
-    MTL::Buffer* offsets = nullptr;  // uint32_t[rowCount] start offset per string
-    MTL::Buffer* lengths = nullptr;  // uint32_t[rowCount] length per string
+    GpuBuffer chars;    // raw character bytes
+    GpuBuffer offsets;  // uint32_t[rowCount] start offset per string
+    GpuBuffer lengths;  // uint32_t[rowCount] length per string
     uint32_t rowCount   = 0;
     uint32_t totalBytes = 0;
 
+    // Assign from a FlatStringGatherResult (takes ownership, releases old)
+    void takeFrom(MTL::Buffer* c, MTL::Buffer* off, MTL::Buffer* len,
+                  uint32_t rc, uint32_t tb) {
+        chars.reset(c); offsets.reset(off); lengths.reset(len);
+        rowCount = rc; totalBytes = tb;
+    }
+
     void release() {
-        if (chars)   { chars->release();   chars   = nullptr; }
-        if (offsets) { offsets->release();  offsets = nullptr; }
-        if (lengths) { lengths->release();  lengths = nullptr; }
+        chars = nullptr; offsets = nullptr; lengths = nullptr;
         rowCount = 0;
         totalBytes = 0;
     }
 };
 
 // Dictionary-encoded string column: sorted unique strings with per-row IDs.
-// Provides collision-free integer encoding (unlike FNV1a hashes) and O(1) reverse mapping.
-// GPU-native: dictionary IDs are the primary representation on GPU; strings are only
-// materialized at output time. Dict IDs compact/gather like any u32 column.
+// Uses GpuBuffer RAII — compiler-generated copy/move/dtor handle retain/release.
 struct DictEncoded {
     std::vector<std::string> dictionary;  // sorted unique strings
     std::vector<uint32_t> ids;            // per-row dictionary ID (CPU mirror, may be lazy)
-    MTL::Buffer* idsGPU = nullptr;        // per-row dictionary ID (GPU) — primary representation
+    GpuBuffer idsGPU;                     // per-row dictionary ID (GPU) — primary representation
     uint32_t rowCount = 0;
 
     // Lookup: given a string value, return its dictionary ID (or UINT32_MAX if not found)
     uint32_t lookupId(const std::string& value) const {
-        // Binary search since dictionary is sorted
         auto it = std::lower_bound(dictionary.begin(), dictionary.end(), value);
         if (it != dictionary.end() && *it == value)
             return static_cast<uint32_t>(it - dictionary.begin());
@@ -112,24 +117,27 @@ struct DictEncoded {
     // Check if this dict encoding is valid and has data
     bool valid() const { return !dictionary.empty() && (idsGPU || !ids.empty()) && rowCount > 0; }
 
-    // Release GPU resources
+    // Release all resources
     void release() {
-        if (idsGPU) { idsGPU->release(); idsGPU = nullptr; }
+        idsGPU = nullptr;
         ids.clear();
         dictionary.clear();
         rowCount = 0;
     }
 };
 
-// Move EvalContext definition here so it can be shared across translation units
+// Move EvalContext definition here so it can be shared across translation units.
+// NOTE: EvalContext uses implicit (default) copy/move for raw MTL::Buffer* in u32/f32 maps.
+// FlatStringCol/DictEncoded maps handle their own retain/release via their RAII semantics.
+// Call releaseGPU() manually when an EvalContext is no longer needed.
 struct EvalContext {
     // Column data keyed by column name
     std::unordered_map<std::string, std::vector<uint32_t>> u32Cols;
     std::unordered_map<std::string, std::vector<float>> f32Cols;
     
-    // GPU storage - Metal buffers
-    std::unordered_map<std::string, MTL::Buffer*> u32ColsGPU;
-    std::unordered_map<std::string, MTL::Buffer*> f32ColsGPU;
+    // GPU storage - Metal buffers (RAII — auto-retains on copy, auto-releases on destroy)
+    std::unordered_map<std::string, GpuBuffer> u32ColsGPU;
+    std::unordered_map<std::string, GpuBuffer> f32ColsGPU;
     
     // Raw string columns for pattern matching (LIKE, CONTAINS)
     // NOTE: With GPU-native dictionary encoding, stringCols is now a LAZY CACHE.
@@ -155,8 +163,8 @@ struct EvalContext {
     // Active row indices (selection vector)
     std::vector<uint32_t> activeRows;
     
-    // GPU selection vector
-    MTL::Buffer* activeRowsGPU = nullptr;
+    // GPU selection vector (RAII — auto-retains on copy, auto-releases on destroy)
+    GpuBuffer activeRowsGPU;
     uint32_t activeRowsCountGPU = 0;
     
     // Row count
@@ -176,6 +184,38 @@ struct EvalContext {
 
     // Flag to indicate if this context represents a scalar result (even if broadcasted)
     bool isScalarResult = false;
+
+    // ========== GPU buffer lifecycle helpers ==========
+    // All GPU buffer maps use GpuBuffer RAII (retain-on-copy, release-on-destroy).
+    // FlatStringCol/DictEncoded maps use their own RAII.
+    // Call releaseGPU() explicitly for cleanup when an EvalContext is no longer needed.
+
+    void collectRawGPUBuffers(std::unordered_set<MTL::Buffer*>& out) const {
+        for (const auto& [_, buf] : u32ColsGPU) if (buf) out.insert(buf.get());
+        for (const auto& [_, buf] : f32ColsGPU) if (buf) out.insert(buf.get());
+        if (activeRowsGPU) out.insert(activeRowsGPU.get());
+    }
+
+    // Release all GPU buffers held by this struct.
+    // All GPU buffer maps use RAII — clearing triggers destructors.
+    void releaseGPU() {
+        u32ColsGPU.clear();
+        f32ColsGPU.clear();
+        activeRowsGPU = nullptr;
+        activeRowsCountGPU = 0;
+        flatStringCols.clear();
+        dictCols.clear();
+    }
+
+    // Safely release and remove a single GPU buffer from the u32/f32 maps.
+    void releaseU32Col(const std::string& col) {
+        u32ColsGPU.erase(col);  // GpuBuffer destructor releases
+    }
+    void releaseF32Col(const std::string& col) {
+        f32ColsGPU.erase(col);  // GpuBuffer destructor releases
+    }
+
+    // ========== End RAII ==========
 
     // Ensure stringCols[colName] is populated from dictCols (lazy materialization).
     // Call before any code path that needs raw string data (LIKE, CONTAINS).
@@ -205,8 +245,7 @@ struct EvalContext {
                 if (bufRows > compactCount) {
                     MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, activeRowsGPU, compactCount, true);
                     if (compacted) {
-                        // NOTE: do NOT release old idsGPU — may be shared with tableContexts
-                        dict.idsGPU = compacted;
+                        dict.idsGPU.reset(compacted);
                         dict.rowCount = compactCount;
                         dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
                     }
@@ -221,8 +260,7 @@ struct EvalContext {
             if (dict.idsGPU) {
                 MTL::Buffer* gathered = GpuOps::gatherU32(dict.idsGPU, indexBuf, newCount, false);
                 if (gathered) {
-                    dict.idsGPU->release();
-                    dict.idsGPU = gathered;
+                    dict.idsGPU.reset(gathered);
                     dict.rowCount = newCount;
                     dict.ids.clear();
                 }
@@ -238,12 +276,7 @@ struct EvalContext {
                     flat.chars, flat.offsets, flat.lengths,
                     activeRowsGPU, compactCount, true);
                 if (r.chars) {
-                    // NOTE: do NOT release old buffers — may be shared with tableContexts
-                    flat.chars = r.chars;
-                    flat.offsets = r.offsets;
-                    flat.lengths = r.lengths;
-                    flat.rowCount = r.rowCount;
-                    flat.totalBytes = r.totalBytes;
+                    flat.takeFrom(r.chars, r.offsets, r.lengths, r.rowCount, r.totalBytes);
                 }
             }
         }
@@ -257,12 +290,7 @@ struct EvalContext {
                     flat.chars, flat.offsets, flat.lengths,
                     indexBuf, newCount, true);
                 if (r.chars) {
-                    // NOTE: do NOT release old buffers — may be shared with tableContexts
-                    flat.chars = r.chars;
-                    flat.offsets = r.offsets;
-                    flat.lengths = r.lengths;
-                    flat.rowCount = r.rowCount;
-                    flat.totalBytes = r.totalBytes;
+                    flat.takeFrom(r.chars, r.offsets, r.lengths, r.rowCount, r.totalBytes);
                 }
             }
         }
@@ -272,13 +300,9 @@ struct EvalContext {
     // Implementation uses flattenStringCol() free function (declared below struct).
     void ensureFlatStringCol(const std::string& colName);
 
-    // Safely erase a flat string column, releasing its GPU buffers first
+    // Safely erase a flat string column (RAII destructor releases GPU buffers)
     void eraseFlatStringCol(const std::string& colName) {
-        auto it = flatStringCols.find(colName);
-        if (it != flatStringCols.end()) {
-            it->second.release();
-            flatStringCols.erase(it);
-        }
+        flatStringCols.erase(colName);
     }
 
     // Gather all GPU-side columns (u32, f32, dict, flat string) by index array.
@@ -287,14 +311,12 @@ struct EvalContext {
         for (auto& [name, buf] : u32ColsGPU) {
             if (!buf) continue;
             MTL::Buffer* gathered = GpuOps::gatherU32(buf, indices, count);
-            buf->release();
-            buf = gathered;
+            buf.reset(gathered);
         }
         for (auto& [name, buf] : f32ColsGPU) {
             if (!buf) continue;
             MTL::Buffer* gathered = GpuOps::gatherF32(buf, indices, count);
-            buf->release();
-            buf = gathered;
+            buf.reset(gathered);
         }
         compactDictCols(indices, count);
         compactFlatStringCols(indices, count);
@@ -311,10 +333,7 @@ struct EvalContext {
     // Reset active rows tracking (releases activeRowsGPU if set).
     void clearActiveRows() {
         activeRows.clear();
-        if (activeRowsGPU) {
-            activeRowsGPU->release();
-            activeRowsGPU = nullptr;
-        }
+        activeRowsGPU = nullptr; // GpuBuffer RAII releases automatically
         activeRowsCountGPU = 0;
     }
 

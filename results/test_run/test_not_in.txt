@@ -1,56 +1,8 @@
 --- Running (Engine Host) ---
-[Planner] Parsed aliases:
-[Planner]   'sum(l_extendedprice)' -> 'total_price'
-[Planner]   'cnt' -> 'count(*)'
-[Planner]   'total_price' -> 'sum(l_extendedprice)'
-[Planner]   'count(*)' -> 'cnt'
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: ORDER_BY
-[Planner] Traversing: ORDER_BY
-[Planner] Entering children traversal block. Name: order_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_GROUP_BY
-[Planner] Traversing: HASH_GROUP_BY
-[Planner] Entering children traversal block. Name: hash_group_by Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: PROJECTION
-[Planner] Traversing: PROJECTION
-[Planner] Entering children traversal block. Name: projection Children: 1
-[Planner] Traversing node: HASH_JOIN
-[Planner] Traversing: HASH_JOIN
-[Planner] [TraverseNode] Logic for JOIN: HASH_JOIN
-[Planner] Checking RHS capture for Join HASH_JOIN
-[Planner] Inspecting RHS node SEQ_SCAN 
-[Planner] Captured Table orders
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: o_orderkey
 DEBUG: Scan table determined as: 'orders'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=orders
-[Planner] Generating Scan: orders at index 0 Plan: 6161995760
-[Planner] Node SEQ_SCAN  output projections: o_orderkey, 
-[Planner] Traversing node: SEQ_SCAN 
-[Planner] Traversing: SEQ_SCAN 
-[Planner] Entering children traversal block. Name: seq_scan  Children: 0
-[Planner] Parsing Projections for SEQ_SCAN 
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_extendedprice
 DEBUG: Scan table determined as: 'lineitem'
 DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
-[Planner] Generating Scan: lineitem at index 0 Plan: 6162016616
-[Planner] Node SEQ_SCAN  output projections: l_orderkey, l_shipmode, l_extendedprice, 
 [Planner] Creating JOIN 'HASH_JOIN'. CapturedRightTable: 'orders'
 [Planner] Pre-resolved Condition: 'l_orderkey = o_orderkey'
 [Planner] ChildProjs size: 4
@@ -60,106 +12,70 @@ DEBUG: Pushing SCAN node for SEQ_SCAN . Table=lineitem
   #3: o_orderkey
 [Planner] Resolved Condition: 'l_orderkey = o_orderkey'
 DEBUG_JOIN_EMISSION: Node='HASH_JOIN' capturedRHS=true capturedRightTable='orders'
-[Planner] Join Key Analysis: l => lineitem, r => orders
-[Planner] Captured RHS Table: orders
-[Planner] RHS Tables: orders, 
-[Planner] Checking matchesRHS: lineitem
-[Planner] Checking matchesRHS: orders
-[Planner] Node HASH_JOIN output projections: l_orderkey, l_shipmode, l_extendedprice, o_orderkey, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_orderkey
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_extendedprice
-[Planner] Forcing keep of global column: o_orderkey
-[Planner] Node PROJECTION output projections: l_orderkey, l_shipmode, l_extendedprice, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: l_extendedprice
-[Planner] Forcing keep of global column: l_orderkey
-[Planner] Node PROJECTION output projections: l_shipmode, l_extendedprice, 
-[Planner] Parsing agg string: 'count_star()'
-[Planner] Resolved agg: count_star()
-[Planner] Looking up agg alias: 'count_star()'
-[Planner] Found alias for agg: cnt
-[Planner] Pushing spec with outputName='cnt'
-[Planner] Parsing agg string: 'sum(#1)'
-[Planner] Resolved agg: sum(l_extendedprice)
-[Planner] inputExpr 'l_extendedprice' exists in child projections. Treating as Column.
-[Planner] Looking up agg alias: 'sum(l_extendedprice)'
-[Planner] Found alias for agg: total_price
-[Planner] Pushing spec with outputName='total_price'
-[Planner] Node HASH_GROUP_BY output projections: l_shipmode, cnt, total_price, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: cnt
-[Planner] Proj: total_price
-[Planner] Node PROJECTION output projections: l_shipmode, cnt, total_price, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: cnt
-[Planner] Proj: total_price
-[Planner] Node PROJECTION output projections: l_shipmode, cnt, total_price, 
-[Planner] ORDER BY looking up alias: 'count_star()'
-[Planner] Node ORDER_BY output projections: l_shipmode, cnt, total_price, 
-[Planner] Parsing Projections for PROJECTION
-[Planner] Proj: l_shipmode
-[Planner] Proj: cnt
-[Planner] Proj: total_price
-[Planner] Node PROJECTION output projections: l_shipmode, cnt, total_price, 
-[Planner] plan.outputColumns from SQL:
-[Planner]   'l_shipmode'
-[Planner]   'cnt'
-[Planner]   'total_price'
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (130 KB source).
+[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[Exec] GroupBy VERIFY: key mismatches = 0 / 228140
+[Exec] GroupBy VERIFY: CPU grand total = 0.00
+[Exec] GroupBy VERIFY: GPU grand total = 0.00
+[Exec] GroupBy VERIFY: difference = 0.00
+[Exec] GroupBy VERIFY: CPU max key=2 val=0.00
+[Exec] GroupBy VERIFY: GPU max key=1 val=0.00
+[Exec] GroupBy VERIFY: GPU value for CPU max key 2 = 0.00
+[Exec] GroupBy VERIFY: GPU group key=4 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=3 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=6 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=5 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=0 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=2 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: GPU group key=1 val=0.00 EXCEEDS CPU max!
+[Exec] GroupBy VERIFY: 7 GPU groups exceed CPU max revenue
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 cnt|total_price|l_shipmode|
+32796.00|1255379200.00|FOB|
+32789.00|1255204608.00|SHIP|
+32661.00|1238079744.00|TRUCK|
+32639.00|1245425024.00|REG AIR|
+32468.00|1244478336.00|RAIL|
+32419.00|1236174592.00|AIR|
+32368.00|1238255616.00|MAIL|
 ---------------------------------------------------
-Planning time: 19.14 ms
-Data Load Time (Disk+Upload): 12045.23 ms
-GPU kernels time: 12.58 ms
-CPU postprocess time: 90.24 ms
-Total Internal Pipeline time: 12148.05 ms
-Total Host Execution time: 12152.16 ms
-Total Wall time (Plan+Exec): 12171.30 ms
+Planning time: 1.02 ms
+Data Load Time (Disk+Upload): 3717.30 ms
+GPU kernels time: 14.65 ms
+CPU postprocess time: 82.55 ms
+Total Internal Pipeline time: 3814.50 ms
+Total Host Execution time: 3818.64 ms
+Total Wall time (Plan+Exec): 3819.66 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  compact        :    1.987 ms (15.791%) [3 calls]
-  filter         :    3.213 ms (25.527%) [3 calls]
-  gather         :    6.818 ms (54.175%) [14 calls]
-  hash_join_probe_u32:    0.567 ms (4.508%) [1 calls]
+  cast           :    0.178 ms (1.213%) [1 calls]
+  filter         :    3.919 ms (26.759%) [3 calls]
+  gather         :    0.185 ms (1.260%) [1 calls]
+  groupby        :    9.820 ms (67.043%) [3 calls]
+  hash_join_probe_u32:    0.340 ms (2.321%) [1 calls]
+  sort           :    0.205 ms (1.403%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 12.585 ms
-  Kernel invocations: 21
+  TOTAL GPU TIME: 14.647 ms
+  Kernel invocations: 11
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                2.240        6001215       2679.314
-ops::compact_indices                 1.166        6001215       5147.577
-ops::filter_ge_u32_indexed           0.606        1500048       2477.371
-ops::compact_indices_indexed         0.436        1500048       3442.783
-ops::filter_lt_u32_indexed           0.367        1084502       2953.372
-ops::compact_indices_indexed         0.386        1084502       2811.718
-ops::gather_col_u32                  1.207         228140        189.053
-ops::gather_col_u32                  0.322         228140        708.875
-ops::gather_col_u32                  0.528         228140        432.186
-ops::gather_col_u32                  0.281         228140        811.407
-ops::gather_col_f32                  0.504         228140        452.583
-ops::gather_col_u32                  0.404         228140        564.762
-ops::gather_col_u32                  0.468         228140        487.956
-ops::gather_col_u32                  0.460         228140        495.463
-ops::gather_col_u32                  0.468         228140        487.565
-ops::gather_col_f32                  0.470         228140        485.189
-ops::gather_col_u32                  0.613         228140        371.892
-ops::gather_col_u32                  0.517         228140        440.957
-hash_join_probe_write_multi          0.567         228140        402.156
-ops::gather_col_u32                  0.310         228140        736.924
-ops::gather_col_u32                  0.266         228140        858.880
+ops::filter_string_eq                2.541        6001215       2361.559
+ops::filter_ge_u32_indexed           0.830        1500048       1806.379
+ops::filter_lt_u32_indexed           0.548        1084502       1979.773
+hash_join_probe_write_multi          0.340         228140        671.000
+ops::groupby_agg_multi_key_ty        9.084         228140         25.114
+ops::ht_mark_valid                   0.517         524288       1014.507
+ops::ht_extract_compact              0.219              7          0.032
+ops::cast_u32_to_f32                 0.178              7          0.039
+block_sort_kv_u64                    0.000              7          0.000
+orderby_gpu_gather                   0.205             14          0.068
+ops::gather_col_u32                  0.185              7          0.038
 ─────────────────────────────────────────────────────────────────
-TOTAL: 12.585 ms
+TOTAL: 14.647 ms
