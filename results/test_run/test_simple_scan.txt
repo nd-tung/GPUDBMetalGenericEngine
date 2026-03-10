@@ -2,7 +2,7 @@
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -33,30 +33,30 @@ UNITED KINGDOM|
 UNITED STATES|
 VIETNAM|
 ---------------------------------------------------
-Planning time: 0.61 ms
-Data Load Time (Disk+Upload): 22.66 ms
-GPU kernels time: 3.28 ms
-CPU postprocess time: 6.32 ms
-Total Internal Pipeline time: 32.27 ms
-Total Host Execution time: 32.29 ms
-Total Wall time (Plan+Exec): 32.90 ms
+Planning time: 0.59 ms
+Data Load Time (Disk+Upload): 22.94 ms
+GPU kernels time: 3.45 ms
+CPU postprocess time: 6.03 ms
+Total Internal Pipeline time: 32.43 ms
+Total Host Execution time: 32.45 ms
+Total Wall time (Plan+Exec): 33.04 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  gather         :    1.807 ms (55.069%) [2 calls]
-  hash_join_probe_u32:    0.705 ms (21.479%) [1 calls]
-  sort           :    0.770 ms (23.452%) [2 calls]
+  gather         :    1.612 ms (46.671%) [2 calls]
+  hash_join_probe_u32:    0.889 ms (25.748%) [1 calls]
+  sort           :    0.953 ms (27.581%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 3.282 ms
+  TOTAL GPU TIME: 3.453 ms
   Kernel invocations: 5
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi          0.705             25          0.035
+hash_join_probe_write_multi          0.889             25          0.028
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.770             50          0.065
-ops::gather_col_u32                  0.967             25          0.026
-ops::gather_col_u32                  0.841             25          0.030
+orderby_gpu_gather                   0.953             50          0.052
+ops::gather_col_u32                  0.834             25          0.030
+ops::gather_col_u32                  0.777             25          0.032
 ─────────────────────────────────────────────────────────────────
-TOTAL: 3.282 ms
+TOTAL: 3.453 ms

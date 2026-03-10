@@ -28,9 +28,14 @@ struct KernelTiming {
 class KernelTimer {
 public:
     static KernelTimer& instance() {
+        if (s_override) return *s_override;
         static KernelTimer timer;
         return timer;
     }
+    
+    // For testing: inject a custom/mock instance; call resetTestInstance() to restore.
+    static void setTestInstance(KernelTimer* mock) { s_override = mock; }
+    static void resetTestInstance() { s_override = nullptr; }
     
     // Reset all timings for a new query
     void reset() {
@@ -139,6 +144,7 @@ public:
 private:
     KernelTimer() = default;
     
+    static inline KernelTimer* s_override = nullptr;
     mutable std::mutex m_mutex;
     std::vector<KernelTiming> m_timings;
     double m_totalGpuMs = 0.0;

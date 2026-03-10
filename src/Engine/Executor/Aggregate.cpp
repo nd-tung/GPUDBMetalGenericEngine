@@ -1,6 +1,7 @@
 #include "GpuExecutor.hpp"
 #include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
+#include "EngineError.hpp"
 
 #include <iostream>
 #include <limits>
@@ -89,7 +90,7 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
         if (success) return true;
     }
 
-    throw std::runtime_error("GPU Aggregate failed: operation not supported on GPU (CPU fallback disabled).");
+    ENGINE_THROW("GPU Aggregate failed: operation not supported on GPU (CPU fallback disabled).");
 }
 
 } // namespace engine

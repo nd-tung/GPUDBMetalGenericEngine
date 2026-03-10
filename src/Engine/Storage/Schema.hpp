@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <mutex>
 
 namespace engine {
 
@@ -49,17 +50,24 @@ struct TableSchema {
 class SchemaRegistry {
 public:
     static SchemaRegistry& instance() {
+        if (s_override) return *s_override;
         static SchemaRegistry inst;
         return inst;
     }
     
-    // Register a table schema
+    // For testing: inject a custom/mock instance; call resetTestInstance() to restore.
+    static void setTestInstance(SchemaRegistry* mock) { s_override = mock; }
+    static void resetTestInstance() { s_override = nullptr; }
+    
+    // Register a table schema (thread-safe)
     void registerTable(TableSchema schema) {
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_tables[schema.name] = std::move(schema);
     }
     
-    // Get table schema
+    // Get table schema (thread-safe)
     const TableSchema* getTable(const std::string& name) const {
+        std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_tables.find(name);
         return it != m_tables.end() ? &it->second : nullptr;
     }
@@ -210,11 +218,11 @@ public:
         }});
     }
     
-private:
-    SchemaRegistry() {
-        initTPCH();  // Initialize with TPC-H by default
-    }
+    SchemaRegistry() = default;  // Starts empty; call initTPCH() to register TPC-H schema
     
+private:
+    static inline SchemaRegistry* s_override = nullptr;
+    mutable std::mutex m_mutex;
     std::unordered_map<std::string, TableSchema> m_tables;
 };
 

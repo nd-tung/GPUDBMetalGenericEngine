@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <mutex>
 
 // Forward declare Metal types (included in .cpp)
 namespace MTL { class Device; class Buffer; class Library; class CommandQueue; }
@@ -17,9 +18,16 @@ struct GpuColumn {
 };
 
 // Singleton staging cache for GPU buffers.
+// Owns Metal device, library, command queue, and all staged column buffers.
+// Thread-safe: all public methods are guarded by an internal mutex.
 class GpuColumnStore {
 public:
     static GpuColumnStore& instance();
+    ~GpuColumnStore();
+
+    // For testing: inject a custom/mock instance; call resetTestInstance() to restore.
+    static void setTestInstance(GpuColumnStore* mock);
+    static void resetTestInstance();
 
     void initialize(); // lazy Metal device/library acquisition
 
@@ -43,6 +51,10 @@ private:
     GpuColumnStore(const GpuColumnStore&) = delete;
     GpuColumnStore& operator=(const GpuColumnStore&) = delete;
 
+    void initializeImpl(); // must be called with m_mutex held
+
+    static inline GpuColumnStore* s_override = nullptr;
+    mutable std::mutex m_mutex;
     MTL::Device* m_device = nullptr;
     MTL::Library* m_library = nullptr;
     MTL::CommandQueue* m_queue = nullptr;

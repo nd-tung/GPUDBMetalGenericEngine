@@ -5,12 +5,60 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <regex>
+#include <filesystem>
 
 namespace engine {
 
-GpuColumnStore& GpuColumnStore::instance() { static GpuColumnStore inst; return inst; }
+// Resolve #include "..." directives in Metal source for runtime compilation
+// (the runtime newLibraryWithSource API does not support #include).
+static std::string preprocessMetalIncludes(const std::string& source,
+                                           const std::string& baseDir) {
+    std::istringstream stream(source);
+    std::ostringstream out;
+    std::regex includeRe(R"raw(^\s*#include\s+"([^"]+)")raw");    std::string line;
+    while (std::getline(stream, line)) {
+        std::smatch m;
+        if (std::regex_search(line, m, includeRe)) {
+            std::string incPath = baseDir + "/" + m[1].str();
+            std::ifstream incFile(incPath);
+            if (incFile.is_open()) {
+                std::ostringstream inc;
+                inc << incFile.rdbuf();
+                out << inc.str() << "\n";
+            } else {
+                out << "// WARNING: could not resolve " << line << "\n";
+            }
+        } else {
+            out << line << "\n";
+        }
+    }
+    return out.str();
+}
 
-void GpuColumnStore::initialize() {
+GpuColumnStore& GpuColumnStore::instance() {
+    if (s_override) return *s_override;
+    static GpuColumnStore inst;
+    return inst;
+}
+
+void GpuColumnStore::setTestInstance(GpuColumnStore* mock) { s_override = mock; }
+void GpuColumnStore::resetTestInstance() { s_override = nullptr; }
+
+GpuColumnStore::~GpuColumnStore() {
+    // Release all staged column buffers
+    for (auto& [name, col] : m_columns) {
+        if (col.buffer) { col.buffer->release(); col.buffer = nullptr; }
+    }
+    m_columns.clear();
+    // Release Metal infrastructure (order: queue, library, device)
+    if (m_queue)   { m_queue->release();   m_queue = nullptr; }
+    if (m_library) { m_library->release(); m_library = nullptr; }
+    if (m_device)  { m_device->release();  m_device = nullptr; }
+}
+
+// Internal: must be called with m_mutex already held.
+void GpuColumnStore::initializeImpl() {
     if (m_device) return; // already
 
     NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
@@ -41,7 +89,9 @@ void GpuColumnStore::initialize() {
     if (metalFile.is_open()) {
         std::ostringstream oss;
         oss << metalFile.rdbuf();
-        std::string src = oss.str();
+        std::string raw = oss.str();
+        // Resolve #include "..." directives (newLibraryWithSource doesn't support them)
+        std::string src = preprocessMetalIncludes(raw, "kernels");
         auto srcStr = NS::String::string(src.c_str(), NS::UTF8StringEncoding);
         auto opts = MTL::CompileOptions::alloc()->init();
         NS::Error* compileError = nullptr;
@@ -71,9 +121,15 @@ void GpuColumnStore::initialize() {
     pool->release();
 }
 
+void GpuColumnStore::initialize() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    initializeImpl();
+}
+
 GpuColumn* GpuColumnStore::stageFloatColumn(const std::string& name,
                                             const std::vector<float>& data) {
-    initialize();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    initializeImpl();
     if (!m_device || !m_library) return nullptr;
     auto it = m_columns.find(name);
     if (it != m_columns.end()) {
@@ -92,7 +148,8 @@ GpuColumn* GpuColumnStore::stageFloatColumn(const std::string& name,
 
 GpuColumn* GpuColumnStore::stageU32Column(const std::string& name,
                                           const std::vector<uint32_t>& data) {
-    initialize();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    initializeImpl();
     if (!m_device || !m_library) return nullptr;
     auto it = m_columns.find(name);
     if (it != m_columns.end()) {
@@ -110,7 +167,8 @@ GpuColumn* GpuColumnStore::stageU32Column(const std::string& name,
 }
 
 GpuColumn* GpuColumnStore::getColumn(const std::string& name) {
-    initialize();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    initializeImpl();
     auto it = m_columns.find(name);
     if (it == m_columns.end()) return nullptr;
     return &it->second;

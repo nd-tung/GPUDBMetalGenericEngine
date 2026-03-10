@@ -21,44 +21,58 @@ namespace engine {
 // FlatStringCol/DictEncoded maps handle their own retain/release via their RAII semantics.
 // Call releaseGPU() manually when an EvalContext is no longer needed.
 struct EvalContext {
-    // Column data keyed by column name
+    // ======================== Column Data (CPU) ========================
+    // Integer columns keyed by column name (e.g., "l_orderkey" → [1,2,3,...])
     std::unordered_map<std::string, std::vector<uint32_t>> u32Cols;
+    // Float columns keyed by column name (e.g., "l_quantity" → [1.0,2.0,...])
     std::unordered_map<std::string, std::vector<float>> f32Cols;
     
-    // GPU storage - Metal buffers (RAII — auto-retains on copy, auto-releases on destroy)
+    // ======================== Column Data (GPU) ========================
+    // GPU-resident Metal buffers (RAII — auto-retains on copy, auto-releases on destroy)
     std::unordered_map<std::string, GpuBuffer> u32ColsGPU;
     std::unordered_map<std::string, GpuBuffer> f32ColsGPU;
     
-    // Raw string columns for pattern matching (LIKE, CONTAINS)
-    // NOTE: With GPU-native dictionary encoding, stringCols is now a LAZY CACHE.
-    // Primary string data lives in dictCols. stringCols is populated on-demand
-    // when pattern matching needs raw strings (LIKE, CONTAINS) or at final output.
+    // ======================== String Data ========================
+    // Raw string columns — LAZY CACHE populated on-demand from dictCols.
+    // Used for pattern matching (LIKE, CONTAINS) or final output.
     std::unordered_map<std::string, std::vector<std::string>> stringCols;
 
-    // Pre-flattened string columns (Arrow-style GPU buffers, created at load time)
-    // Uses standalone FlatStringCol struct above.
-    // NOTE: Built lazily from dictCols when GPU string pattern matching is needed.
+    // Arrow-style GPU flat string buffers (chars + offsets + lengths).
+    // Built lazily from dictCols when GPU string pattern matching is needed.
     std::unordered_map<std::string, FlatStringCol> flatStringCols;
     
     // Dictionary-encoded string columns — PRIMARY string representation.
-    // Dict IDs are GPU-resident u32 values that propagate through the pipeline
-    // like normal u32 columns (compact, gather, join, groupby all work on IDs).
-    // Strings are only materialized from dict at output time.
+    // Dict IDs are GPU-resident u32 values that propagate through the pipeline.
     std::unordered_map<std::string, DictEncoded> dictCols;
     
-    // Column aliases: maps alias -> canonical name
-    // e.g., "supplier_no" -> "l_suppkey" for CTE aliasing
+    // ======================== Name Resolution ========================
+    // Column aliases: maps alias → canonical name
+    // e.g., "supplier_no" → "l_suppkey" for CTE aliasing
     std::unordered_map<std::string, std::string> columnAliases;
-    
-    // Active row indices (selection vector)
+
+    // ======================== Selection State ========================
+    // Active row indices (CPU-side selection vector)
     std::vector<uint32_t> activeRows;
     
     // GPU selection vector (RAII — auto-retains on copy, auto-releases on destroy)
     GpuBuffer activeRowsGPU;
     uint32_t activeRowsCountGPU = 0;
     
-    // Row count
+    // Total row count for this context
     size_t rowCount = 0;
+
+    // ======================== Execution Metadata ========================
+    // Flag to indicate if this context represents a scalar result (even if broadcasted)
+    bool isScalarResult = false;
+
+    // Which table is "current" for column lookups
+    std::string currentTable;
+    
+    // Columns originating from DELIM_SCAN (correlation keys)
+    std::unordered_set<std::string> isDelimCorrelation;
+
+    // Sequential counter for positional aggregate output columns (#0, #1, ...)
+    size_t aggregateCounter = 0;
 
     // Lazy sync: download activeRowsGPU to CPU activeRows on demand.
     // Call this before any code path that reads activeRows (the CPU vector).
@@ -72,10 +86,7 @@ struct EvalContext {
         }
     }
 
-    // Flag to indicate if this context represents a scalar result (even if broadcasted)
-    bool isScalarResult = false;
-
-    // ========== Column resolution helper ==========
+    // ======================== Column Resolution ========================
     // Resolve a column name to the actual key present in this context.
     // Searches u32ColsGPU, f32ColsGPU, u32Cols, f32Cols, dictCols, stringCols, flatStringCols.
     // Tries: 1) exact, 2) suffix _1.._9, 3) _rhs_ prefix, 4) columnAliases.
@@ -129,37 +140,9 @@ struct EvalContext {
         return "";
     }
 
-    // ========== GPU buffer lifecycle helpers ==========
+    // ======================== Lazy Materialization ========================
     // All GPU buffer maps use GpuBuffer RAII (retain-on-copy, release-on-destroy).
     // FlatStringCol/DictEncoded maps use their own RAII.
-    // Call releaseGPU() explicitly for cleanup when an EvalContext is no longer needed.
-
-    void collectRawGPUBuffers(std::unordered_set<MTL::Buffer*>& out) const {
-        for (const auto& [_, buf] : u32ColsGPU) if (buf) out.insert(buf.get());
-        for (const auto& [_, buf] : f32ColsGPU) if (buf) out.insert(buf.get());
-        if (activeRowsGPU) out.insert(activeRowsGPU.get());
-    }
-
-    // Release all GPU buffers held by this struct.
-    // All GPU buffer maps use RAII — clearing triggers destructors.
-    void releaseGPU() {
-        u32ColsGPU.clear();
-        f32ColsGPU.clear();
-        activeRowsGPU = nullptr;
-        activeRowsCountGPU = 0;
-        flatStringCols.clear();
-        dictCols.clear();
-    }
-
-    // Safely release and remove a single GPU buffer from the u32/f32 maps.
-    void releaseU32Col(const std::string& col) {
-        u32ColsGPU.erase(col);  // GpuBuffer destructor releases
-    }
-    void releaseF32Col(const std::string& col) {
-        f32ColsGPU.erase(col);  // GpuBuffer destructor releases
-    }
-
-    // ========== End RAII ==========
 
     // Ensure stringCols[colName] is populated from dictCols (lazy materialization).
     // Call before any code path that needs raw string data (LIKE, CONTAINS).
@@ -180,6 +163,8 @@ struct EvalContext {
         auto it = dictCols.find(colName);
         return it != dictCols.end() && it->second.valid();
     }
+
+    // ======================== Compaction ========================
 
     // Compact dictCols using activeRowsGPU (GPU gather of dict IDs)
     void compactDictCols(uint32_t compactCount) {
@@ -240,6 +225,8 @@ struct EvalContext {
         }
     }
 
+    // ======================== Bulk GPU Operations ========================
+
     // Ensure flatStringCols[colName] is built from dictCols or stringCols (lazy).
     // Implementation uses flattenStringCol() free function (declared below struct).
     void ensureFlatStringCol(const std::string& colName);
@@ -280,16 +267,6 @@ struct EvalContext {
         activeRowsGPU = nullptr; // GpuBuffer RAII releases automatically
         activeRowsCountGPU = 0;
     }
-
-    // Which table is "current" for column lookups
-    std::string currentTable;
-    
-    // Columns originating from DELIM_SCAN (correlation keys)
-    // These should be prioritized during join column name collision resolution
-    std::unordered_set<std::string> isDelimCorrelation;
-
-    // Sequential counter for positional aggregate output columns (#0, #1, ...)
-    size_t aggregateCounter = 0;
 };
 
 } // namespace engine

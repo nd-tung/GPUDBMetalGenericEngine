@@ -2,54 +2,54 @@
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 revenue|n_name|
-55502044.00|INDONESIA|
-55295088.00|VIETNAM|
-53724496.00|CHINA|
-52035508.00|INDIA|
-45410164.00|JAPAN|
+55502048.00|INDONESIA|
+55295100.00|VIETNAM|
+53724488.00|CHINA|
+52035524.00|INDIA|
+45410176.00|JAPAN|
 ---------------------------------------------------
-Planning time: 1.92 ms
-Data Load Time (Disk+Upload): 2970.47 ms
-GPU kernels time: 5.16 ms
-CPU postprocess time: 26.65 ms
-Total Internal Pipeline time: 3002.28 ms
-Total Host Execution time: 3002.39 ms
-Total Wall time (Plan+Exec): 3004.31 ms
+Planning time: 1.88 ms
+Data Load Time (Disk+Upload): 3197.86 ms
+GPU kernels time: 4.93 ms
+CPU postprocess time: 25.84 ms
+Total Internal Pipeline time: 3228.63 ms
+Total Host Execution time: 3228.73 ms
+Total Wall time (Plan+Exec): 3230.61 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    1.677 ms (32.485%) [4 calls]
-  gather         :    0.203 ms (3.932%) [1 calls]
-  groupby        :    0.914 ms (17.709%) [3 calls]
-  hash_join_probe_u32:    1.822 ms (35.308%) [4 calls]
-  hash_join_probe_u64:    0.335 ms (6.484%) [1 calls]
-  sort           :    0.211 ms (4.082%) [2 calls]
+  filter         :    1.573 ms (31.894%) [4 calls]
+  gather         :    0.193 ms (3.903%) [1 calls]
+  groupby        :    0.901 ms (18.260%) [3 calls]
+  hash_join_probe_u32:    1.753 ms (35.544%) [4 calls]
+  hash_join_probe_u64:    0.313 ms (6.340%) [1 calls]
+  sort           :    0.200 ms (4.059%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 5.161 ms
+  TOTAL GPU TIME: 4.933 ms
   Kernel invocations: 15
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.291              5          0.017
-hash_join_probe_write_multi          0.233             25          0.107
-ops::filter_le_u32                   0.281         150000        533.413
-hash_join_probe_write_multi          0.399         149999        376.409
-ops::filter_ge_u32                   0.592        1500000       2534.319
-ops::filter_lt_u32_indexed           0.513        1046266       2040.662
-hash_join_probe_write_multi          0.326         227597        698.686
-hash_join_probe_write_multi          0.865        6001215       6936.153
-ops::join_probe_u64                  0.335         184082        550.045
-ops::groupby_agg_multi_key_ty        0.487           7243         14.869
-ops::ht_mark_valid                   0.214          16384         76.501
-ops::ht_extract_compact              0.213              5          0.024
+ops::filter_string_eq                0.243              5          0.021
+hash_join_probe_write_multi          0.230             25          0.109
+ops::filter_le_u32                   0.266         150000        564.175
+hash_join_probe_write_multi          0.399         149999        375.662
+ops::filter_ge_u32                   0.562        1500000       2668.446
+ops::filter_lt_u32_indexed           0.502        1046266       2082.121
+hash_join_probe_write_multi          0.330         227597        689.602
+hash_join_probe_write_multi          0.794        6001215       7559.786
+ops::join_probe_u64                  0.313         184082        588.512
+ops::groupby_agg_multi_key_ty        0.477           7243         15.177
+ops::ht_mark_valid                   0.216          16384         75.954
+ops::ht_extract_compact              0.208              5          0.024
 block_sort_kv_u64                    0.000              5          0.000
-orderby_gpu_gather                   0.211              5          0.024
-ops::gather_col_u32                  0.203              5          0.025
+orderby_gpu_gather                   0.200              5          0.025
+ops::gather_col_u32                  0.193              5          0.026
 ─────────────────────────────────────────────────────────────────
-TOTAL: 5.161 ms
+TOTAL: 4.933 ms

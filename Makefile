@@ -44,7 +44,7 @@ FRAMEWORKS = -framework Metal -framework Foundation -framework QuartzCore
 # Source files
 SOURCES = $(shell find $(SOURCE_DIR) -name '*.cpp')
 OBJECTS = $(SOURCES:$(SOURCE_DIR)/%.cpp=$(OBJ_DIR)/%.o)
-KERNELS = $(wildcard $(KERNEL_DIR)/*.metal)
+KERNELS = $(wildcard $(KERNEL_DIR)/*.metal) $(wildcard $(KERNEL_DIR)/*.h)
 
 # Target executable
 TARGET = $(BIN_DIR)/$(PROJECT_NAME)
@@ -78,7 +78,7 @@ $(TARGET): $(OBJECTS) | $(BIN_DIR)
 # Build Metal kernels (only when metal CLI is available)
 $(KERNEL_AIR): $(KERNELS) | $(BUILD_SENTINEL)
 	@echo "Compiling Metal kernels (.air)..."
-	$(METAL) -c $(KERNEL_DIR)/Operators.metal -o $(KERNEL_AIR)
+	$(METAL) -I $(KERNEL_DIR) -c $(KERNEL_DIR)/Operators.metal -o $(KERNEL_AIR)
 
 $(KERNEL_METALLIB): $(KERNEL_AIR)
 	@echo "Linking Metal library (.metallib)..."

@@ -270,7 +270,7 @@ std::vector<std::string> GpuExecutor::getUnsupportedFeatures(const Plan& plan) {
     for (const auto& node : plan.nodes) {
         if (node.type == IRNode::Type::GroupBy) {
             const auto& gb = node.asGroupBy();
-            if (gb.keys.size() > 8) {
+            if (gb.keys.size() > engine::config::kMaxGroupByKeys) {
                 blockers.push_back("GROUP BY with >8 keys");
             }
         }
@@ -284,16 +284,132 @@ std::vector<std::string> GpuExecutor::getUnsupportedFeatures(const Plan& plan) {
 // Extracted node handlers + post-processing helpers for execute()
 // ============================================================================
 
+// Helper: DELIM_SCAN deduplication — materialize GPU→CPU, find correlation
+// columns, dedup, and strip non-correlation data from the context.
+static void delimScanDedup(
+    EvalContext& ctx, const std::string& tableKey,
+    const std::unordered_map<std::string, std::vector<std::string>>& delimCorrelationCols,
+    const std::vector<std::string>& scanColumns,
+    bool markCorrelation, bool debug)
+{
+    if (ctx.rowCount <= 1) return;
+
+    // Materialize GPU data to CPU if needed
+    for (auto& [name, buf] : ctx.u32ColsGPU) {
+        if (buf && (!ctx.u32Cols.count(name) || ctx.u32Cols.at(name).empty())) {
+            ctx.u32Cols[name].resize(ctx.rowCount);
+            memcpy(ctx.u32Cols[name].data(), buf->contents(), ctx.rowCount * sizeof(uint32_t));
+        }
+    }
+    for (auto& [name, buf] : ctx.f32ColsGPU) {
+        if (buf && (!ctx.f32Cols.count(name) || ctx.f32Cols.at(name).empty())) {
+            ctx.f32Cols[name].resize(ctx.rowCount);
+            memcpy(ctx.f32Cols[name].data(), buf->contents(), ctx.rowCount * sizeof(float));
+        }
+    }
+
+    // Prefer correlation columns from DELIM_JOIN if available
+    std::vector<std::string> dedupCols;
+    for (const auto& [grp, cols] : delimCorrelationCols) {
+        if (tableKey.find(grp) == 0 || grp.find(tableKey) == 0) {
+            for (const auto& c : cols) {
+                if (ctx.u32Cols.count(c) && !ctx.u32Cols.at(c).empty())
+                    dedupCols.push_back(c);
+            }
+        }
+    }
+    // Fallback: use all u32 scan columns
+    if (dedupCols.empty()) {
+        for (const auto& c : scanColumns) {
+            if (ctx.u32Cols.count(c) && !ctx.u32Cols.at(c).empty())
+                dedupCols.push_back(c);
+        }
+    }
+
+    if (debug) {
+        std::cerr << "[Exec] DELIM_SCAN dedup: dedupCols=[";
+        for (size_t ci = 0; ci < dedupCols.size(); ++ci) { if (ci) std::cerr << ","; std::cerr << dedupCols[ci]; }
+        std::cerr << "]\n";
+    }
+    if (dedupCols.empty()) return;
+
+    uint32_t newCount = deduplicateContext(ctx, dedupCols, debug);
+    if (newCount > 0) {
+        ctx.f32Cols.clear(); ctx.f32ColsGPU.clear(); ctx.stringCols.clear();
+        std::set<std::string> keepCols(dedupCols.begin(), dedupCols.end());
+        for (auto it2 = ctx.u32Cols.begin(); it2 != ctx.u32Cols.end(); ) {
+            if (keepCols.find(it2->first) == keepCols.end()) it2 = ctx.u32Cols.erase(it2);
+            else ++it2;
+        }
+        for (auto it2 = ctx.u32ColsGPU.begin(); it2 != ctx.u32ColsGPU.end(); ) {
+            if (keepCols.find(it2->first) == keepCols.end()) it2 = ctx.u32ColsGPU.erase(it2);
+            else ++it2;
+        }
+        if (markCorrelation) {
+            if (debug) std::cerr << "[Exec] DELIM_SCAN: stripped to correlation cols only: [" << dedupCols.size() << " cols]\n";
+            for (const auto& dc : dedupCols)
+                ctx.isDelimCorrelation.insert(dc);
+        }
+    }
+}
+
+// Helper: Filter an EvalContext to only keep columns referenced by a scan
+// node's projection list and pushed-down filter, supporting instance suffixes.
+static void filterContextColumns(
+    EvalContext& ctx, const std::vector<std::string>& scanColumns,
+    const TypedExprPtr& scanFilter, bool debug)
+{
+    if (scanColumns.empty()) return;
+
+    std::set<std::string> keepCols(scanColumns.begin(), scanColumns.end());
+    if (scanFilter) collectColumnsFromExpr(scanFilter, keepCols);
+
+    auto shouldKeep = [&](const std::string& colName) -> bool {
+        if (keepCols.count(colName)) return true;
+        auto lastUnderscore = colName.rfind('_');
+        if (lastUnderscore != std::string::npos) {
+            std::string suffix = colName.substr(lastUnderscore + 1);
+            bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
+            if (allDigits && keepCols.count(colName.substr(0, lastUnderscore)))
+                return true;
+        }
+        return false;
+    };
+
+    for (auto cit = ctx.u32Cols.begin(); cit != ctx.u32Cols.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.u32Cols.erase(cit); else ++cit;
+    for (auto cit = ctx.u32ColsGPU.begin(); cit != ctx.u32ColsGPU.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.u32ColsGPU.erase(cit); else ++cit;
+    for (auto cit = ctx.f32Cols.begin(); cit != ctx.f32Cols.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.f32Cols.erase(cit); else ++cit;
+    for (auto cit = ctx.f32ColsGPU.begin(); cit != ctx.f32ColsGPU.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.f32ColsGPU.erase(cit); else ++cit;
+    for (auto cit = ctx.stringCols.begin(); cit != ctx.stringCols.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.stringCols.erase(cit); else ++cit;
+    for (auto cit = ctx.flatStringCols.begin(); cit != ctx.flatStringCols.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.flatStringCols.erase(cit); else ++cit;
+    for (auto cit = ctx.dictCols.begin(); cit != ctx.dictCols.end(); )
+        if (!shouldKeep(cit->first)) cit = ctx.dictCols.erase(cit); else ++cit;
+
+    if (debug) {
+        std::cerr << "[Exec] Scan column filter: kept cols:";
+        for (const auto& c : keepCols) std::cerr << " " << c;
+        std::cerr << "\n";
+    }
+}
+
 static void handleExecScanNode(
     const IRScan& scan, size_t nodeIdx, const Plan& plan,
     bool debug, EvalContext& currentCtx,
-    std::unordered_map<std::string, EvalContext>& tableContexts,
     const std::map<size_t, ScanInstance>& scanInstanceMap,
     const std::unordered_map<std::string, std::vector<std::string>>& delimCorrelationCols,
-    std::vector<EvalContext>& savedPipelines,
-    std::vector<std::set<std::string>>& savedPipelineTables,
-    std::set<std::string>& joinedTables, bool& hasPipeline
+    GpuExecutor::JoinPipelineState& state
 ) {
+    auto& tableContexts = state.tableContexts;
+    auto& savedPipelines = state.savedPipelines;
+    auto& savedPipelineTables = state.savedPipelineTables;
+    auto& joinedTables = state.joinedTables;
+    auto& hasPipeline = state.hasPipeline;
 
     // Skip empty scans (DELIM_SCAN markers)
     if (scan.table.empty()) {
@@ -412,64 +528,7 @@ static void handleExecScanNode(
             // DELIM_SCAN dedup for build-side tables too
             if (scan.isDelimScan && !scan.columns.empty()) {
                 EvalContext& tableCtx = tableContexts[tableKey];
-                if (tableCtx.rowCount > 1) {
-                    // First, materialize GPU data to CPU if needed
-                    for (auto& [name, buf] : tableCtx.u32ColsGPU) {
-                        if (buf && (!tableCtx.u32Cols.count(name) || tableCtx.u32Cols.at(name).empty())) {
-                            tableCtx.u32Cols[name].resize(tableCtx.rowCount);
-                            memcpy(tableCtx.u32Cols[name].data(), buf->contents(), tableCtx.rowCount * sizeof(uint32_t));
-                        }
-                    }
-                    for (auto& [name, buf] : tableCtx.f32ColsGPU) {
-                        if (buf && (!tableCtx.f32Cols.count(name) || tableCtx.f32Cols.at(name).empty())) {
-                            tableCtx.f32Cols[name].resize(tableCtx.rowCount);
-                            memcpy(tableCtx.f32Cols[name].data(), buf->contents(), tableCtx.rowCount * sizeof(float));
-                        }
-                    }
-                    std::vector<std::string> dedupCols;
-                    // Prefer correlation columns from DELIM_JOIN if available
-                    std::string baseDelim = tableKey;
-                    // Strip instance suffix (e.g., tmpl_delim_lhs_11_1 -> tmpl_delim_lhs_11)
-                    for (const auto& [grp, cols] : delimCorrelationCols) {
-                        if (baseDelim.find(grp) == 0 || grp.find(baseDelim) == 0) {
-                            for (const auto& c : cols) {
-                                if (tableCtx.u32Cols.count(c) && !tableCtx.u32Cols.at(c).empty())
-                                    dedupCols.push_back(c);
-                            }
-                        }
-                    }
-                    // Fallback: use all u32 scan columns if no correlation cols found
-                    if (dedupCols.empty()) {
-                        for (const auto& c : scan.columns) {
-                            if (tableCtx.u32Cols.count(c) && !tableCtx.u32Cols.at(c).empty()) {
-                                dedupCols.push_back(c);
-                            }
-                        }
-                    }
-                    if (!dedupCols.empty()) {
-                        uint32_t newCount = deduplicateContext(tableCtx, dedupCols, debug);
-                        if (newCount > 0) {
-                            // Strip payload columns
-                            tableCtx.f32Cols.clear();
-                            tableCtx.f32ColsGPU.clear();
-                            tableCtx.stringCols.clear();
-                            // Also strip non-correlation u32 columns
-                            {
-                                std::set<std::string> keepCols(dedupCols.begin(), dedupCols.end());
-                                for (auto it2 = tableCtx.u32Cols.begin(); it2 != tableCtx.u32Cols.end(); ) {
-                                    if (keepCols.find(it2->first) == keepCols.end())
-                                        it2 = tableCtx.u32Cols.erase(it2);
-                                    else ++it2;
-                                }
-                                for (auto it2 = tableCtx.u32ColsGPU.begin(); it2 != tableCtx.u32ColsGPU.end(); ) {
-                                    if (keepCols.find(it2->first) == keepCols.end())
-                                        it2 = tableCtx.u32ColsGPU.erase(it2);
-                                    else ++it2;
-                                }
-                            }
-                        }
-                    }
-                }
+                delimScanDedup(tableCtx, tableKey, delimCorrelationCols, scan.columns, false, debug);
             }
             if (debug) {
                 std::cerr << "[Exec] Scan " << tableKey << " (for join build): " 
@@ -496,140 +555,14 @@ static void handleExecScanNode(
             // Filter context to only include columns needed by this scan
             // This prevents extra columns (e.g., string match cols) from
             // leaking into the pipeline and causing name collisions later
-            if (!scan.columns.empty()) {
-                std::set<std::string> keepCols(scan.columns.begin(), scan.columns.end());
-                // Also keep columns referenced by the scan's pushed-down filter
-                if (scan.filter) {
-                    collectColumnsFromExpr(scan.filter, keepCols);
-                }
-                // Helper: check if a column name (possibly with instance suffix) should be kept
-                auto shouldKeep = [&](const std::string& colName) -> bool {
-                    if (keepCols.count(colName)) return true;
-                    // Check without instance suffix (e.g., "n_nationkey_2" -> "n_nationkey")
-                    auto lastUnderscore = colName.rfind('_');
-                    if (lastUnderscore != std::string::npos) {
-                        std::string suffix = colName.substr(lastUnderscore + 1);
-                        bool allDigits = !suffix.empty() && std::all_of(suffix.begin(), suffix.end(), ::isdigit);
-                        if (allDigits) {
-                            std::string baseName = colName.substr(0, lastUnderscore);
-                            if (keepCols.count(baseName)) return true;
-                        }
-                    }
-                    return false;
-                };
-                // Apply filter to u32/f32/string columns
-                for (auto cit = currentCtx.u32Cols.begin(); cit != currentCtx.u32Cols.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.u32Cols.erase(cit);
-                    else ++cit;
-                }
-                for (auto cit = currentCtx.u32ColsGPU.begin(); cit != currentCtx.u32ColsGPU.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.u32ColsGPU.erase(cit);
-                    else ++cit;
-                }
-                for (auto cit = currentCtx.f32Cols.begin(); cit != currentCtx.f32Cols.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.f32Cols.erase(cit);
-                    else ++cit;
-                }
-                for (auto cit = currentCtx.f32ColsGPU.begin(); cit != currentCtx.f32ColsGPU.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.f32ColsGPU.erase(cit);
-                    else ++cit;
-                }
-                for (auto cit = currentCtx.stringCols.begin(); cit != currentCtx.stringCols.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.stringCols.erase(cit);
-                    else ++cit;
-                }
-                for (auto cit = currentCtx.flatStringCols.begin(); cit != currentCtx.flatStringCols.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.flatStringCols.erase(cit);
-                    else ++cit;
-                }
-                for (auto cit = currentCtx.dictCols.begin(); cit != currentCtx.dictCols.end(); ) {
-                    if (!shouldKeep(cit->first))
-                        cit = currentCtx.dictCols.erase(cit);
-                    else ++cit;
-                }
-                if (debug) {
-                    std::cerr << "[Exec] Scan column filter: kept cols:";
-                    for (const auto& c : keepCols) std::cerr << " " << c;
-                    std::cerr << "\n";
-                }
-            }
+            filterContextColumns(currentCtx, scan.columns, scan.filter, debug);
 
             // DELIM_SCAN deduplication: In DuckDB's decorrelated plans,
             // DELIM_SCAN produces the DISTINCT set of correlated keys,
             // while COLUMN_DATA_SCAN produces the full original data.
             // Deduplicate by the scan's projected columns to get distinct keys.
-            if (scan.isDelimScan && !scan.columns.empty() && currentCtx.rowCount > 1) {
-                // First, materialize GPU data to CPU if needed
-                for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-                    if (buf && (!currentCtx.u32Cols.count(name) || currentCtx.u32Cols.at(name).empty())) {
-                        currentCtx.u32Cols[name].resize(currentCtx.rowCount);
-                        memcpy(currentCtx.u32Cols[name].data(), buf->contents(), currentCtx.rowCount * sizeof(uint32_t));
-                    }
-                }
-                for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-                    if (buf && (!currentCtx.f32Cols.count(name) || currentCtx.f32Cols.at(name).empty())) {
-                        currentCtx.f32Cols[name].resize(currentCtx.rowCount);
-                        memcpy(currentCtx.f32Cols[name].data(), buf->contents(), currentCtx.rowCount * sizeof(float));
-                    }
-                }
-                // Find correlation columns for DELIM_SCAN dedup
-                std::vector<std::string> dedupCols;
-                // Prefer correlation columns from DELIM_JOIN if available
-                for (const auto& [grp, cols] : delimCorrelationCols) {
-                    if (tableKey.find(grp) == 0 || grp.find(tableKey) == 0) {
-                        for (const auto& c : cols) {
-                            if (currentCtx.u32Cols.count(c) && !currentCtx.u32Cols.at(c).empty())
-                                dedupCols.push_back(c);
-                        }
-                    }
-                }
-                // Fallback: use all u32 scan columns
-                if (dedupCols.empty()) {
-                    for (const auto& c : scan.columns) {
-                        if (currentCtx.u32Cols.count(c) && !currentCtx.u32Cols.at(c).empty()) {
-                            dedupCols.push_back(c);
-                        }
-                    }
-                }
-                if (debug) {
-                    std::cerr << "[Exec] DELIM_SCAN dedup: dedupCols=[";
-                    for (size_t ci=0; ci<dedupCols.size(); ++ci) { if (ci) std::cerr << ","; std::cerr << dedupCols[ci]; }
-                    std::cerr << "]\n";
-                }
-                if (!dedupCols.empty()) {
-                    uint32_t newCount = deduplicateContext(currentCtx, dedupCols, debug);
-                    if (newCount > 0) {
-                        // Strip non-correlation columns from DELIM_SCAN context
-                        currentCtx.f32Cols.clear();
-                        currentCtx.f32ColsGPU.clear();
-                        currentCtx.stringCols.clear();
-                        // Also strip non-correlation u32 columns
-                        {
-                            std::set<std::string> keepCols(dedupCols.begin(), dedupCols.end());
-                            for (auto it2 = currentCtx.u32Cols.begin(); it2 != currentCtx.u32Cols.end(); ) {
-                                if (keepCols.find(it2->first) == keepCols.end())
-                                    it2 = currentCtx.u32Cols.erase(it2);
-                                else ++it2;
-                            }
-                            for (auto it2 = currentCtx.u32ColsGPU.begin(); it2 != currentCtx.u32ColsGPU.end(); ) {
-                                if (keepCols.find(it2->first) == keepCols.end())
-                                    it2 = currentCtx.u32ColsGPU.erase(it2);
-                                else ++it2;
-                            }
-                        }
-                        if (debug) std::cerr << "[Exec] DELIM_SCAN: stripped to correlation cols only: [" << dedupCols.size() << " cols]\n";
-                        // Mark these columns as DELIM correlation for join priority
-                        for (const auto& dc : dedupCols) {
-                            currentCtx.isDelimCorrelation.insert(dc);
-                        }
-                    }
-                }
+            if (scan.isDelimScan && !scan.columns.empty()) {
+                delimScanDedup(currentCtx, tableKey, delimCorrelationCols, scan.columns, true, debug);
             }
 
             // Alias ps_partkey -> p_partkey for correlated subquery contexts
@@ -685,6 +618,211 @@ static void handleExecScanNode(
     }
 }
 
+// -- Extracted: compactTableResultAfterFilter --
+// Compact tableResult columns via GPU gather using activeRows indices.
+// Only compacts when tableResult row count matches the pre-filter context size.
+static void compactTableResultAfterFilter(EvalContext& ctx, TableResult& tableResult, bool debug) {
+    if (tableResult.u32Cols.empty() && tableResult.f32Cols.empty()) return;
+
+    // Find the physical buffer size (pre-filter row count)
+    size_t physicalRows = 0;
+    for (const auto& [name, buf] : ctx.u32ColsGPU) {
+        if (buf) { physicalRows = buf->length() / sizeof(uint32_t); break; }
+    }
+    if (physicalRows == 0) {
+        for (const auto& [name, buf] : ctx.f32ColsGPU) {
+            if (buf) { physicalRows = buf->length() / sizeof(float); break; }
+        }
+    }
+    bool sizeMatch = (tableResult.rowCount == physicalRows) ||
+                     (physicalRows == 0 && !tableResult.u32Cols.empty() &&
+                      tableResult.u32Cols[0].size() == ctx.activeRowsCountGPU);
+
+    if (sizeMatch && ctx.activeRowsCountGPU > 0 && ctx.activeRowsGPU) {
+        uint32_t arCount = ctx.activeRowsCountGPU;
+        auto& s = GpuColumnStore::instance();
+        for (size_t ci = 0; ci < tableResult.u32Cols.size(); ++ci) {
+            auto& col = tableResult.u32Cols[ci];
+            MTL::Buffer* gpuBuf = nullptr;
+            if (ci < tableResult.u32Names.size()) {
+                auto it = ctx.u32ColsGPU.find(tableResult.u32Names[ci]);
+                if (it != ctx.u32ColsGPU.end()) gpuBuf = it->second;
+            }
+            if (gpuBuf) {
+                MTL::Buffer* dst = GpuOps::gatherU32(gpuBuf, ctx.activeRowsGPU, arCount);
+                col.resize(arCount);
+                std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
+                dst->release();
+            } else {
+                MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, arCount);
+                col.resize(arCount);
+                std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
+                src->release(); dst->release();
+            }
+        }
+        for (size_t ci = 0; ci < tableResult.f32Cols.size(); ++ci) {
+            auto& col = tableResult.f32Cols[ci];
+            MTL::Buffer* gpuBuf = nullptr;
+            if (ci < tableResult.f32Names.size()) {
+                auto it = ctx.f32ColsGPU.find(tableResult.f32Names[ci]);
+                if (it != ctx.f32ColsGPU.end()) gpuBuf = it->second;
+            }
+            if (gpuBuf) {
+                MTL::Buffer* dst = GpuOps::gatherF32(gpuBuf, ctx.activeRowsGPU, arCount);
+                col.resize(arCount);
+                std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
+                dst->release();
+            } else {
+                MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, arCount);
+                col.resize(arCount);
+                std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
+                src->release(); dst->release();
+            }
+        }
+        for (auto& col : tableResult.stringCols) {
+            bool gpuDone = false;
+            size_t colIdx = &col - &tableResult.stringCols[0];
+            if (colIdx < tableResult.stringNames.size()) {
+                const auto& colName = tableResult.stringNames[colIdx];
+                auto fit = ctx.flatStringCols.find(colName);
+                if (fit != ctx.flatStringCols.end() && fit->second.chars) {
+                    auto r = GpuOps::gatherFlatString(
+                        fit->second.chars, fit->second.offsets, fit->second.lengths,
+                        ctx.activeRowsGPU, arCount, true);
+                    if (r.chars) {
+                        const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
+                        const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
+                        const char* ch = static_cast<const char*>(r.chars->contents());
+                        col.resize(arCount);
+                        for (uint32_t i = 0; i < arCount; ++i) {
+                            col[i].assign(ch + offs[i], lens[i]);
+                        }
+                        gpuDone = true;
+                    }
+                }
+            }
+            if (!gpuDone) {
+                const uint32_t* arPtr = static_cast<const uint32_t*>(ctx.activeRowsGPU->contents());
+                std::vector<std::string> filtered;
+                filtered.reserve(arCount);
+                for (uint32_t i = 0; i < arCount; ++i) {
+                    uint32_t idx = arPtr[i];
+                    if (idx < col.size()) filtered.push_back(col[idx]);
+                }
+                col = std::move(filtered);
+            }
+        }
+        tableResult.rowCount = arCount;
+    } else if (!sizeMatch) {
+        if (debug) std::cerr << "[Exec] Filter: clearing stale tableResult (size "
+                             << tableResult.rowCount << " != physical " << physicalRows << ")\n";
+        tableResult.u32Cols.clear();
+        tableResult.u32Names.clear();
+        tableResult.f32Cols.clear();
+        tableResult.f32Names.clear();
+        tableResult.stringCols.clear();
+        tableResult.stringNames.clear();
+        tableResult.order.clear();
+        tableResult.rowCount = 0;
+    }
+}
+
+// -- Extracted: compactContextAfterFilter --
+// Compact all context columns (GPU + CPU) using activeRows, then
+// invalidate stale CPU mirrors and clear activeRows state.
+static void compactContextAfterFilter(EvalContext& ctx) {
+    if (ctx.activeRowsCountGPU == 0 || !ctx.activeRowsGPU) return;
+
+    uint32_t compactCount = ctx.activeRowsCountGPU;
+
+    // GPU-direct compaction: gather u32/f32 GPU columns
+    for (auto& [name, buf] : ctx.u32ColsGPU) {
+        if (buf) {
+            auto compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, compactCount);
+            if (compacted) { buf.reset(compacted); }
+        }
+    }
+    for (auto& [name, buf] : ctx.f32ColsGPU) {
+        if (buf) {
+            auto compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, compactCount);
+            if (compacted) { buf.reset(compacted); }
+        }
+    }
+
+    // Compact CPU-only columns via GPU gather — retain gathered GPU buffer
+    {
+        auto& s = GpuColumnStore::instance();
+        for (auto& [name, col] : ctx.u32Cols) {
+            if (col.size() > compactCount) {
+                auto itGpu = ctx.u32ColsGPU.find(name);
+                if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
+                    col.resize(compactCount);
+                    std::memcpy(col.data(), itGpu->second->contents(), compactCount * sizeof(uint32_t));
+                } else {
+                    MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, compactCount);
+                    col.resize(compactCount);
+                    std::memcpy(col.data(), dst->contents(), compactCount * sizeof(uint32_t));
+                    ctx.u32ColsGPU[name].reset(dst);
+                    src->release();
+                }
+            }
+        }
+        for (auto& [name, col] : ctx.f32Cols) {
+            if (col.size() > compactCount) {
+                auto itGpu = ctx.f32ColsGPU.find(name);
+                if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
+                    col.resize(compactCount);
+                    std::memcpy(col.data(), itGpu->second->contents(), compactCount * sizeof(float));
+                } else {
+                    MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
+                    MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, compactCount);
+                    col.resize(compactCount);
+                    std::memcpy(col.data(), dst->contents(), compactCount * sizeof(float));
+                    ctx.f32ColsGPU[name].reset(dst);
+                    src->release();
+                }
+            }
+        }
+    }
+    // GPU-native dict compaction
+    ctx.compactDictCols(compactCount);
+    // GPU-native flat string compaction
+    ctx.compactFlatStringCols(compactCount);
+    // Invalidate stale stringCols
+    for (auto& [name, col] : ctx.stringCols) {
+        auto dit = ctx.dictCols.find(name);
+        auto fit = ctx.flatStringCols.find(name);
+        if ((dit != ctx.dictCols.end() && dit->second.valid()) ||
+            (fit != ctx.flatStringCols.end() && fit->second.chars)) {
+            col.clear();
+        } else if (col.size() > compactCount) {
+            const uint32_t* arPtr = static_cast<const uint32_t*>(ctx.activeRowsGPU->contents());
+            std::vector<std::string> filtered;
+            filtered.reserve(compactCount);
+            for (uint32_t i = 0; i < compactCount; ++i) {
+                uint32_t idx = arPtr[i];
+                if (idx < col.size()) filtered.push_back(col[idx]);
+            }
+            col = std::move(filtered);
+        }
+    }
+
+    // Invalidate stale CPU mirrors
+    for (auto& [name, buf] : ctx.u32ColsGPU) {
+        if (buf) ctx.u32Cols[name].clear();
+    }
+    for (auto& [name, buf] : ctx.f32ColsGPU) {
+        if (buf) ctx.f32Cols[name].clear();
+    }
+
+    ctx.activeRows.clear();
+    ctx.activeRowsGPU = nullptr;
+    ctx.activeRowsCountGPU = 0;
+}
+
 static bool handleExecFilterNode(
     const IRFilter& filter, bool debug, EvalContext& currentCtx,
     std::unordered_map<std::string, EvalContext>& tableContexts,
@@ -711,216 +849,8 @@ static bool handleExecFilterNode(
         tableContexts[currentCtx.currentTable] = currentCtx;
     }
 
-    // Compact tableResult only if its row count matches the pre-filter
-    // context size (otherwise it's from a different pipeline stage).
-    if (!tableResult.u32Cols.empty() || !tableResult.f32Cols.empty()) {
-        // Find the physical buffer size (pre-filter row count)
-        size_t physicalRows = 0;
-        for (const auto& [name, buf] : currentCtx.u32ColsGPU) {
-            if (buf) { physicalRows = buf->length() / sizeof(uint32_t); break; }
-        }
-        if (physicalRows == 0) {
-            for (const auto& [name, buf] : currentCtx.f32ColsGPU) {
-                if (buf) { physicalRows = buf->length() / sizeof(float); break; }
-            }
-        }
-        bool sizeMatch = (tableResult.rowCount == physicalRows) || 
-                         (physicalRows == 0 && !tableResult.u32Cols.empty() && 
-                          tableResult.u32Cols[0].size() == currentCtx.activeRowsCountGPU);
-
-        if (sizeMatch && currentCtx.activeRowsCountGPU > 0 && currentCtx.activeRowsGPU) {
-            // Compact tableResult based on activeRows via GPU gather
-            uint32_t arCount = currentCtx.activeRowsCountGPU;
-            auto& s = GpuColumnStore::instance();
-            for (size_t ci = 0; ci < tableResult.u32Cols.size(); ++ci) {
-                auto& col = tableResult.u32Cols[ci];
-                // Prefer existing GPU buffer from context over uploading CPU vector
-                MTL::Buffer* gpuBuf = nullptr;
-                if (ci < tableResult.u32Names.size()) {
-                    auto it = currentCtx.u32ColsGPU.find(tableResult.u32Names[ci]);
-                    if (it != currentCtx.u32ColsGPU.end()) gpuBuf = it->second;
-                }
-                if (gpuBuf) {
-                    MTL::Buffer* dst = GpuOps::gatherU32(gpuBuf, currentCtx.activeRowsGPU, arCount);
-                    col.resize(arCount);
-                    std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
-                    dst->release();
-                } else {
-                    MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, arCount);
-                    col.resize(arCount);
-                    std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
-                    src->release(); dst->release();
-                }
-            }
-            for (size_t ci = 0; ci < tableResult.f32Cols.size(); ++ci) {
-                auto& col = tableResult.f32Cols[ci];
-                MTL::Buffer* gpuBuf = nullptr;
-                if (ci < tableResult.f32Names.size()) {
-                    auto it = currentCtx.f32ColsGPU.find(tableResult.f32Names[ci]);
-                    if (it != currentCtx.f32ColsGPU.end()) gpuBuf = it->second;
-                }
-                if (gpuBuf) {
-                    MTL::Buffer* dst = GpuOps::gatherF32(gpuBuf, currentCtx.activeRowsGPU, arCount);
-                    col.resize(arCount);
-                    std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
-                    dst->release();
-                } else {
-                    MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, arCount);
-                    col.resize(arCount);
-                    std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
-                    src->release(); dst->release();
-                }
-            }
-            for (auto& col : tableResult.stringCols) {
-                // Try GPU gather via flatStringCols if available
-                bool gpuDone = false;
-                // Find matching column name from tableResult.stringNames
-                size_t colIdx = &col - &tableResult.stringCols[0];
-                if (colIdx < tableResult.stringNames.size()) {
-                    const auto& colName = tableResult.stringNames[colIdx];
-                    auto fit = currentCtx.flatStringCols.find(colName);
-                    if (fit != currentCtx.flatStringCols.end() && fit->second.chars) {
-                        auto r = GpuOps::gatherFlatString(
-                            fit->second.chars, fit->second.offsets, fit->second.lengths,
-                            currentCtx.activeRowsGPU, arCount, true);
-                        if (r.chars) {
-                            // Materialize gathered FlatStringCol to std::vector<std::string> for tableResult
-                            const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
-                            const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
-                            const char* ch = static_cast<const char*>(r.chars->contents());
-                            col.resize(arCount);
-                            for (uint32_t i = 0; i < arCount; ++i) {
-                                col[i].assign(ch + offs[i], lens[i]);
-                            }
-                            gpuDone = true;
-                        }
-                    }
-                }
-                if (!gpuDone) {
-                    const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
-                    std::vector<std::string> filtered;
-                    filtered.reserve(arCount);
-                    for (uint32_t i = 0; i < arCount; ++i) {
-                        uint32_t idx = arPtr[i];
-                        if (idx < col.size()) filtered.push_back(col[idx]);
-                    }
-                    col = std::move(filtered);
-                }
-            }
-            tableResult.rowCount = arCount;
-        } else if (!sizeMatch) {
-            // tableResult is from a different pipeline stage, clear it
-            if (debug) std::cerr << "[Exec] Filter: clearing stale tableResult (size " 
-                                 << tableResult.rowCount << " != physical " << physicalRows << ")\n";
-            tableResult.u32Cols.clear();
-            tableResult.u32Names.clear();
-            tableResult.f32Cols.clear();
-            tableResult.f32Names.clear();
-            tableResult.stringCols.clear();
-            tableResult.stringNames.clear();
-            tableResult.order.clear();
-            tableResult.rowCount = 0;
-        }
-    }
-
-    // Always compact currentCtx columns when filter has activeRows,
-    // to ensure consistent row counts across all data.
-    if (currentCtx.activeRowsCountGPU > 0 && currentCtx.activeRowsGPU) {
-        uint32_t compactCount = currentCtx.activeRowsCountGPU;
-
-        // GPU-direct compaction: gather u32/f32 GPU columns using
-        // activeRowsGPU index buffer — no CPU round-trip.
-        for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-            if (buf) {
-                auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, compactCount);
-                if (compacted) { buf.reset(compacted); }
-            }
-        }
-        for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-            if (buf) {
-                auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, compactCount);
-                if (compacted) { buf.reset(compacted); }
-            }
-        }
-
-        // Compact CPU-only columns via GPU gather — retain gathered GPU buffer
-        {
-            auto& s = GpuColumnStore::instance();
-            for (auto& [name, col] : currentCtx.u32Cols) {
-                if (col.size() > compactCount) {
-                    // Skip if GPU buffer already exists (was already compacted above)
-                    auto itGpu = currentCtx.u32ColsGPU.find(name);
-                    if (itGpu != currentCtx.u32ColsGPU.end() && itGpu->second) {
-                        col.resize(compactCount);
-                        std::memcpy(col.data(), itGpu->second->contents(), compactCount * sizeof(uint32_t));
-                    } else {
-                        MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* dst = GpuOps::gatherU32(src, currentCtx.activeRowsGPU, compactCount);
-                        col.resize(compactCount);
-                        std::memcpy(col.data(), dst->contents(), compactCount * sizeof(uint32_t));
-                        currentCtx.u32ColsGPU[name].reset(dst); // promote to GPU
-                        src->release();
-                    }
-                }
-            }
-            for (auto& [name, col] : currentCtx.f32Cols) {
-                if (col.size() > compactCount) {
-                    auto itGpu = currentCtx.f32ColsGPU.find(name);
-                    if (itGpu != currentCtx.f32ColsGPU.end() && itGpu->second) {
-                        col.resize(compactCount);
-                        std::memcpy(col.data(), itGpu->second->contents(), compactCount * sizeof(float));
-                    } else {
-                        MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                        MTL::Buffer* dst = GpuOps::gatherF32(src, currentCtx.activeRowsGPU, compactCount);
-                        col.resize(compactCount);
-                        std::memcpy(col.data(), dst->contents(), compactCount * sizeof(float));
-                        currentCtx.f32ColsGPU[name].reset(dst); // promote to GPU
-                        src->release();
-                    }
-                }
-            }
-        }
-        // GPU-native dict compaction: gather dict IDs on GPU
-        currentCtx.compactDictCols(compactCount);
-        // GPU-native flat string compaction: gather chars/offsets/lengths on GPU
-        currentCtx.compactFlatStringCols(compactCount);
-        // Invalidate stale stringCols — will be lazily rebuilt from dictCols/flatStringCols if needed
-        for (auto& [name, col] : currentCtx.stringCols) {
-            auto dit = currentCtx.dictCols.find(name);
-            auto fit = currentCtx.flatStringCols.find(name);
-            if ((dit != currentCtx.dictCols.end() && dit->second.valid()) ||
-                (fit != currentCtx.flatStringCols.end() && fit->second.chars)) {
-                col.clear();  // Will be rebuilt from dict/flat on demand
-            } else if (col.size() > compactCount) {
-                // Legacy fallback for orphan string cols without dict or flat encoding
-                const uint32_t* arPtr = static_cast<const uint32_t*>(currentCtx.activeRowsGPU->contents());
-                std::vector<std::string> filtered;
-                filtered.reserve(compactCount);
-                for (uint32_t i = 0; i < compactCount; ++i) {
-                    uint32_t idx = arPtr[i];
-                    if (idx < col.size()) filtered.push_back(col[idx]);
-                }
-                col = std::move(filtered);
-            }
-        }
-
-        // NOTE: CPU mirror sync removed — unified memory means GPU buffers
-        // are directly accessible via ->contents(). Downstream operators
-        // (Join, GroupBy, Project) check GPU buffers first.
-        // Invalidate stale CPU mirrors so lazy download refreshes them if needed.
-        for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-            if (buf) currentCtx.u32Cols[name].clear();
-        }
-        for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-            if (buf) currentCtx.f32Cols[name].clear();
-        }
-
-        currentCtx.activeRows.clear();
-        currentCtx.activeRowsGPU = nullptr;
-        currentCtx.activeRowsCountGPU = 0;
-    }
+    compactTableResultAfterFilter(currentCtx, tableResult, debug);
+    compactContextAfterFilter(currentCtx);
 
     if (debug) {
         std::cerr << "[Exec] Filter: " << currentCtx.rowCount << " rows after\n";
@@ -1855,6 +1785,56 @@ static void filterOutputColumns(
 
 }
 
+// ── Extract DELIM correlation columns from self-comparison join conditions ──
+// Scans the plan for joins with "col = col" or "col IS NOT DISTINCT FROM col"
+// patterns and maps them back to their DELIM_SCAN group.
+static std::unordered_map<std::string, std::vector<std::string>>
+extractDelimCorrelationCols(const Plan& plan, bool debug) {
+    std::unordered_map<std::string, std::vector<std::string>> result;
+
+    for (size_t ni = 0; ni < plan.nodes.size(); ++ni) {
+        if (plan.nodes[ni].type != IRNode::Type::Join) continue;
+
+        const auto& join = plan.nodes[ni].asJoin();
+        const std::string& cond = join.conditionStr;
+
+        std::vector<std::string> corrCols;
+        auto condParts = splitConditionByAnd(cond);
+        for (const auto& part : condParts) {
+            std::string col = parseSelfComparison(part);
+            if (!col.empty()) corrCols.push_back(col);
+        }
+        if (corrCols.empty()) continue;
+
+        // Find the delim group by looking backward for tmpl_delim_lhs_* scans
+        std::string delimGroup;
+        for (size_t si = 0; si < ni; ++si) {
+            if (plan.nodes[si].type == IRNode::Type::Scan) {
+                const std::string& tbl = plan.nodes[si].asScan().table;
+                if (tbl.find("tmpl_delim_lhs_") == 0) delimGroup = tbl;
+            }
+        }
+        if (delimGroup.empty()) continue;
+
+        auto& existing = result[delimGroup];
+        for (const auto& c : corrCols) {
+            if (std::find(existing.begin(), existing.end(), c) == existing.end())
+                existing.push_back(c);
+        }
+    }
+
+    if (debug && !result.empty()) {
+        for (const auto& [group, cols] : result) {
+            std::cerr << "[Exec] DELIM correlation: " << group << " -> [";
+            for (size_t i = 0; i < cols.size(); ++i) {
+                if (i) std::cerr << ", ";
+                std::cerr << cols[i];
+            }
+            std::cerr << "]\n";
+        }
+    }
+    return result;
+}
 
 // --- Main Execution Entry Point ---
 
@@ -1944,62 +1924,11 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
 
     std::vector<std::set<std::string>> savedPipelineTables;
 
+    // Bundle join pipeline state for cleaner parameter passing
+    JoinPipelineState joinState{tableContexts, savedPipelines, savedPipelineTables, joinedTables, hasPipeline};
+
     // Pre-scan: extract DELIM correlation columns from self-comparison join conditions
-    std::unordered_map<std::string, std::vector<std::string>> delimCorrelationCols;
-    {
-        // Find Save nodes for delim groups, then find the DELIM_JOIN for each
-        for (size_t ni = 0; ni < plan.nodes.size(); ++ni) {
-            if (plan.nodes[ni].type == IRNode::Type::Join) {
-                const auto& join = plan.nodes[ni].asJoin();
-                const std::string& cond = join.conditionStr;
-                // Look for self-comparison patterns that indicate DELIM correlation
-                bool hasSelfComp = false;
-                std::vector<std::string> corrCols;
-                // Parse "colA IS NOT DISTINCT FROM colA" and "colA = colA" patterns
-                auto condParts = splitConditionByAnd(cond);
-                for (const auto& part : condParts) {
-                    std::string col = parseSelfComparison(part);
-                    if (!col.empty()) {
-                        hasSelfComp = true;
-                        corrCols.push_back(col);
-                    }
-                }
-                if (hasSelfComp && !corrCols.empty()) {
-                    // Find the delim group this belongs to by looking at rightTable
-                    // or by looking backward for the nearest Save
-                    std::string delimGroup;
-                    // Look for Scan nodes referencing tmpl_delim_lhs_* before this join
-                    for (size_t si = 0; si < ni; ++si) {
-                        if (plan.nodes[si].type == IRNode::Type::Scan) {
-                            const std::string& tbl = plan.nodes[si].asScan().table;
-                            if (tbl.find("tmpl_delim_lhs_") == 0) {
-                                delimGroup = tbl;
-                            }
-                        }
-                    }
-                    if (!delimGroup.empty()) {
-                        // Merge correlation cols (may accumulate from multiple joins)
-                        auto& existing = delimCorrelationCols[delimGroup];
-                        for (const auto& c : corrCols) {
-                            if (std::find(existing.begin(), existing.end(), c) == existing.end()) {
-                                existing.push_back(c);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if (debug && !delimCorrelationCols.empty()) {
-            for (const auto& [group, cols] : delimCorrelationCols) {
-                std::cerr << "[Exec] DELIM correlation: " << group << " -> [";
-                for (size_t i = 0; i < cols.size(); ++i) {
-                    if (debug) if (i) std::cerr << ", ";
-                    if (debug) std::cerr << cols[i];
-                }
-                if (debug) std::cerr << "]\n";
-            }
-        }
-    }
+    auto delimCorrelationCols = extractDelimCorrelationCols(plan, debug);
 
     for (size_t nodeIdx = 0; nodeIdx < plan.nodes.size(); ++nodeIdx) {
         const auto& node = plan.nodes[nodeIdx];
@@ -2013,8 +1942,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
             case IRNode::Type::Scan: {
                 const auto& scan = node.asScan();
                 handleExecScanNode(scan, nodeIdx, plan, debug, currentCtx,
-                    tableContexts, scanInstanceMap, delimCorrelationCols,
-                    savedPipelines, savedPipelineTables, joinedTables, hasPipeline);
+                    scanInstanceMap, delimCorrelationCols, joinState);
 
                 break;
             }
@@ -2029,8 +1957,7 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
             }
 
             case IRNode::Type::Join: {
-                if (!executeJoinPipeline(node.asJoin(), currentCtx, tableContexts, 
-                                     savedPipelines, savedPipelineTables, joinedTables, hasPipeline, result)) {
+                if (!executeJoinPipeline(node.asJoin(), currentCtx, joinState, result)) {
                     return result;
                 }
                 break;

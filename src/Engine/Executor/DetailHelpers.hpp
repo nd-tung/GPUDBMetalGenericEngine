@@ -32,19 +32,6 @@ inline std::vector<T> gatherToVector(MTL::Buffer* buf, MTL::Buffer* indices, uin
     return result;
 }
 
-// Overload: gather into an existing vector (resize + copy, release gathered buffer).
-template<typename T>
-inline void gatherInto(std::vector<T>& vec, MTL::Buffer* buf, MTL::Buffer* indices, uint32_t count) {
-    MTL::Buffer* gathered;
-    if constexpr (std::is_same_v<T, float>)
-        gathered = GpuOps::gatherF32(buf, indices, count);
-    else
-        gathered = GpuOps::gatherU32(buf, indices, count);
-    vec.resize(count);
-    std::memcpy(vec.data(), gathered->contents(), count * sizeof(T));
-    gathered->release();
-}
-
 // ========== String utility helpers ==========
 
 // Split a condition string by " AND " into parts.

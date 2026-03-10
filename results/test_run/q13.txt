@@ -2,7 +2,7 @@
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -50,39 +50,39 @@ custdist|c_count|
 2.00|41.00|
 1.00|39.00|
 ---------------------------------------------------
-Planning time: 0.81 ms
-Data Load Time (Disk+Upload): 1471.06 ms
-GPU kernels time: 15.82 ms
-CPU postprocess time: 414.00 ms
-Total Internal Pipeline time: 1900.87 ms
-Total Host Execution time: 1981.36 ms
-Total Wall time (Plan+Exec): 1982.17 ms
+Planning time: 0.80 ms
+Data Load Time (Disk+Upload): 1517.48 ms
+GPU kernels time: 16.26 ms
+CPU postprocess time: 406.49 ms
+Total Internal Pipeline time: 1940.23 ms
+Total Host Execution time: 2010.05 ms
+Total Wall time (Plan+Exec): 2010.85 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    1.432 ms (9.055%) [2 calls]
-  filter         :    2.095 ms (13.247%) [1 calls]
-  groupby        :   11.247 ms (71.108%) [6 calls]
-  hash_join_probe_u32:    0.767 ms (4.847%) [1 calls]
-  sort           :    0.276 ms (1.742%) [2 calls]
+  cast           :    1.410 ms (8.672%) [2 calls]
+  filter         :    2.128 ms (13.086%) [1 calls]
+  groupby        :   11.426 ms (70.257%) [6 calls]
+  hash_join_probe_u32:    1.019 ms (6.263%) [1 calls]
+  sort           :    0.280 ms (1.722%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 15.817 ms
+  TOTAL GPU TIME: 16.263 ms
   Kernel invocations: 12
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_multi_cont        2.095        1500000        715.862
-hash_join_probe_write_multi          0.767        1483918       1935.547
-ops::cast_u32_to_f32                 1.240        1533923       1236.703
-ops::groupby_agg_multi_key_ty        6.422        1533923        238.857
-ops::ht_mark_valid                   1.370        4194304       3060.513
-ops::ht_extract_compact              0.550         150000        272.831
-ops::groupby_agg_multi_key_ty        2.338         150000         64.165
-ops::ht_mark_valid                   0.307         524288       1708.474
-ops::ht_extract_compact              0.261             42          0.161
-ops::cast_u32_to_f32                 0.192             42          0.219
+ops::filter_string_multi_cont        2.128        1500000        704.846
+hash_join_probe_write_multi          1.019        1483918       1456.844
+ops::cast_u32_to_f32                 1.218        1533923       1259.896
+ops::groupby_agg_multi_key_ty        6.664        1533923        230.186
+ops::ht_mark_valid                   1.409        4194304       2977.148
+ops::ht_extract_compact              0.574         150000        261.210
+ops::groupby_agg_multi_key_ty        2.206         150000         68.005
+ops::ht_mark_valid                   0.310         524288       1693.530
+ops::ht_extract_compact              0.263             42          0.159
+ops::cast_u32_to_f32                 0.193             42          0.218
 block_sort_kv_u64                    0.000             42          0.000
-orderby_gpu_gather                   0.276             84          0.305
+orderby_gpu_gather                   0.280             84          0.300
 ─────────────────────────────────────────────────────────────────
-TOTAL: 15.817 ms
+TOTAL: 16.263 ms

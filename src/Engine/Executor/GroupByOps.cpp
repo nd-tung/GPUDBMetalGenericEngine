@@ -2,6 +2,7 @@
 #include "OperatorsInternal.hpp"
 #include "EnvUtil.hpp"
 #include "KernelTimer.hpp"
+#include "EngineConfig.hpp"
 
 #include <cstring>
 #include <iostream>
@@ -19,10 +20,10 @@ std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vecto
     if (!p) return std::nullopt;
 
     uint32_t numKeys = static_cast<uint32_t>(keyColsU32.size());
-    if (numKeys == 0 || numKeys > 8) return std::nullopt;
+    if (numKeys == 0 || numKeys > engine::config::kMaxGroupByKeys) return std::nullopt;
 
     const uint32_t numAggs = static_cast<uint32_t>(aggTypes.size());
-    if (numAggs == 0 || numAggs > 16) return std::nullopt;
+    if (numAggs == 0 || numAggs > engine::config::kMaxGroupByAggs) return std::nullopt;
     if (aggInputsF32.size() < numAggs) return std::nullopt;
 
     uint32_t cap = nextPow2(std::max<uint32_t>(128u, rowCount * 2u));
@@ -167,6 +168,7 @@ std::optional<GroupByExtractResult> GpuOps::extractGroupByHT(
         auto t0 = std::chrono::high_resolution_clock::now();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "ht_mark_valid");
         auto t1 = std::chrono::high_resolution_clock::now();
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         KernelTimer::instance().record("ops::ht_mark_valid", "groupby", ms, cap);
@@ -213,6 +215,7 @@ std::optional<GroupByExtractResult> GpuOps::extractGroupByHT(
         auto t0 = std::chrono::high_resolution_clock::now();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "ht_extract_compact");
         auto t1 = std::chrono::high_resolution_clock::now();
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         KernelTimer::instance().record("ops::ht_extract_compact", "groupby", ms, totalCount);
@@ -297,6 +300,7 @@ MTL::Buffer* GpuOps::dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t
                 enc->endEncoding();
                 cmd->commit();
                 cmd->waitUntilCompleted();
+                checkGpuStatus(cmd, "hash_combine_u64_u32");
             } else {
                 // CPU fallback if kernel not found
                 auto* ptr = (uint64_t*)sortKeys->contents();
@@ -340,6 +344,7 @@ MTL::Buffer* GpuOps::dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "mark_unique_sorted");
     }
 
     if (ownSortKeys) { sortKeys->release(); sortKeys = nullptr; }

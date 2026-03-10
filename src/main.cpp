@@ -18,8 +18,8 @@ static int executeQuery(const std::string& sql, const std::string& datasetPath) 
     using namespace engine;
     std::cout << "--- Running (Engine Host) ---" << std::endl;
 
-    // Initialize schema registry for TPC-H (redundant with constructor, but explicit)
-    // SchemaRegistry::instance().initTPCH();  // Already called in singleton constructor
+    // Initialize schema registry for TPC-H
+    SchemaRegistry::instance().initTPCH();
 
     // V2 Planner: Full SQL support (Q1-Q22)
     auto t_plan_start = std::chrono::high_resolution_clock::now();

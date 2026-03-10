@@ -1,12 +1,9 @@
 #include "GpuExecutor.hpp"
 #include "GpuExecutorDetail.hpp"
-#include "Relation.hpp"
+#include "EngineError.hpp"
 
 #include <iostream>
-#include <vector>
 #include <set>
-#include <algorithm>
-#include <cstring>
 
 namespace engine {
 
@@ -57,11 +54,11 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
             return true;
         } else {
             std::cerr << "[Exec] GPU Filter failed/unsupported: " << filter.predicateStr << "\n";
-            throw std::runtime_error("GPU Filter failed, and CPU fallback is disabled.");
+            ENGINE_THROW("GPU Filter failed, and CPU fallback is disabled.");
         }
     }
     
-    throw std::runtime_error("GPU Filter path not applicable, and CPU fallback is disabled.");
+    ENGINE_THROW("GPU Filter path not applicable, and CPU fallback is disabled.");
 }
 
 } // namespace engine

@@ -2,32 +2,32 @@
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 Scalar count_star(): 25.00
 ---------------------------------------------------
 Planning time: 0.42 ms
-Data Load Time (Disk+Upload): 93.64 ms
-GPU kernels time: 1.93 ms
-CPU postprocess time: 8.93 ms
-Total Internal Pipeline time: 104.51 ms
-Total Host Execution time: 104.67 ms
-Total Wall time (Plan+Exec): 105.09 ms
+Data Load Time (Disk+Upload): 99.65 ms
+GPU kernels time: 1.96 ms
+CPU postprocess time: 8.87 ms
+Total Internal Pipeline time: 110.48 ms
+Total Host Execution time: 110.64 ms
+Total Wall time (Plan+Exec): 111.07 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  groupby        :    1.934 ms (100.000%) [3 calls]
+  groupby        :    1.965 ms (100.000%) [3 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1.934 ms
+  TOTAL GPU TIME: 1.965 ms
   Kernel invocations: 3
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty        1.360         200000        147.023
-ops::ht_mark_valid                   0.322         524288       1627.380
-ops::ht_extract_compact              0.251             25          0.100
+ops::groupby_agg_multi_key_ty        1.365         200000        146.498
+ops::ht_mark_valid                   0.338         524288       1551.148
+ops::ht_extract_compact              0.262             25          0.096
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1.934 ms
+TOTAL: 1.965 ms

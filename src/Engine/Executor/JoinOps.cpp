@@ -75,6 +75,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
         enc2->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "joinHash_count");
     }
     
     // 4. GPU exclusive prefix sum on counts → offsets, returns total
@@ -120,6 +121,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "joinHash_write");
         auto end = std::chrono::high_resolution_clock::now();
         KernelTimer::instance().record("hash_join_probe_write_multi", "hash_join_probe_u32", 
             std::chrono::duration<double, std::milli>(end - start).count(), probeCount);
@@ -180,6 +182,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "joinHashU64_build");
     }
     if (debug) std::cerr << "[GPU] joinHashU64: build phase done." << std::endl << std::flush;
     
@@ -215,6 +218,7 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "joinHashU64_probe");
         auto end = std::chrono::high_resolution_clock::now();
         KernelTimer::instance().record("ops::join_probe_u64", "hash_join_probe_u64", 
             std::chrono::duration<double, std::milli>(end - start).count(), probeCount);
@@ -250,6 +254,7 @@ MTL::Buffer* GpuOps::packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t cou
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "packU32ToU64");
     }
     return out;
 }
@@ -278,6 +283,7 @@ void GpuOps::crossProduct(MTL::Buffer* left, MTL::Buffer* right,
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "crossProduct");
 }
 
 std::optional<FilterResult> GpuOps::hashJoinSemiU32(MTL::Buffer* leftKey,
@@ -341,6 +347,7 @@ std::optional<FilterResult> GpuOps::hashJoinSemiU32(MTL::Buffer* leftKey,
         enc3->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "hashJoinSemiU32");
     }
     ht_head->release();
     next->release();
@@ -434,6 +441,7 @@ std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
         enc4->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "hashJoinAntiU32");
     }
     ht_head->release();
     next->release();
@@ -509,6 +517,7 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
             enc3->endEncoding();
             cmd->commit();
             cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, "findUnmatchedIndices");
         }
         mask->release();
         uint32_t cnt = *(uint32_t*)outCnt->contents();

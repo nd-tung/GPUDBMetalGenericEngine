@@ -13,6 +13,16 @@ namespace engine {
 //   - Multiple GpuBuffer instances may safely alias the same Metal buffer;
 //     each independently holds +1 refcount.
 //   - Implicit conversion to MTL::Buffer* for seamless use with existing APIs.
+//
+// Migration note (E5):
+//   GpuOps static methods currently return raw MTL::Buffer*. Callers are
+//   responsible for wrapping the result in a GpuBuffer or calling release().
+//   Changing GpuOps return types to GpuBuffer is desirable but UNSAFE to do
+//   blindly: if a caller stores the result as MTL::Buffer* (via implicit
+//   conversion), the temporary GpuBuffer is destroyed immediately and the
+//   raw pointer becomes dangling.
+//   Safe migration path: change GpuOps returns one-at-a-time, grep every
+//   call site, and ensure each stores the result as GpuBuffer (not raw ptr).
 // ============================================================================
 class GpuBuffer {
     MTL::Buffer* buf_ = nullptr;

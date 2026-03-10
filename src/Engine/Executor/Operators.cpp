@@ -10,7 +10,6 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -520,7 +519,10 @@ MTL::Buffer* GpuOps::castU32ToF32(MTL::Buffer* in, uint32_t count) {
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        if (!isBatchActive()) cmd->waitUntilCompleted();
+        if (!isBatchActive()) {
+            cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, "castU32ToF32");
+        }
     }
     auto end = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record("ops::cast_u32_to_f32", "cast",
@@ -600,6 +602,7 @@ MTL::Buffer* GpuOps::logicAndNotU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "logicAndNotU32");
     
     return outMask;
 }
@@ -635,6 +638,7 @@ MTL::Buffer* GpuOps::indicesToMask(MTL::Buffer* indices, uint32_t indexCount, ui
     
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "indicesToMask");
     
     return mask;
 }
@@ -663,6 +667,7 @@ std::pair<MTL::Buffer*, uint32_t> GpuOps::compactU32Mask(MTL::Buffer* mask, uint
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "compactU32Mask");
     
     uint32_t count = *reinterpret_cast<uint32_t*>(outCnt->contents());
     outCnt->release();
@@ -688,6 +693,7 @@ void GpuOps::fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count) {
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "fillU32");
 }
 
 MTL::Buffer* GpuOps::createFilledU32(uint32_t val, uint32_t count) {
@@ -715,6 +721,7 @@ void GpuOps::fillF32(MTL::Buffer* buf, float val, uint32_t count) {
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "fillF32");
 }
 
 MTL::Buffer* GpuOps::createFilledF32(float val, uint32_t count) {
@@ -743,6 +750,7 @@ MTL::Buffer* GpuOps::iotaU32(uint32_t count) {
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "iotaU32");
     
     return buf;
 }
@@ -771,6 +779,7 @@ MTL::Buffer* GpuOps::bitcastF32ToU32(MTL::Buffer* in, uint32_t count) {
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "bitcastF32ToU32");
     return out;
 }
 
@@ -795,7 +804,10 @@ MTL::Buffer* GpuOps::arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t co
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        if (!isBatchActive()) cmd->waitUntilCompleted();
+        if (!isBatchActive()) {
+            cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, "arithAddConstU32");
+        }
     }
     return out;
 }
@@ -817,7 +829,10 @@ MTL::Buffer* GpuOps::nonNullIndicatorF32(MTL::Buffer* in, uint32_t count) {
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        if (!isBatchActive()) cmd->waitUntilCompleted();
+        if (!isBatchActive()) {
+            cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, "nonNullIndicatorF32");
+        }
     }
     return out;
 }
@@ -860,7 +875,10 @@ static MTL::Buffer* arithF32Dispatch(
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        if (!GpuOps::isBatchActive()) cmd->waitUntilCompleted();
+        if (!GpuOps::isBatchActive()) {
+            cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, kernelName);
+        }
     }
     return out;
 }
@@ -881,13 +899,13 @@ MTL::Buffer* GpuOps::arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_
     return arithF32Dispatch("ops::arith_div_f32_scalar_col", ArithBindKind::ScalarCol, nullptr, colB, valA, count);
 }
 MTL::Buffer* GpuOps::arithSubF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
-    return arithF32Dispatch("arith_sub_f32_col_col", ArithBindKind::ColCol, colA, colB, 0, count);
+    return arithF32Dispatch("ops::arith_sub_f32_col_col", ArithBindKind::ColCol, colA, colB, 0, count);
 }
 MTL::Buffer* GpuOps::arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count) {
-    return arithF32Dispatch("arith_sub_f32_col_scalar", ArithBindKind::ColScalar, colA, nullptr, valB, count);
+    return arithF32Dispatch("ops::arith_sub_f32_col_scalar", ArithBindKind::ColScalar, colA, nullptr, valB, count);
 }
 MTL::Buffer* GpuOps::arithSubF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count) {
-    return arithF32Dispatch("arith_sub_f32_scalar_col", ArithBindKind::ScalarCol, nullptr, colB, valA, count);
+    return arithF32Dispatch("ops::arith_sub_f32_scalar_col", ArithBindKind::ScalarCol, nullptr, colB, valA, count);
 }
 
 MTL::Buffer* GpuOps::createBuffer(const void* data, size_t size) {
@@ -902,6 +920,8 @@ MTL::Buffer* GpuOps::createBuffer(const void* data, size_t size) {
 
 // Cached 4-byte output buffer for reduce operations (avoids repeated alloc/release)
 static MTL::Buffer* getReduceOutBuf() {
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lk(mu);
     static MTL::Buffer* s_reduceOut = nullptr;
     if (!s_reduceOut) {
         auto& store = GpuColumnStore::instance();
@@ -929,6 +949,7 @@ float GpuOps::reduceSumF32(MTL::Buffer* in, uint32_t count) {
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "reduceSumF32");
     }
     
     float res = *(float*)out->contents();
@@ -955,6 +976,7 @@ float GpuOps::reduceMinF32(MTL::Buffer* in, uint32_t count) {
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "reduceMinF32");
     }
     
     float res = *(float*)out->contents();
@@ -981,6 +1003,7 @@ float GpuOps::reduceMaxF32(MTL::Buffer* in, uint32_t count) {
         enc->endEncoding();
         cmd->commit();
         cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "reduceMaxF32");
     }
     
     float res = *(float*)out->contents();
@@ -1010,7 +1033,10 @@ MTL::Buffer* GpuOps::extractYearU32(MTL::Buffer* dateCol, uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    if (!isBatchActive()) cmd->waitUntilCompleted();
+    if (!isBatchActive()) {
+        cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "extractYearU32");
+    }
 
     return outBuf;
 }
@@ -1050,6 +1076,7 @@ std::pair<MTL::Buffer*, MTL::Buffer*> GpuOps::substringFlat(
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "substringFlat");
 
     return {outOffsets, outLengths};
 }
@@ -1081,6 +1108,7 @@ MTL::Buffer* GpuOps::stringHashEncodeU32(
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "stringHashEncodeU32");
 
     return outBuf;
 }
@@ -1112,6 +1140,7 @@ MTL::Buffer* GpuOps::stringFnv1aU32(
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "stringFnv1aU32");
 
     return outBuf;
 }
@@ -1166,7 +1195,10 @@ GpuOps::FlatStringGatherResult GpuOps::gatherFlatString(
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        if (doSync) cmd->waitUntilCompleted();
+        if (doSync) {
+            cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, "gatherFlatString");
+        }
     }
 
     auto end = std::chrono::high_resolution_clock::now();
@@ -1184,10 +1216,10 @@ GpuOps::FlatStringGatherResult GpuOps::gatherFlatString(
 // ── H4: GPU dedup by sorted keys ────────────────────────────────────────
 
 MTL::Buffer* GpuOps::arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
-    return arithF32Dispatch("arith_add_f32_col_col", ArithBindKind::ColCol, colA, colB, 0, count);
+    return arithF32Dispatch("ops::arith_add_f32_col_col", ArithBindKind::ColCol, colA, colB, 0, count);
 }
 MTL::Buffer* GpuOps::arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count) {
-    return arithF32Dispatch("arith_add_f32_col_scalar", ArithBindKind::ColScalar, colA, nullptr, valB, count);
+    return arithF32Dispatch("ops::arith_add_f32_col_scalar", ArithBindKind::ColScalar, colA, nullptr, valB, count);
 }
 
 void GpuOps::scatterConstantF32(MTL::Buffer* output, MTL::Buffer* indices, uint32_t indexCount, float val) {
@@ -1217,6 +1249,7 @@ void GpuOps::scatterConstantF32(MTL::Buffer* output, MTL::Buffer* indices, uint3
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "scatterConstantF32");
 }
 
 void GpuOps::scatterF32(MTL::Buffer* input, MTL::Buffer* output, MTL::Buffer* indices, uint32_t count) {
@@ -1244,6 +1277,7 @@ void GpuOps::scatterF32(MTL::Buffer* input, MTL::Buffer* output, MTL::Buffer* in
     enc->endEncoding();
     cmd->commit();
     cmd->waitUntilCompleted();
+    checkGpuStatus(cmd, "scatterF32");
 }
 
 MTL::Buffer* GpuOps::mathFloorF32(MTL::Buffer* col, uint32_t count) {
@@ -1262,7 +1296,10 @@ MTL::Buffer* GpuOps::mathFloorF32(MTL::Buffer* col, uint32_t count) {
         dispatch1D(enc, count);
         enc->endEncoding();
         cmd->commit();
-        if (!isBatchActive()) cmd->waitUntilCompleted();
+        if (!isBatchActive()) {
+            cmd->waitUntilCompleted();
+            checkGpuStatus(cmd, "mathFloorF32");
+        }
     }
     return out;
 }

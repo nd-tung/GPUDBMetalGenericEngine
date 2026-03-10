@@ -2,58 +2,58 @@
 [Main] Using GpuExecutor generic executor.
 [GPU] Device: Apple M3 Ultra
 [GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (131 KB source).
+[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|l_linestatus|sum_qty|sum_base_price|sum_disc_price|sum_charge|avg_qty|avg_price|avg_disc|count_order|
-A|F|37733700.00|56586670080.00|53758230528.00|55908646912.00|25.52|38273.21|0.05|1478493.00|
-N|F|991417.00|1487503488.00|1413085312.00|1469654272.00|25.52|38284.44|0.05|38854.00|
-N|O|74476648.00|111702761472.00|106117955584.00|110367997952.00|25.50|38249.48|0.05|2920374.00|
-R|F|37719640.00|56568016896.00|53741707264.00|55890194432.00|25.51|38250.85|0.05|1478870.00|
+A|F|37734348.00|56586805248.00|53758496768.00|55909261312.00|25.52|38273.30|0.05|1478493.00|
+N|F|991417.00|1487502592.00|1413082496.00|1469653248.00|25.52|38284.41|0.05|38854.00|
+N|O|74475856.00|111701942272.00|106118889472.00|110367817728.00|25.50|38249.22|0.05|2920374.00|
+R|F|37719592.00|56568451072.00|53741019136.00|55889637376.00|25.51|38251.16|0.05|1478870.00|
 ---------------------------------------------------
-Planning time: 2.80 ms
-Data Load Time (Disk+Upload): 2990.99 ms
-GPU kernels time: 316.06 ms
-CPU postprocess time: 255.31 ms
-Total Internal Pipeline time: 3562.36 ms
-Total Host Execution time: 3563.60 ms
-Total Wall time (Plan+Exec): 3566.40 ms
+Planning time: 2.74 ms
+Data Load Time (Disk+Upload): 3140.29 ms
+GPU kernels time: 330.71 ms
+CPU postprocess time: 256.69 ms
+Total Internal Pipeline time: 3727.69 ms
+Total Host Execution time: 3728.81 ms
+Total Wall time (Plan+Exec): 3731.54 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.745 ms (0.236%) [4 calls]
-  filter         :   10.354 ms (3.276%) [1 calls]
-  gather         :   14.277 ms (4.517%) [11 calls]
-  groupby        :  283.601 ms (89.731%) [3 calls]
-  sort           :    7.080 ms (2.240%) [2 calls]
+  cast           :    0.714 ms (0.216%) [4 calls]
+  filter         :    9.973 ms (3.016%) [1 calls]
+  gather         :   19.666 ms (5.947%) [11 calls]
+  groupby        :  293.412 ms (88.723%) [3 calls]
+  sort           :    6.941 ms (2.099%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 316.056 ms
+  TOTAL GPU TIME: 330.706 ms
   Kernel invocations: 21
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_le_u32                  10.354        6001215        579.601
-ops::gather_col_u32                  1.250        5916591       4733.432
-ops::gather_col_u32                  1.252        5916591       4727.600
-ops::gather_col_f32                  1.230        5916591       4811.868
-ops::gather_col_f32                  1.232        5916591       4803.890
-ops::gather_col_f32                  1.370        5916591       4319.468
-ops::gather_col_f32                  1.337        5916591       4425.138
-ops::gather_col_f32                  1.328        5916591       4456.523
-ops::gather_col_f32                  1.043        5916591       5674.935
-ops::gather_col_f32                  1.191        5916591       4968.272
-ops::gather_col_f32                  0.953        5916591       6208.932
-ops::gather_col_f32                  2.093        5916591       2826.453
-ops::groupby_agg_multi_key_ty      280.277        5916591         21.110
-ops::ht_mark_valid                   2.510       16777216       6683.484
-ops::ht_extract_compact              0.814              4          0.005
-ops::cast_u32_to_f32                 0.188              4          0.021
-ops::cast_u32_to_f32                 0.186              4          0.021
-ops::cast_u32_to_f32                 0.194              4          0.021
-ops::cast_u32_to_f32                 0.177              4          0.023
+ops::filter_le_u32                   9.973        6001215        601.776
+ops::gather_col_u32                  2.105        5916591       2811.122
+ops::gather_col_u32                  1.863        5916591       3176.338
+ops::gather_col_f32                  1.990        5916591       2973.722
+ops::gather_col_f32                  1.853        5916591       3193.050
+ops::gather_col_f32                  1.587        5916591       3727.573
+ops::gather_col_f32                  1.237        5916591       4784.788
+ops::gather_col_f32                  2.142        5916591       2762.181
+ops::gather_col_f32                  1.642        5916591       3603.009
+ops::gather_col_f32                  1.902        5916591       3110.312
+ops::gather_col_f32                  1.161        5916591       5094.471
+ops::gather_col_f32                  2.185        5916591       2707.977
+ops::groupby_agg_multi_key_ty      290.154        5916591         20.391
+ops::ht_mark_valid                   2.481       16777216       6762.620
+ops::ht_extract_compact              0.778              4          0.005
+ops::cast_u32_to_f32                 0.179              4          0.022
+ops::cast_u32_to_f32                 0.179              4          0.022
+ops::cast_u32_to_f32                 0.181              4          0.022
+ops::cast_u32_to_f32                 0.175              4          0.023
 block_sort_kv_u64                    0.000              4          0.000
-orderby_gpu_gather                   7.080             40          0.006
+orderby_gpu_gather                   6.941             40          0.006
 ─────────────────────────────────────────────────────────────────
-TOTAL: 316.056 ms
+TOTAL: 330.706 ms

@@ -498,7 +498,7 @@ std::optional<FilterResult> GpuOps::filterU32Indexed(const std::string& colName,
     return res;
 }
 
-std::optional<FilterResult> GpuOps::filterF32(const std::string& colName,
+std::optional<FilterResult> GpuOps::filterF32(const std::string& /*colName*/,
                                                       MTL::Buffer* col,
                                                       uint32_t rowCount,
                                                       engine::GpuFilterOp op,

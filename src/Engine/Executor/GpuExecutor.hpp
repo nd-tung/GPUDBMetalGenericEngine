@@ -62,16 +62,25 @@ public:
     
     // Recursively evaluate filter predicates on GPU
     static bool executeFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx);
+
+    // ========================================================================
+    // JoinPipelineState: bundles mutable state threaded through join execution.
+    // Avoids passing 5+ separate mutable references between executeJoinPipeline
+    // and its helper functions.
+    // ========================================================================
+    struct JoinPipelineState {
+        std::unordered_map<std::string, EvalContext>& tableContexts;
+        std::vector<EvalContext>&                     savedPipelines;
+        std::vector<std::set<std::string>>&           savedPipelineTables;
+        std::set<std::string>&                        joinedTables;
+        bool&                                         hasPipeline;
+    };
     
     // Execute full join pipeline: resolve tables, handle scalar subqueries, and dispatch join
     static bool executeJoinPipeline(
         const IRJoin& join,
         EvalContext& currentCtx,
-        std::unordered_map<std::string, EvalContext>& tableContexts,
-        std::vector<EvalContext>& savedPipelines,
-        std::vector<std::set<std::string>>& savedPipelineTables,
-        std::set<std::string>& joinedTables,
-        bool& hasPipeline,
+        JoinPipelineState& state,
         ExecutionResult& result
     );
 };

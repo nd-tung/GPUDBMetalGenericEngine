@@ -1,6 +1,7 @@
 #include "Operators.hpp"
 #include "OperatorsInternal.hpp"
 #include "KernelTimer.hpp"
+#include "EngineConfig.hpp"
 
 #include <cstring>
 #include <iostream>
@@ -109,7 +110,7 @@ static void blockSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count
 void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
     if (count <= 1) return;
 
-    if (count <= 1024) {
+    if (count <= engine::config::kBlockSortThreshold) {
         blockSortU32(keys, indices, count);
         KernelTimer::instance().record("block_sort_kv_u32", "sort", 0, count);
         return;
@@ -194,7 +195,7 @@ void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
 void GpuOps::radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
     if (count <= 1) return;
 
-    if (count <= 1024) {
+    if (count <= engine::config::kBlockSortThreshold) {
         blockSortU64(keys, indices, count);
         KernelTimer::instance().record("block_sort_kv_u64", "sort", 0, count);
         return;

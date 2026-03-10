@@ -1,0 +1,462 @@
+Script started on Sun Mar  8 13:39:49 2026
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  python3 /tmp/find_god_functions.py 2 [K>>&1[?2004l
+Found 1 functions with 100+ lines:
+
+#    Lines   Range           File                                                    Function
+--------------------------------------------------------------------------------------------------------------------------------------------
+1    142     L17-L158        src/main.cpp                                            executeQuery
+
+
+Detailed signatures:
+============================================================================================================================================
+
+1. src/main.cpp :: executeQuery  (lines 17-158, 142 lines)
+   Signature: #include "Schema.hpp" #include "DuckDBAdapter.hpp" #include "KernelTimer.hpp" #include "EnvUtil.hpp"  static int executeQuery(const std::string& sql, ...
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  for f in src/Engine/Executor/*.cpp s [Krrc/Engine/Planner/*.cpp src/Engine/Storage/GPU/*.cpp; do echo "=== $f ===" && he [Kaad -20 "$f" && echo "..."; done 2>&1 | head -200[?2004l
+=== src/Engine/Executor/Aggregate.cpp ===
+#include "GpuExecutor.hpp"
+#include "GpuExecutorDetail.hpp"
+#include "Operators.hpp"
+#include "EngineError.hpp"
+
+#include <iostream>
+#include <limits>
+
+namespace engine {
+
+bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
+                                        double& outValue, std::string& outName) {
+    outName = agg.alias.empty() ? aggFuncName(agg.func) : agg.alias;
+    
+    // Account for active rows
+    uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
+    // Clamp if activeRowsCount exceeds rowCount
+    if (ctx.activeRowsGPU != nullptr && ctx.activeRowsCountGPU > ctx.rowCount) {
+        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] CountStar: activeRowsCountGPU " << ctx.activeRowsCountGPU << " > rowCount " << ctx.rowCount << ", ignoring GPU selection\n";
+        count = ctx.rowCount;
+...
+=== src/Engine/Executor/Distinct.cpp ===
+#include "GpuExecutor.hpp"
+#include "GpuExecutorDetail.hpp"
+#include "Operators.hpp"
+#include "TypedExpr.hpp"
+
+#include <iostream>
+
+namespace engine {
+
+// Forward declaration — defined in GpuExecutor.cpp
+uint32_t deduplicateContext(EvalContext& ctx,
+                            const std::vector<std::string>& dedupCols,
+                            bool debug);
+
+bool GpuExecutor::executeDistinct(const IRDistinct& distinct, EvalContext& ctx) {
+    if (ctx.rowCount <= 1) return true;
+
+    bool debug = (std::getenv("GPUDB_DEBUG") != nullptr);
+
+    // Collect all column names to deduplicate on.
+...
+=== src/Engine/Executor/Evaluator.cpp ===
+#include "GpuExecutorDetail.hpp"
+#include "EngineError.hpp"
+
+#include <iostream>
+#include <algorithm>
+#include <cmath>
+#include <chrono>
+
+namespace engine {
+
+// Unwrap Cast/Alias wrappers to get the underlying expression.
+static const TypedExpr* unwrapExpr(const TypedExpr* e) {
+    while (e) {
+        if (e->kind == TypedExpr::Kind::Cast) e = e->asCast().expr.get();
+        else if (e->kind == TypedExpr::Kind::Alias) e = e->asAlias().expr.get();
+        else break;
+    }
+    return e;
+}
+
+...
+=== src/Engine/Executor/Filter.cpp ===
+#include "GpuExecutor.hpp"
+#include "GpuExecutorDetail.hpp"
+#include "EngineError.hpp"
+
+#include <iostream>
+#include <set>
+
+namespace engine {
+
+bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
+    const bool debug = env_truthy("GPUDB_DEBUG_OPS");
+    
+    if (!filter.predicate) {
+        if (debug) std::cerr << "[Exec] Filter: no predicate\n";
+        return true;  // No-op filter
+    }
+    
+    if (debug) {
+        std::cerr << "[Exec] Filter predicate kind=" << static_cast<int>(filter.predicate->kind) << "\n";
+        std::cerr << "[Exec] Filter predicateStr=" << filter.predicateStr << "\n";
+...
+=== src/Engine/Executor/FilterOps.cpp ===
+#include "Operators.hpp"
+#include "OperatorsInternal.hpp"
+#include "EnvUtil.hpp"
+#include "KernelTimer.hpp"
+
+#include <cstring>
+#include <iostream>
+
+namespace engine {
+
+std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
+                                                      MTL::Buffer* col,
+                                                      uint32_t rowCount,
+                                                      engine::GpuFilterOp op,
+                                                      uint32_t literal) {
+    auto& store = GpuColumnStore::instance();
+    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
+
+    if (env_truthy("GPUDB_DEBUG_OPS")) {
+        std::cerr << "[Exec] GPU filterU32: col=" << colName << " rowCount=" << rowCount << " val=" << literal << "\n";
+...
+=== src/Engine/Executor/GpuExecutor.cpp ===
+#include "GpuExecutor.hpp"
+#include "GpuExecutorDetail.hpp"
+#include "Operators.hpp"
+#include "GpuColumnStore.hpp"
+#include <Metal/Metal.hpp>
+
+#include "Planner.hpp"
+#include "KernelTimer.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cctype>
+#include <iostream>
+#include <map>
+#include <set>
+#include <unordered_set>
+
+namespace engine {
+
+// ── GPU dedup helper: deduplicate an EvalContext by u32 key columns ──
+...
+=== src/Engine/Executor/GroupBy.cpp ===
+#include "GpuExecutor.hpp"
+#include "GpuExecutorDetail.hpp"
+#include "Operators.hpp"
+#include "GpuColumnStore.hpp"
+#include "KernelTimer.hpp"
+#include "EngineError.hpp"
+#include "Schema.hpp"
+
+#include <algorithm>
+#include <cstring>
+#include <iomanip>
+#include <iostream>
+#include <map>
+#include <unordered_map>
+#include <unordered_set>
+
+namespace engine {
+
+// ── Data structures for extracted helpers ──
+
+...
+=== src/Engine/Executor/GroupByOps.cpp ===
+#include "Operators.hpp"
+#include "OperatorsInternal.hpp"
+#include "EnvUtil.hpp"
+#include "KernelTimer.hpp"
+#include "EngineConfig.hpp"
+
+#include <cstring>
+#include <iostream>
+
+namespace engine {
+
+std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vector<MTL::Buffer*>& keyColsU32,
+                                                                         const std::vector<MTL::Buffer*>& aggInputsF32,
+                                                                         const std::vector<uint32_t>& aggTypes,
+                                                                         uint32_t rowCount) {
+    auto& store = GpuColumnStore::instance();
+    if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
+
+    auto p = makePSO(store.device(), store.library(), "ops::groupby_agg_multi_key_typed");
+    if (!p) return std::nullopt;
+...
+=== src/Engine/Executor/JoinCore.cpp ===
+// ============================================================================
+// JoinCore.cpp — Core join execution: key resolution, hash join, output scatter
+// ============================================================================
+#include "JoinInternal.hpp"
+#include <future>
+#include <thread>
+
+namespace engine {
+
+// Helper: extract all equi-join key pairs from a condition expression,
+// and collect non-equality conditions as residual post-join filters.
+static void extractJoinKeyPairs(const TypedExprPtr& expr, 
+                                std::vector<std::pair<std::string, std::string>>& keyPairs,
+                                std::vector<TypedExprPtr>* residuals = nullptr) {
+    if (!expr) return;
+    
+    if (expr->kind == TypedExpr::Kind::Compare) {
+        const auto& cmp = expr->asCompare();
+        if (cmp.op == CompareOp::Eq && cmp.left && cmp.right) {
+            if (cmp.left->kind == TypedExpr::Kind::Column && 
+...
+=== src/Engine/Executor/JoinOps.cpp ===
+#include "Operators.hpp"
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  python3 /tmp/find_god_functions3.py  [K22>&1[?2004l
+Found 52 functions with 100+ lines:
+
+#    Lines   Range           File                                                    Function
+--------------------------------------------------------------------------------------------------------------------------------------------
+1    456     L275-L730       src/Engine/Executor/GroupBy.cpp                         buildGroupByKeys
+2    444     L514-L957       src/Engine/Executor/Evaluator.cpp                       filterCompare
+3    402     L1259-L1660     src/Engine/Executor/GroupBy.cpp                         GpuExecutor::executeGroupBy
+4    347     L110-L456       src/Engine/Executor/OrderBy.cpp                         GpuExecutor::executeOrderBy
+5    342     L315-L656       src/Engine/Planner/PlannerExprParser.cpp                std::move
+6    342     L567-L908       src/Engine/Executor/JoinCore.cpp                        if
+7    318     L16-L333        src/Engine/Executor/JoinScalarSubquery.cpp              handleScalarSubquerySavedPipelines
+8    280     L1794-L2073     src/Engine/Executor/GpuExecutor.cpp                     GpuExecutor::execute
+9    276     L342-L617       src/Engine/Executor/JoinScalarSubquery.cpp              handled
+10   270     L737-L1006      src/Engine/Executor/GroupBy.cpp                         buildAggInputs
+11   270     L1279-L1548     src/Engine/Executor/Project.cpp                         push_back
+12   265     L859-L1123      src/Engine/Planner/PlannerNodeHandlers.cpp              handleJoinEmit
+13   238     L625-L862       src/Engine/Executor/GpuExecutor.cpp                     handleExecFilterNode
+14   218     L194-L411       src/Engine/Executor/JoinOutput.cpp                      appendUnmatchedRightRows
+15   217     L556-L772       src/Engine/Planner/PlannerTraversal.cpp                 insert
+16   215     L133-L347       src/Engine/Executor/Project.cpp                         SUBSTRING
+17   207     L374-L580       src/Engine/Planner/PlannerNodeHandlers.cpp              handleGroupBy
+18   206     L1679-L1884     src/Engine/Executor/Evaluator.cpp                       GpuExecutor::executeFilterRecursive
+19   200     L1400-L1599     src/Engine/Executor/Evaluator.cpp                       evalFunctionExpr
+20   199     L355-L553       src/Engine/Executor/Project.cpp                         EXTRACT
+21   192     L15-L206        src/Engine/Planner/PlannerNodeHandlers.cpp              handleScan
+22   191     L868-L1058      src/Engine/Executor/GpuExecutor.cpp                     handleExecGroupByNode
+23   186     L1523-L1708     src/Engine/Executor/GpuExecutor.cpp                     recoverStringColumns
+24   186     L1100-L1285     src/Engine/Executor/Evaluator.cpp                       if
+25   184     L610-L793       src/Engine/Executor/JoinPipeline.cpp                    GpuExecutor::executeJoinPipeline
+26   179     L11-L189        src/Engine/Executor/JoinPipeline.cpp                    dedupDelimJoinRHS
+27   176     L1959-L2134     src/Engine/Executor/Evaluator.cpp                       GpuExecutor::evaluateExpression
+28   174     L572-L745       src/Engine/Executor/Project.cpp                         projectCrossTableLookup
+29   173     L15-L187        src/Engine/Executor/JoinOutput.cpp                      appendUnmatchedLeftRows
+30   159     L211-L369       src/Engine/Planner/PlannerNodeHandlers.cpp              handleFilter
+31   158     L338-L495       src/Engine/Planner/PlannerTraversal.cpp                 handleDelimJoinTraversal
+32   158     L760-L917       src/Engine/Executor/Project.cpp                         void
+33   155     L48-L202        src/Engine/Executor/JoinCore.cpp                        executeJoin
+34   142     L17-L158        src/main.cpp                                            executeQuery
+35   140     L959-L1098      src/Engine/Executor/Evaluator.cpp                       filterColumnAsBool
+36   128     L285-L412       src/Engine/Executor/Operators.cpp                       GpuOps::scanTable
+37   125     L193-L317       src/Engine/Planner/PlannerTraversal.cpp                 traverseNode
+38   125     L1394-L1518     src/Engine/Executor/GpuExecutor.cpp                     resolveOutputColumnNames
+39   125     L15-L139        src/Engine/Executor/GroupByOps.cpp                      GpuOps::groupByAggMultiKeyTyped
+40   124     L25-L148        src/Engine/Executor/GpuExecutor.cpp                     count
+41   124     L157-L280       src/Engine/Executor/GpuExecutor.cpp                     GpuExecutor::getUnsupportedFeatures
+42   121     L16-L136        src/Engine/Executor/JoinOps.cpp                         GpuOps::joinHash
+43   120     L1271-L1390     src/Engine/Executor/GpuExecutor.cpp                     materializeContextToResult
+44   115     L91-L205        src/Engine/Executor/Evaluator.cpp                       substring
+45   114     L265-L378       src/Engine/Executor/GroupByOps.cpp                      GpuOps::dedupByKeys
+46   112     L1116-L1227     src/Engine/Executor/GpuExecutor.cpp                     handleExecOrderByNode
+47   112     L1287-L1398     src/Engine/Executor/Evaluator.cpp                       evalCaseExpr
+48   112     L145-L256       src/Engine/Executor/GroupByOps.cpp                      GpuOps::extractGroupByHT
+49   108     L209-L316       src/Engine/Executor/JoinCore.cpp                        applyPostJoinFilter
+50   107     L20-L126        src/Engine/Executor/Project.cpp                         fuzzyFindColumn
+51   105     L659-L763       src/Engine/Planner/PlannerNodeHandlers.cpp              handleProjection
+52   102     L926-L1027      src/Engine/Executor/Project.cpp                         compaction
+
+
+Detailed signatures:
+============================================================================================================================================
+
+1. src/Engine/Executor/GroupBy.cpp :: buildGroupByKeys  (lines 275-730, 456 lines)
+   Sig: // Handles dict ID path, GPU FNV1a hash path, CPU fallback, positional references, // and f32→u32 bitcast for float groupby keys. static GroupByKeyData buildGroupByKeys( const IRGroupBy& groupBy, Eval...
+
+2. src/Engine/Executor/Evaluator.cpp :: filterCompare  (lines 514-957, 444 lines)
+   Sig: return true; } return false; }  static bool filterCompare(const TypedExprPtr& expr, EvalContext& ctx) {
+
+3. src/Engine/Executor/GroupBy.cpp :: GpuExecutor::executeGroupBy  (lines 1259-1660, 402 lines)
+   Sig: } } } }  bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, TableResult& out) {
+
+4. src/Engine/Executor/OrderBy.cpp :: GpuExecutor::executeOrderBy  (lines 110-456, 347 lines)
+   Sig: return sortCols; }  bool GpuExecutor::executeOrderBy(const IROrderBy& order, TableResult& table, const std::unordered_map<std::string, DictEncoded>& dictCols, const std::unordered_map<std::string, Fla...
+
+5. src/Engine/Planner/PlannerExprParser.cpp :: std::move  (lines 315-656, 342 lines)
+   Sig: e->data = std::move(fc); return e; }  // Simple expression parser for DuckDB expression strings TypedExprPtr Planner::parseExpression(const std::string& exprStr) {
+
+6. src/Engine/Executor/JoinCore.cpp :: if  (lines 567-908, 342 lines)
+   Sig: if (debug) std::cerr << "[Exec] Join: resolved " << result.keys.size() << " key pair(s)\n"; return result; }  bool GpuExecutor::executeJoin(const IRJoin& join, EvalContext& leftCtx, EvalContext& right...
+
+7. src/Engine/Executor/JoinScalarSubquery.cpp :: handleScalarSubquerySavedPipelines  (lines 16-333, 318 lines)
+   Sig: bool handleScalarSubquerySavedPipelines( const IRJoin& join, EvalContext& currentCtx, std::vector<EvalContext>& savedPipelines, std::vector<std::set<std::string>>& savedPipelineTables, std::set<std::s...
+
+8. src/Engine/Executor/GpuExecutor.cpp :: GpuExecutor::execute  (lines 1794-2073, 280 lines)
+   Sig: }   // --- Main Execution Entry Point ---  GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::string& datasetPath) {
+
+9. src/Engine/Executor/JoinScalarSubquery.cpp :: handled  (lines 342-617, 276 lines)
+   Sig: // Returns true if handled (caller should return). bool handleScalarSubqueryTableContexts( const IRJoin& join, EvalContext& currentCtx, std::unordered_map<std::string, EvalContext>& tableContexts, std...
+
+10. src/Engine/Executor/GroupBy.cpp :: buildAggInputs  (lines 737-1006, 270 lines)
+   Sig: // -- Extracted: buildAggInputs -- // Builds aggregate input vectors and GPU buffers for each IRGroupBy aggregate spec. static GroupByAggData buildAggInputs( const IRGroupBy& groupBy, EvalContext& ctx...
+
+11. src/Engine/Executor/Project.cpp :: push_back  (lines 1279-1548, 270 lines)
+   Sig: out.f32Cols.push_back(std::move(colData)); out.f32Names.push_back(outName.empty() ? col : outName); return true; }  bool GpuExecutor::executeProject(const IRProject& project, EvalContext& ctx, TableRe...
+
+12. src/Engine/Planner/PlannerNodeHandlers.cpp :: handleJoinEmit  (lines 859-1123, 265 lines)
+   Sig: }  // ========== handleJoinEmit ========== void handleJoinEmit(const json& /*node*/, const std::string& name, const std::string& nameLower, const json& extraInfo, const std::vector<std::string>& child...
+
+13. src/Engine/Executor/GpuExecutor.cpp :: handleExecFilterNode  (lines 625-862, 238 lines)
+   Sig: static bool handleExecFilterNode( const IRFilter& filter, bool debug, EvalContext& currentCtx, std::unordered_map<std::string, EvalContext>& tableContexts, TableResult& tableResult, GpuExecutor::Execu...
+
+14. src/Engine/Executor/JoinOutput.cpp :: appendUnmatchedRightRows  (lines 194-411, 218 lines)
+   Sig: void appendUnmatchedRightRows( EvalContext& rightCtx, EvalContext& outCtx, const JoinResult& jRes, uint32_t& resCount, uint32_t rCount, const std::unordered_map<std::string, std::string>& rightColumnM...
+
+15. src/Engine/Planner/PlannerTraversal.cpp :: insert  (lines 556-772, 217 lines)
+   Sig: childProjs.insert(childProjs.end(), lhsProjections.begin(), lhsProjections.end()); childProjs.insert(childProjs.end(), rhsProjections.begin(), rhsProjections.end()); }   void traverseNode(const json& ...
+
+16. src/Engine/Executor/Project.cpp :: SUBSTRING  (lines 133-347, 215 lines)
+   Sig: // -- Extracted: projectSubstring -- // Handles SUBSTRING(column, start, length) projection. // Returns true if handled (caller should continue). static bool projectSubstring(const FunctionCall& func,...
+
+17. src/Engine/Planner/PlannerNodeHandlers.cpp :: handleGroupBy  (lines 374-580, 207 lines)
+   Sig: }  // ========== handleGroupBy ========== void handleGroupBy(const json& /*node*/, const std::string& name, const json& extraInfo, const std::vector<std::string>& childProjs, std::vector<std::string>&...
+
+18. src/Engine/Executor/Evaluator.cpp :: GpuExecutor::executeFilterRecursive  (lines 1679-1884, 206 lines)
+   Sig: ctx.activeRowsCountGPU = res->count; } return true; }  bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx) {
+
+19. src/Engine/Executor/Evaluator.cpp :: evalFunctionExpr  (lines 1400-1599, 200 lines)
+   Sig: return outBuf; } return nullptr; // unreachable: call site guarantees expr->kind == Case }  static MTL::Buffer* evalFunctionExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
+
+20. src/Engine/Executor/Project.cpp :: EXTRACT  (lines 355-553, 199 lines)
+   Sig: // Handles EXTRACT(YEAR FROM col) and YEAR(col) projection. // Returns true if handled (caller should continue). static bool projectExtractYear(const FunctionCall& func, const std::string& funcLower, ...
+
+21. src/Engine/Planner/PlannerNodeHandlers.cpp :: handleScan  (lines 15-206, 192 lines)
+   Sig: namespace engine {  // ========== handleScan ========== bool handleScan(const json& /*node*/, const std::string& name, const std::string& nameLower, const json& extraInfo, std::vector<std::string>& my...
+
+22. src/Engine/Executor/GpuExecutor.cpp :: handleExecGroupByNode  (lines 868-1058, 191 lines)
+   Sig: static bool handleExecGroupByNode( const IRGroupBy& groupBy, bool debug, EvalContext& currentCtx, TableResult& tableResult, std::set<std::string>& joinedTables, bool& hasPipeline, GpuExecutor::Executi...
+
+23. src/Engine/Executor/GpuExecutor.cpp :: recoverStringColumns  (lines 1523-1708, 186 lines)
+   Sig: }  static void recoverStringColumns( EvalContext& currentCtx, TableResult& tableResult, const std::string& datasetPath, bool debug ) {
+
+24. src/Engine/Executor/Evaluator.cpp :: if  (lines 1100-1285, 186 lines)
+   Sig: } // end if (expr->kind == Column)  return false; }  static MTL::Buffer* evalColumnExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
+
+25. src/Engine/Executor/JoinPipeline.cpp :: GpuExecutor::executeJoinPipeline  (lines 610-793, 184 lines)
+   Sig: bool GpuExecutor::executeJoinPipeline( const IRJoin& join, EvalContext& currentCtx, JoinPipelineState& state, ExecutionResult& result ) {
+
+26. src/Engine/Executor/JoinPipeline.cpp :: dedupDelimJoinRHS  (lines 11-189, 179 lines)
+   Sig: namespace engine {  // -- dedupDelimJoinRHS -- // Deduplicates RHS for DELIM_JOIN self-comparison patterns. void dedupDelimJoinRHS( const IRJoin& join, EvalContext& currentCtx, EvalContext& rightCtx, ...
+
+27. src/Engine/Executor/Evaluator.cpp :: GpuExecutor::evaluateExpression  (lines 1959-2134, 176 lines)
+   Sig: }  return nullptr; }  MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx) {
+
+28. src/Engine/Executor/Project.cpp :: projectCrossTableLookup  (lines 572-745, 174 lines)
+   Sig: //   instead of hard-coded column-name prefixes, so this works for arbitrary //   schemas beyond TPC-H. static bool projectCrossTableLookup(const std::string& lookupCol, EvalContext& ctx, TableResult&...
+
+29. src/Engine/Executor/JoinOutput.cpp :: appendUnmatchedLeftRows  (lines 15-187, 173 lines)
+   Sig: void appendUnmatchedLeftRows( EvalContext& leftCtx, EvalContext& outCtx, const JoinResult& jRes, uint32_t& resCount, uint32_t lCount, const std::unordered_map<std::string, std::string>& rightColumnMap...
+
+30. src/Engine/Planner/PlannerNodeHandlers.cpp :: handleFilter  (lines 211-369, 159 lines)
+   Sig: }  // ========== handleFilter ========== void handleFilter(const json& /*node*/, const std::string& name, const json& extraInfo, const std::string& extraStr, std::vector<std::string>& childProjs, Trav...
+
+31. src/Engine/Planner/PlannerTraversal.cpp :: handleDelimJoinTraversal  (lines 338-495, 158 lines)
+   Sig: }  // --- handleDelimJoinTraversal: process DELIM_JOIN provider/consumer pattern --- static void handleDelimJoinTraversal(const json& node, const std::string& /*name*/, const std::string& nameLower, c...
+
+32. src/Engine/Executor/Project.cpp :: void  (lines 760-917, 158 lines)
+   Sig: const std::string& posName, EvalContext& ctx, TableResult& out, const std::function<void(size_t)>& updateRowCount, bool debug) {
+
+33. src/Engine/Executor/JoinCore.cpp :: executeJoin  (lines 48-202, 155 lines)
+   Sig: // ============================================================================ // Extracted helpers for executeJoin() // ============================================================================  ...
+
+34. src/main.cpp :: executeQuery  (lines 17-158, 142 lines)
+   Sig: #include "Schema.hpp" #include "DuckDBAdapter.hpp" #include "KernelTimer.hpp" #include "EnvUtil.hpp"  static int executeQuery(const std::string& sql, const std::string& datasetPath) {
+
+35. src/Engine/Executor/Evaluator.cpp :: filterColumnAsBool  (lines 959-1098, 140 lines)
+   Sig: return false; } return false; }  static bool filterColumnAsBool(const TypedExprPtr& expr, EvalContext& ctx) {
+
+36. src/Engine/Executor/Operators.cpp :: GpuOps::scanTable  (lines 285-412, 128 lines)
+   Sig: }}, };  GpuRelation GpuOps::scanTable(const std::string& datasetPath, const std::string& table, const std::vector<std::string>& neededCols) {
+
+37. src/Engine/Planner/PlannerTraversal.cpp :: traverseNode  (lines 193-317, 125 lines)
+   Sig: traverseNode(kids[1], ctx); return true; }  // --- tryCaptureJoinRHS: attempt to capture a simple Scan/Filter chain from the RHS subtree --- static bool tryCaptureJoinRHS(const json& root, JoinCapture...
+
+38. src/Engine/Executor/GpuExecutor.cpp :: resolveOutputColumnNames  (lines 1394-1518, 125 lines)
+   Sig: }  static void resolveOutputColumnNames( EvalContext& currentCtx, TableResult& tableResult, bool debug ) {
+
+39. src/Engine/Executor/GroupByOps.cpp :: GpuOps::groupByAggMultiKeyTyped  (lines 15-139, 125 lines)
+   Sig: namespace engine {  std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vector<MTL::Buffer*>& keyColsU32, const std::vector<MTL::Buffer*>& aggInputsF32, const std::vector<uint32...
+
+40. src/Engine/Executor/GpuExecutor.cpp :: count  (lines 25-148, 124 lines)
+   Sig: // ── GPU dedup helper: deduplicate an EvalContext by u32 key columns ── // Uses GpuOps::dedupByKeys on GPU buffers, then GPU gather for u32/f32, // CPU gather for strings. Returns new row count (0 = ...
+
+41. src/Engine/Executor/GpuExecutor.cpp :: GpuExecutor::getUnsupportedFeatures  (lines 157-280, 124 lines)
+   Sig: // column appears in multiple comparison arms and suffixed variants exist.   // --- GPU Feasibility Checking ---  std::vector<std::string> GpuExecutor::getUnsupportedFeatures(const Plan& plan) {
+
+42. src/Engine/Executor/JoinOps.cpp :: GpuOps::joinHash  (lines 16-136, 121 lines)
+   Sig: JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys, MTL::Buffer* /*buildIndices*/, uint32_t buildCount, MTL::Buffer* probeKeys, MTL::Buffer* /*probeIndices*/, uint32_t probeCount) {
+
+43. src/Engine/Executor/GpuExecutor.cpp :: materializeContextToResult  (lines 1271-1390, 120 lines)
+   Sig: }  static void materializeContextToResult( EvalContext& currentCtx, TableResult& tableResult, bool isScalarAggregate, bool debug ) {
+
+44. src/Engine/Executor/Evaluator.cpp :: substring  (lines 91-205, 115 lines)
+   Sig: // ============================================================================  // Handles IN operator by rewriting to a chain of ORed equality comparisons. // Supports substring(col, start, len) IN ...
+
+45. src/Engine/Executor/GroupByOps.cpp :: GpuOps::dedupByKeys  (lines 265-378, 114 lines)
+   Sig: g.htAggs = nullptr; g.capacity = 0; }  MTL::Buffer* GpuOps::dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count, uint32_t& uniqueCount) {
+
+46. src/Engine/Executor/GpuExecutor.cpp :: handleExecOrderByNode  (lines 1116-1227, 112 lines)
+   Sig: }  static bool handleExecOrderByNode( const IROrderBy& orderBy, bool debug, EvalContext& currentCtx, TableResult& tableResult, GpuExecutor::ExecutionResult& result ) {
+
+47. src/Engine/Executor/Evaluator.cpp :: evalCaseExpr  (lines 1287-1398, 112 lines)
+   Sig: } } return nullptr; // unreachable: call site guarantees expr->kind == Column }  static MTL::Buffer* evalCaseExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
+
+48. src/Engine/Executor/GroupByOps.cpp :: GpuOps::extractGroupByHT  (lines 145-256, 112 lines)
+   Sig: std::optional<GroupByExtractResult> GpuOps::extractGroupByHT( const GroupByHashTable& ht, uint32_t numKeys, uint32_t numAggsTotal) {
+
+49. src/Engine/Executor/JoinCore.cpp :: applyPostJoinFilter  (lines 209-316, 108 lines)
+   Sig: static void applyPostJoinFilter( const TypedExprPtr& postJoinFilter, const EvalContext& leftCtx, const EvalContext& rightCtx, const std::unordered_map<std::string, std::string>& rightColumnMapping, Ev...
+
+50. src/Engine/Executor/Project.cpp :: fuzzyFindColumn  (lines 20-126, 107 lines)
+   Sig: namespace engine {  // -- Extracted: fuzzyFindColumn -- // Fuzzy column resolution for join aliases, aggregate expressions, and TPC-H key suffixes. static std::string fuzzyFindColumn(const std::string...
+
+51. src/Engine/Planner/PlannerNodeHandlers.cpp :: handleProjection  (lines 659-763, 105 lines)
+   Sig: }  // ========== handleProjection ========== void handleProjection(const json& /*node*/, const std::string& name, const std::vector<std::string>& myProjs, const std::vector<std::string>& childProjs, T...
+
+52. src/Engine/Executor/Project.cpp :: compaction  (lines 926-1027, 102 lines)
+   Sig: // activeRows compaction (GPU flat-string gather or CPU fallback), and pushes to output. static bool projectStringColumn( const std::string& col, const std::string& outName, const std::string& posName...
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  make 2>&1 | grep -E "error|warning"  [K|| head -20[?2004l
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/duckdb/lib/libduckdb.dylib' which was built for newer version 26.0
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  make 2>&1 | tail -5[?2004l
+Built without metal CLI — shaders will be compiled at runtime from kernels/Operators.metal
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h[?2004l
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  ./scripts/run_all_tests.sh 2>&1 | gr [Keep -E "SUMMARY|Total:|Pass:|Fail:" [?2004l
+^C
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  ./scripts/run_all_tests.sh 2>&1 | ta [Kiil -8[?2004l
+^C
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  ./scripts/run_all_tests.sh 2>&1 | ta [Kiil -10[?2004l
+^C
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  ./scripts/run_all_tests.sh 2>/dev/nu [Klll | tail -10[?2004l
+^C
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h  bash ./scripts/run_all_tests.sh > /t [Kmmp/test_output.txt 2>&1; tail -10 /tmp/test_output.txt[?2004l
+    CPU postprocess time: 26.55 ms
+
+
+=================================================================
+  SUMMARY
+=================================================================
+  Total: 47   [0;32mPass: 47[0m   [0;31mFail: 0[0m
+=================================================================
+
+Detailed results saved in: results/test_run/
+[1m[7m%[27m[1m[0m                                                                                [0m[27m[24m[Jnguyen@APW01T4Z7 GPUDBMetalGenericEngine % [K[?2004h

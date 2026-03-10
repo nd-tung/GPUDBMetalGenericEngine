@@ -1,5 +1,5 @@
 #include "GpuExecutorDetail.hpp"
-#include "Operators.hpp" // Included for GpuOps::filter*
+#include "EngineError.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -204,6 +204,612 @@ static bool filterCompareInList(const CompareExpr& cmp, EvalContext& ctx,
     return GpuExecutor::executeFilterRecursive(root, ctx);
 }
 
+// Constant-fold Literal vs Literal comparisons (e.g. 1=1).
+// Returns true if both sides are literals (handled), false otherwise.
+static bool filterCompareLiteralVsLiteral(const TypedExpr* leftRaw,
+                                          const TypedExpr* rightRaw,
+                                          const CompareExpr& cmp,
+                                          EvalContext& ctx, bool debug) {
+    if (!(leftRaw && rightRaw &&
+          leftRaw->kind == TypedExpr::Kind::Literal &&
+          rightRaw->kind == TypedExpr::Kind::Literal))
+        return false;
+
+    if (debug) std::cerr << "[Exec] DEBUG: Literal vs Literal comparison\n";
+    bool result = false;
+    const auto& lv = leftRaw->asLiteral().value;
+    const auto& rv = rightRaw->asLiteral().value;
+    if      (cmp.op == engine::CompareOp::Eq) result = (lv == rv);
+    else if (cmp.op == engine::CompareOp::Ne) result = (lv != rv);
+    else if (cmp.op == engine::CompareOp::Lt) result = (lv < rv);
+    else if (cmp.op == engine::CompareOp::Le) result = (lv <= rv);
+    else if (cmp.op == engine::CompareOp::Gt) result = (lv > rv);
+    else if (cmp.op == engine::CompareOp::Ge) result = (lv >= rv);
+
+    if (result) {
+        if (!ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0)
+            ctx.activeRowsCountGPU = ctx.rowCount;
+    } else {
+        ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
+        ctx.activeRowsCountGPU = 0;
+    }
+    return true;
+}
+
+// Handle Column vs Column comparison on GPU.
+// Returns true if both sides are columns and the filter was executed.
+static bool filterCompareColVsCol(const TypedExpr* leftRaw,
+                                  const TypedExpr* rightRaw,
+                                  const CompareExpr& cmp,
+                                  EvalContext& ctx, bool debug) {
+    if (!(leftRaw && rightRaw &&
+          leftRaw->kind == TypedExpr::Kind::Column &&
+          rightRaw->kind == TypedExpr::Kind::Column))
+        return false;
+
+    std::string lName = leftRaw->asColumn().column;
+    std::string rName = rightRaw->asColumn().column;
+    std::string lActual = ctx.resolveColName(lName);
+    std::string rActual = ctx.resolveColName(rName);
+    if (lActual.empty() || rActual.empty()) return false;
+
+    if (debug) std::cerr << "[Exec] Col vs Col: " << lActual << " vs " << rActual << "\n";
+
+    bool lIsF32 = ctx.f32Cols.count(lActual);
+    bool rIsF32 = ctx.f32Cols.count(rActual);
+
+    int opInt = 0;
+    if      (cmp.op == engine::CompareOp::Eq) opInt = (int)engine::GpuFilterOp::EQ;
+    else if (cmp.op == engine::CompareOp::Ne) opInt = (int)engine::GpuFilterOp::NE;
+    else if (cmp.op == engine::CompareOp::Lt) opInt = (int)engine::GpuFilterOp::LT;
+    else if (cmp.op == engine::CompareOp::Le) opInt = (int)engine::GpuFilterOp::LE;
+    else if (cmp.op == engine::CompareOp::Gt) opInt = (int)engine::GpuFilterOp::GT;
+    else if (cmp.op == engine::CompareOp::Ge) opInt = (int)engine::GpuFilterOp::GE;
+    else return false;
+
+    MTL::Buffer* rootA = lIsF32 ? ctx.f32ColsGPU.at(lActual) : ctx.u32ColsGPU.at(lActual);
+    MTL::Buffer* rootB = rIsF32 ? ctx.f32ColsGPU.at(rActual) : ctx.u32ColsGPU.at(rActual);
+
+    MTL::Buffer* finalA = rootA;
+    MTL::Buffer* finalB = rootB;
+    bool freeFinalA = false;
+    bool freeFinalB = false;
+    uint32_t workingCount = ctx.activeRowsGPU ? ctx.activeRowsCountGPU : ctx.rowCount;
+    bool useF32 = lIsF32 || rIsF32;
+
+    // 1. Cast if needed
+    if (useF32 && !lIsF32) { finalA = GpuOps::castU32ToF32(rootA, ctx.rowCount); freeFinalA = true; }
+    if (useF32 && !rIsF32) { finalB = GpuOps::castU32ToF32(rootB, ctx.rowCount); freeFinalB = true; }
+
+    // 2. Gather if active rows
+    if (ctx.activeRowsGPU) {
+        MTL::Buffer* gA = useF32 ? GpuOps::gatherF32(finalA, ctx.activeRowsGPU, workingCount)
+                                 : GpuOps::gatherU32(finalA, ctx.activeRowsGPU, workingCount);
+        if (freeFinalA) finalA->release();
+        finalA = gA; freeFinalA = true;
+
+        MTL::Buffer* gB = useF32 ? GpuOps::gatherF32(finalB, ctx.activeRowsGPU, workingCount)
+                                 : GpuOps::gatherU32(finalB, ctx.activeRowsGPU, workingCount);
+        if (freeFinalB) finalB->release();
+        finalB = gB; freeFinalB = true;
+    }
+
+    // 3. Execute
+    std::optional<FilterResult> res;
+    if (useF32) res = GpuOps::filterColColF32(finalA, finalB, workingCount, opInt);
+    else        res = GpuOps::filterColColU32(finalA, finalB, workingCount, opInt);
+
+    // 4. Cleanup
+    if (freeFinalA && finalA) finalA->release();
+    if (freeFinalB && finalB) finalB->release();
+
+    if (res) {
+        if (ctx.activeRowsGPU) {
+            MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
+            ctx.activeRowsGPU.reset(newActive);
+            ctx.activeRowsCountGPU = res->count;
+        } else {
+            ctx.activeRowsGPU = std::move(res->indices);
+            ctx.activeRowsCountGPU = res->count;
+        }
+        return true;
+    }
+    return false;
+}
+
+// Handle String Filter (LIKE or EQ) — GPU string matching via flat buffers.
+// Returns true if the comparison is a string Col op StringLiteral and was handled.
+static bool filterCompareStringCol(const CompareExpr& cmp, EvalContext& ctx, bool debug) {
+    if (cmp.op != engine::CompareOp::Like && cmp.op != engine::CompareOp::Eq)
+        return false;
+
+    const TypedExpr* left = unwrapExpr(cmp.left.get());
+    const TypedExpr* right = unwrapExpr(cmp.right.get());
+    if (!(left->kind == TypedExpr::Kind::Column &&
+          right->kind == TypedExpr::Kind::Literal &&
+          std::holds_alternative<std::string>(right->asLiteral().value)))
+        return false;
+
+    std::string colName = left->asColumn().column;
+    std::string pat = std::get<std::string>(right->asLiteral().value);
+
+    const std::vector<std::string>* vec = nullptr;
+    ctx.ensureStringCol(colName);
+    if (ctx.stringCols.count(colName)) {
+        vec = &ctx.stringCols.at(colName);
+    } else {
+        std::string resolved = ctx.resolveColName(colName);
+        if (!resolved.empty()) {
+            ctx.ensureStringCol(resolved);
+            if (ctx.stringCols.count(resolved)) { vec = &ctx.stringCols.at(resolved); colName = resolved; }
+        }
+    }
+
+    if (!vec) return false;
+
+    if (debug)
+        std::cerr << "[Exec] Found string col " << colName << " size " << vec->size() << " pattern '" << pat << "'" << std::endl;
+
+    MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+    auto fit = ctx.flatStringCols.find(colName);
+    if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
+        fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+    }
+
+    engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Like) ? engine::GpuFilterOp::LIKE_PATTERN : engine::GpuFilterOp::EQ;
+    auto res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
+
+    if (res) {
+        if (ctx.activeRowsGPU) {
+            auto joinRes = GpuOps::joinHash(ctx.activeRowsGPU, nullptr, ctx.activeRowsCountGPU, res->indices, nullptr, res->count);
+            MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
+            ctx.activeRowsGPU.reset(newActive);
+            ctx.activeRowsCountGPU = joinRes.count;
+        } else {
+            ctx.activeRowsGPU = std::move(res->indices);
+            ctx.activeRowsCountGPU = res->count;
+        }
+        return true;
+    }
+    return false;
+}
+
+// Hash-based string equality filter: Col(StringHash) = "Literal".
+// Uses FNV1a hash of the literal to compare against pre-hashed u32 column.
+// Returns true if handled.
+static bool filterCompareStringHash(const CompareExpr& cmp, EvalContext& ctx, bool debug) {
+    if (cmp.op != engine::CompareOp::Eq && cmp.op != engine::CompareOp::Ne)
+        return false;
+
+    const TypedExpr* left = unwrapExpr(cmp.left.get());
+    const TypedExpr* right = unwrapExpr(cmp.right.get());
+    if (!(left->kind == TypedExpr::Kind::Column &&
+          right->kind == TypedExpr::Kind::Literal &&
+          std::holds_alternative<std::string>(right->asLiteral().value)))
+        return false;
+
+    std::string colName = left->asColumn().column;
+    std::string pat = std::get<std::string>(right->asLiteral().value);
+    std::string actualCol = ctx.resolveColName(colName);
+    if (actualCol.empty()) return false;
+
+    // Detect SingleChar columns — compare char code, not FNV1a hash
+    bool isSingleChar = false;
+    {
+        std::string tbl = tableForColumn(actualCol);
+        if (!tbl.empty())
+            isSingleChar = SchemaRegistry::instance().isSingleCharColumn(tbl, actualCol);
+    }
+    uint32_t hashVal;
+    if (isSingleChar && pat.size() == 1) {
+        hashVal = static_cast<uint32_t>(static_cast<unsigned char>(pat[0]));
+        if (debug)
+            std::cerr << "[Exec] Found SingleChar col " << actualCol << " for pattern '" << pat << "' (charCode=" << hashVal << ")" << std::endl;
+    } else {
+        hashVal = GpuOps::fnv1a32(pat);
+        if (debug)
+            std::cerr << "[Exec] Found StringHash col " << actualCol << " for pattern '" << pat << "' (hashing=" << hashVal << ")" << std::endl;
+    }
+    engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Eq) ? engine::GpuFilterOp::EQ : engine::GpuFilterOp::NE;
+
+    MTL::Buffer* colBuf = ctx.u32ColsGPU.at(actualCol);
+    uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
+
+    std::optional<FilterResult> res;
+    if (ctx.activeRowsGPU) {
+        res = GpuOps::filterU32Indexed(actualCol, colBuf, ctx.activeRowsGPU, count, op, hashVal);
+    } else {
+        res = GpuOps::filterU32(actualCol, colBuf, count, op, hashVal);
+    }
+
+    if (res) {
+        ctx.activeRowsGPU = std::move(res->indices);
+        ctx.activeRowsCountGPU = res->count;
+        return true;
+    }
+    return false;
+}
+
+// ---------- filterCompareGenericExpression ----------
+// Handles comparison filters where one or both sides are computed expressions
+// (not simple column references). Evaluates via GPU expression evaluation.
+static bool filterCompareGenericExpression(
+    const TypedExprPtr& left, const TypedExprPtr& right,
+    const TypedExpr* leftUnwrapped, const TypedExpr* rightUnwrapped,
+    engine::GpuFilterOp op, EvalContext& ctx, bool debug)
+{
+    if (debug) std::cerr << "[Exec] GPU Filter: Generic Expression Path\n";
+    uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
+    if (count == 0) return true;
+
+    MTL::Buffer* leftBuf = nullptr;
+    float leftLitVal = 0.0f;
+    bool leftIsLit = false;
+
+    if (leftUnwrapped->kind == TypedExpr::Kind::Literal) {
+        leftIsLit = true;
+        const auto& lit = leftUnwrapped->asLiteral();
+        if (std::holds_alternative<double>(lit.value)) leftLitVal = (float)std::get<double>(lit.value);
+        else if (std::holds_alternative<int64_t>(lit.value)) leftLitVal = (float)std::get<int64_t>(lit.value);
+    } else {
+        leftBuf = GpuExecutor::evaluateExpression(left, ctx);
+        if (!leftBuf) return false;
+    }
+
+    MTL::Buffer* rightBuf = nullptr;
+    float rightLitVal = 0.0f;
+    bool rightIsLit = false;
+
+    if (rightUnwrapped->kind == TypedExpr::Kind::Literal) {
+        rightIsLit = true;
+        const auto& lit = rightUnwrapped->asLiteral();
+        if (std::holds_alternative<double>(lit.value)) rightLitVal = (float)std::get<double>(lit.value);
+        else if (std::holds_alternative<int64_t>(lit.value)) rightLitVal = (float)std::get<int64_t>(lit.value);
+    } else {
+        rightBuf = GpuExecutor::evaluateExpression(right, ctx);
+        if (!rightBuf) { if (leftBuf) leftBuf->release(); return false; }
+    }
+
+    std::optional<FilterResult> res;
+
+    if (leftIsLit && rightBuf) {
+        engine::GpuFilterOp flipped;
+        bool valid = true;
+        switch (op) {
+            case engine::GpuFilterOp::EQ: flipped = engine::GpuFilterOp::EQ; break;
+            case engine::GpuFilterOp::NE: flipped = engine::GpuFilterOp::NE; break;
+            case engine::GpuFilterOp::LT: flipped = engine::GpuFilterOp::GT; break;
+            case engine::GpuFilterOp::LE: flipped = engine::GpuFilterOp::GE; break;
+            case engine::GpuFilterOp::GT: flipped = engine::GpuFilterOp::LT; break;
+            case engine::GpuFilterOp::GE: flipped = engine::GpuFilterOp::LE; break;
+            default: valid = false; break;
+        }
+        if (valid) res = GpuOps::filterF32("expr", rightBuf, count, flipped, leftLitVal);
+    }
+    else if (leftBuf && rightIsLit) {
+        res = GpuOps::filterF32("expr", leftBuf, count, op, rightLitVal);
+    }
+    else if (leftBuf && rightBuf) {
+        res = GpuOps::filterColColF32(leftBuf, rightBuf, count, (int)op);
+    }
+
+    if (leftBuf) leftBuf->release();
+    if (rightBuf) rightBuf->release();
+
+    if (res) {
+        if (debug) std::cerr << "[Exec] Generic Filter Result: " << res->count << " rows\n";
+        if (ctx.activeRowsGPU) {
+            if (debug) std::cerr << "[Exec] Intersecting Generic with " << ctx.activeRowsCountGPU << " rows\n";
+            MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
+            ctx.activeRowsGPU.reset(newActive);
+        } else {
+            ctx.activeRowsGPU = std::move(res->indices);
+        }
+        ctx.activeRowsCountGPU = res->count;
+        return true;
+    }
+    return false;
+}
+
+// -- Extracted: filterCompareColColResolved --
+// Handles the late Col-vs-Col comparison path with buffer resolution,
+// aggregate fallback, _rhs_ suffix stripping, gather, cast, and filterColCol dispatch.
+static bool filterCompareColColResolved(
+    const std::string& colName1, const std::string& colName2,
+    engine::GpuFilterOp op, EvalContext& ctx, bool debug) {
+
+    std::string c1 = colName1, c2 = colName2;
+    if (debug) std::cerr << "[Exec] DEBUG ColCol: " << c1 << " vs " << c2 << "\n";
+
+    auto resolveBuf = [&](std::string& n, bool& isF) -> MTL::Buffer* {
+        std::string resolved = ctx.resolveGpuColName(n);
+        if (!resolved.empty()) {
+            n = resolved;
+            if (ctx.f32ColsGPU.count(resolved)) { isF=true; return ctx.f32ColsGPU[resolved]; }
+            if (ctx.u32ColsGPU.count(resolved)) { isF=false; return ctx.u32ColsGPU[resolved]; }
+        }
+        size_t rhsPos = n.rfind("_rhs_");
+        if (rhsPos != std::string::npos) {
+            std::string base = n.substr(0, rhsPos);
+            resolved = ctx.resolveGpuColName(base);
+            if (!resolved.empty()) {
+                n = resolved;
+                if (ctx.f32ColsGPU.count(resolved)) { isF=true; return ctx.f32ColsGPU[resolved]; }
+                if (ctx.u32ColsGPU.count(resolved)) { isF=false; return ctx.u32ColsGPU[resolved]; }
+            }
+        }
+        if (n.find("min(") != std::string::npos || n.find("max(") != std::string::npos ||
+            n.find("sum(") != std::string::npos || n.find("avg(") != std::string::npos ||
+            n.find("count(") != std::string::npos || n.find("MIN(") != std::string::npos ||
+            n.find("MAX(") != std::string::npos || n.find("SUM(") != std::string::npos) {
+            std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
+            if (ctx.f32ColsGPU.count(posKey)) { n=posKey; isF=true; ctx.aggregateCounter++; return ctx.f32ColsGPU[posKey]; }
+            if (ctx.u32ColsGPU.count(posKey)) { n=posKey; isF=false; ctx.aggregateCounter++; return ctx.u32ColsGPU[posKey]; }
+        }
+        return nullptr;
+    };
+
+    bool f1=false, f2=false;
+    MTL::Buffer* b1 = resolveBuf(c1, f1);
+    MTL::Buffer* b2 = resolveBuf(c2, f2);
+
+    if (!b1 || !b2) {
+        if (debug) {
+            if (!b1) std::cerr << "[Exec] Failed to resolve " << c1 << "\n";
+            if (!b2) std::cerr << "[Exec] Failed to resolve " << c2 << "\n";
+            std::cerr << "Available F32 Cols: ";
+            for(const auto& kv : ctx.f32ColsGPU) std::cerr << "'" << kv.first << "' ";
+            std::cerr << "\nAvailable U32 Cols: ";
+            for(const auto& kv : ctx.u32ColsGPU) std::cerr << "'" << kv.first << "' ";
+            std::cerr << "\n";
+        }
+        return false;
+    }
+
+    uint32_t currentCount = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
+    MTL::Buffer* input1 = b1;
+    MTL::Buffer* input2 = b2;
+    std::vector<MTL::Buffer*> temp;
+
+    if (ctx.activeRowsGPU) {
+        input1 = f1 ? GpuOps::gatherF32(b1, ctx.activeRowsGPU, currentCount)
+                     : GpuOps::gatherU32(b1, ctx.activeRowsGPU, currentCount);
+        temp.push_back(input1);
+        input2 = f2 ? GpuOps::gatherF32(b2, ctx.activeRowsGPU, currentCount)
+                     : GpuOps::gatherU32(b2, ctx.activeRowsGPU, currentCount);
+        temp.push_back(input2);
+    }
+
+    std::optional<FilterResult> res;
+    if (f1 || f2) {
+        if (!f1) { MTL::Buffer* t = GpuOps::castU32ToF32(input1, currentCount); temp.push_back(t); input1 = t; }
+        if (!f2) { MTL::Buffer* t = GpuOps::castU32ToF32(input2, currentCount); temp.push_back(t); input2 = t; }
+        res = GpuOps::filterColColF32(input1, input2, currentCount, (int)op);
+    } else {
+        res = GpuOps::filterColColU32(input1, input2, currentCount, (int)op);
+    }
+
+    for(auto* t : temp) if(t) t->release();
+
+    if (res) {
+        if (ctx.activeRowsGPU) {
+            MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
+            ctx.activeRowsGPU.reset(newActive);
+        } else {
+            ctx.activeRowsGPU = std::move(res->indices);
+        }
+        ctx.activeRowsCountGPU = res->count;
+        return true;
+    }
+    return false;
+}
+
+// -- Extracted: resolveFilterGpuBuffer --
+// Resolves a column name to its GPU buffer, trying direct lookup, suffix resolution,
+// and aggregate positional fallback (count->~#1, sum->~#0).
+// Returns the buffer and sets isF32/colName accordingly, or nullptr if not found.
+static MTL::Buffer* resolveFilterGpuBuffer(
+    std::string& colName, bool& isF32, EvalContext& ctx, bool debug)
+{
+    MTL::Buffer* buf = nullptr;
+    if (ctx.f32ColsGPU.count(colName)) {
+        buf = ctx.f32ColsGPU[colName];
+        isF32 = true;
+    } else if (ctx.u32ColsGPU.count(colName)) {
+        buf = ctx.u32ColsGPU[colName];
+        isF32 = false;
+    } else {
+        if (debug) std::cerr << "[Exec] DEBUG FIND BUF: colName " << colName << " not found in GPU cols\n";
+        // Fallback for suffixed columns
+        {
+            std::string resolved = ctx.resolveGpuColName(colName);
+            if (!resolved.empty()) {
+                colName = resolved;
+                if (ctx.f32ColsGPU.count(resolved)) { buf = ctx.f32ColsGPU[resolved]; isF32=true; }
+                else { buf = ctx.u32ColsGPU[resolved]; isF32=false; }
+            }
+        }
+
+        // Fallback for aggregations (count_star() -> #1, sum -> #0 heuristic)
+        if (!buf) {
+             if (colName.find("count") != std::string::npos || colName.find("COUNT") != std::string::npos) {
+                 if (ctx.u32ColsGPU.count("#1")) { buf = ctx.u32ColsGPU["#1"]; isF32=false; colName="#1"; }
+                 else if (ctx.f32ColsGPU.count("#1")) { buf = ctx.f32ColsGPU["#1"]; isF32=true; colName="#1"; }
+                 else if (ctx.u32ColsGPU.count("#0")) { buf = ctx.u32ColsGPU["#0"]; isF32=false; colName="#0"; }
+                 else if (ctx.f32ColsGPU.count("#0")) { buf = ctx.f32ColsGPU["#0"]; isF32=true; colName="#0"; }
+             } else if (colName.find("sum") != std::string::npos || colName.find("SUM") != std::string::npos) {
+                 if (ctx.f32ColsGPU.count("#0")) { buf = ctx.f32ColsGPU["#0"]; isF32=true; colName="#0"; }
+                 else if (ctx.u32ColsGPU.count("#0")) { buf = ctx.u32ColsGPU["#0"]; isF32=false; colName="#0"; }
+             }
+        }
+
+        if (!buf) {
+            if (debug) std::cerr << "[Exec] DEBUG FIND BUF: FAILED for colName " << colName << "\n";
+        }
+    }
+    return buf;
+}
+
+// -- Extracted: applyLiteralFilter --
+// Applies a GPU filter comparing a column buffer against a literal value.
+// Handles f32/u32 paths, scalar broadcast, date conversion, and activeRows.
+// Returns true on success (ctx.activeRowsGPU updated), false on failure.
+static bool applyLiteralFilter(
+    MTL::Buffer* buf, const std::string& colName, bool isF32,
+    const Literal& lit, engine::GpuFilterOp op,
+    EvalContext& ctx, bool debug)
+{
+    std::optional<FilterResult> res;
+    uint32_t currentCount = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
+
+    if (isF32) {
+        float val = 0.0f;
+        if (std::holds_alternative<double>(lit.value)) val = (float)std::get<double>(lit.value);
+        else if (std::holds_alternative<int64_t>(lit.value)) val = (float)std::get<int64_t>(lit.value);
+        else if (std::holds_alternative<std::string>(lit.value)) {
+            try {
+                val = std::stof(std::get<std::string>(lit.value));
+            } catch(...) {
+                // Literal string not a valid float — val stays 0
+            }
+        }
+
+        // Handle scalar broadcast filter (single value buffer vs multiple rows)
+        if (buf && buf->length() == sizeof(float) && currentCount > 1) {
+            float colVal = *static_cast<const float*>(buf->contents());
+            bool pass = false;
+            switch(op) {
+                case engine::GpuFilterOp::EQ: pass = (colVal == val); break;
+                case engine::GpuFilterOp::NE: pass = (colVal != val); break;
+                case engine::GpuFilterOp::LT: pass = (colVal < val); break;
+                case engine::GpuFilterOp::LE: pass = (colVal <= val); break;
+                case engine::GpuFilterOp::GT: pass = (colVal > val); break;
+                case engine::GpuFilterOp::GE: pass = (colVal >= val); break;
+                default: break;
+            }
+            if (!pass) {
+                ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
+                ctx.activeRowsCountGPU = 0;
+            }
+            return true;
+        }
+
+        try {
+            if (ctx.activeRowsGPU) {
+                res = GpuOps::filterF32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, op, val);
+            } else {
+                res = GpuOps::filterF32(colName, buf, currentCount, op, val);
+            }
+        } catch(...) {
+            if(debug) std::cerr << "[Exec] Exception in filterF32\n";
+            res = std::nullopt;
+        }
+
+        if (!res) {
+            if (debug) std::cerr << "[Exec] DEBUG: filterF32 failed. bufLen=" << buf->length() << " count=" << currentCount << " val=" << val << " op=" << (int)op << "\n";
+            ENGINE_THROW("GPU F32 Filter failed: " + colName);
+        }
+    } else {
+        uint32_t val = 0;
+        if (std::holds_alternative<int64_t>(lit.value)) val = (uint32_t)std::get<int64_t>(lit.value);
+        else if (std::holds_alternative<double>(lit.value)) val = (uint32_t)std::get<double>(lit.value);
+        else if (std::holds_alternative<std::string>(lit.value)) {
+            std::string s = std::get<std::string>(lit.value);
+            // Handle Date Literal format YYYY-MM-DD -> YYYYMMDD
+            if (s.length() == 10 && s[4] == '-' && s[7] == '-') {
+                 std::string d = s.substr(0,4) + s.substr(5,2) + s.substr(8,2);
+                 try { val = std::stoul(d); } catch(...) {
+                     // Malformed date string — val stays 0
+                 }
+            } else {
+                 // Check for single char column
+                 std::string tableName = tableForColumn(colName);
+                 bool isSingleChar = false;
+                 if (!tableName.empty()) {
+                     const auto& schema = SchemaRegistry::instance();
+                     isSingleChar = schema.isSingleCharColumn(tableName, colName);
+                 }
+
+                 if (isSingleChar && s.size() == 1) {
+                     val = static_cast<uint32_t>(static_cast<unsigned char>(s[0]));
+                 } else {
+                     try { 
+                         size_t idx = 0;
+                         val = std::stoul(s, &idx);
+                         if (idx != s.size()) {
+                             val = GpuOps::fnv1a32(s);
+                         }
+                     } catch(...) {
+                        // Not a valid integer — fall back to FNV hash of the string
+                         val = GpuOps::fnv1a32(s);
+                     }
+                 }
+            }
+        }
+
+        // Check for Date column with Days-Since-Epoch literal (small integer)
+        if (val > 0 && val < engine::config::kDateFormatThreshold) {
+            std::string tableNameD = tableForColumn(colName);
+            if (!tableNameD.empty()) {
+                 const auto& schema = SchemaRegistry::instance();
+                 if (schema.getColumnType(tableNameD, colName) == ColumnType::Date) {
+                     using namespace std::chrono;
+                     sys_days sd = sys_days(days(val));
+                     year_month_day ymd{sd};
+                     val = (int)ymd.year() * 10000 + (unsigned)ymd.month() * 100 + (unsigned)ymd.day();
+                 }
+            }
+        }
+
+        // Handle scalar broadcast filter (U32)
+        if (buf && buf->length() == sizeof(uint32_t) && currentCount > 1) {
+            if (debug) std::cerr << "[Exec] DEBUG: Scalar broadcast detected. bufLen=" << buf->length() << " currentCount=" << currentCount << "\n";
+            uint32_t colVal = *static_cast<const uint32_t*>(buf->contents());
+            bool pass = false;
+            switch(op) {
+                case engine::GpuFilterOp::EQ: pass = (colVal == val); break;
+                case engine::GpuFilterOp::NE: pass = (colVal != val); break;
+                case engine::GpuFilterOp::LT: pass = (colVal < val); break;
+                case engine::GpuFilterOp::LE: pass = (colVal <= val); break;
+                case engine::GpuFilterOp::GT: pass = (colVal > val); break;
+                case engine::GpuFilterOp::GE: pass = (colVal >= val); break;
+                default: break;
+            }
+            if (!pass) {
+                ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
+                ctx.activeRowsCountGPU = 0;
+            }
+            return true;
+        }
+
+        if (debug) std::cerr << "[Exec] DEBUG: About to filter. activeRowsGPU=" << (ctx.activeRowsGPU ? "set" : "null") << " bufLen=" << buf->length() << " count=" << currentCount << " val=" << val << " op=" << (int)op << "\n";
+
+        if (ctx.activeRowsGPU) {
+            res = GpuOps::filterU32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, op, val);
+        } else {
+            res = GpuOps::filterU32(colName, buf, currentCount, op, val);
+        }
+
+        if (!res) {
+            if (debug) std::cerr << "[Exec] DEBUG: filterU32 failed. bufLen=" << buf->length() << " count=" << currentCount << " val=" << val << " op=" << (int)op << "\n";
+            ENGINE_THROW("GPU U32 Filter failed: " + colName);
+        }
+    }
+
+    if (res) {
+        ctx.activeRowsGPU = std::move(res->indices);
+        ctx.activeRowsCountGPU = res->count;
+        if (debug && res->indices) {
+            uint32_t* idx = (uint32_t*)res->indices->contents();
+            std::cerr << "[Exec] Filter result indices first 5: ";
+            for (uint32_t i = 0; i < std::min(5u, res->count); ++i) std::cerr << idx[i] << " ";
+            if (debug) std::cerr << "\n";
+        }
+        return true;
+    }
+    return false;
+}
+
 static bool filterCompare(const TypedExprPtr& expr, EvalContext& ctx) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
 if (expr->kind == TypedExpr::Kind::Compare) {
@@ -213,129 +819,12 @@ if (expr->kind == TypedExpr::Kind::Compare) {
     const TypedExpr* rightRaw = unwrapExpr(cmp.right.get());
 
     // Handle Literal vs Literal (e.g. 1=1)
-    if (leftRaw && rightRaw && 
-        leftRaw->kind == TypedExpr::Kind::Literal && 
-        rightRaw->kind == TypedExpr::Kind::Literal) {
-
-        if (debug) std::cerr << "[Exec] DEBUG: Literal vs Literal comparison\n";
-        bool result = false;
-        const auto& lv = leftRaw->asLiteral().value;
-        const auto& rv = rightRaw->asLiteral().value;
-        if (cmp.op == engine::CompareOp::Eq) {
-            result = (lv == rv);
-        } else if (cmp.op == engine::CompareOp::Ne) {
-            result = (lv != rv);
-        } else if (cmp.op == engine::CompareOp::Lt) {
-            result = (lv < rv);
-        } else if (cmp.op == engine::CompareOp::Le) {
-            result = (lv <= rv);
-        } else if (cmp.op == engine::CompareOp::Gt) {
-            result = (lv > rv);
-        } else if (cmp.op == engine::CompareOp::Ge) {
-            result = (lv >= rv);
-        }
-
-        if (result) {
-            // Ensure count is consistent for implicit "all rows" state
-            if (!ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0) {
-                 ctx.activeRowsCountGPU = ctx.rowCount;
-            }
-            return true; // Keep all rows
-        } else {
-            // Clear all rows
-            ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
-            ctx.activeRowsCountGPU = 0;
-            return true;
-        }
-    }
+    if (filterCompareLiteralVsLiteral(leftRaw, rightRaw, cmp, ctx, debug))
+        return true;
 
     // Handle Col vs Col
-    if (leftRaw && rightRaw && 
-        leftRaw->kind == TypedExpr::Kind::Column && 
-        rightRaw->kind == TypedExpr::Kind::Column) {
-
-         std::string lName = leftRaw->asColumn().column;
-         std::string rName = rightRaw->asColumn().column;
-
-         std::string lActual = ctx.resolveColName(lName);
-         std::string rActual = ctx.resolveColName(rName);
-
-         if (!lActual.empty() && !rActual.empty()) {
-              if (debug) std::cerr << "[Exec] Col vs Col: " << lActual << " vs " << rActual << "\n";
-
-              // Determine type. Prefer F32 if mismatch? Or assume same.
-              bool lIsF32 = ctx.f32Cols.count(lActual);
-              bool rIsF32 = ctx.f32Cols.count(rActual);
-
-              // Map Op
-              int opInt = 0;
-              if (cmp.op == engine::CompareOp::Eq) opInt = (int)engine::GpuFilterOp::EQ;
-              else if (cmp.op == engine::CompareOp::Ne) opInt = (int)engine::GpuFilterOp::NE;
-              else if (cmp.op == engine::CompareOp::Lt) opInt = (int)engine::GpuFilterOp::LT;
-              else if (cmp.op == engine::CompareOp::Le) opInt = (int)engine::GpuFilterOp::LE;
-              else if (cmp.op == engine::CompareOp::Gt) opInt = (int)engine::GpuFilterOp::GT;
-              else if (cmp.op == engine::CompareOp::Ge) opInt = (int)engine::GpuFilterOp::GE;
-              else return false;
-
-              MTL::Buffer* rootA = (lIsF32) ? ctx.f32ColsGPU.at(lActual) : ctx.u32ColsGPU.at(lActual);
-              MTL::Buffer* rootB = (rIsF32) ? ctx.f32ColsGPU.at(rActual) : ctx.u32ColsGPU.at(rActual);
-
-              MTL::Buffer* finalA = rootA;
-              MTL::Buffer* finalB = rootB;
-              bool freeFinalA = false;
-              bool freeFinalB = false;
-              uint32_t workingCount = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
-
-              bool useF32 = lIsF32 || rIsF32;
-
-              // 1. Cast if needed (Global scale)
-              if (useF32 && !lIsF32) {
-                  finalA = GpuOps::castU32ToF32(rootA, ctx.rowCount);
-                  freeFinalA = true;
-              }
-              if (useF32 && !rIsF32) {
-                  finalB = GpuOps::castU32ToF32(rootB, ctx.rowCount);
-                  freeFinalB = true;
-              }
-
-              // 2. Gather if active rows
-              if (ctx.activeRowsGPU) {
-                   MTL::Buffer* gA = (useF32) ? GpuOps::gatherF32(finalA, ctx.activeRowsGPU, workingCount) 
-                                              : GpuOps::gatherU32(finalA, ctx.activeRowsGPU, workingCount);
-                   if (freeFinalA) finalA->release(); // Release intermediate
-                   finalA = gA;
-                   freeFinalA = true; // Gathered buffer needs release
-
-                   MTL::Buffer* gB = (useF32) ? GpuOps::gatherF32(finalB, ctx.activeRowsGPU, workingCount) 
-                                              : GpuOps::gatherU32(finalB, ctx.activeRowsGPU, workingCount);
-                   if (freeFinalB) finalB->release();
-                   finalB = gB;
-                   freeFinalB = true;
-              }
-
-              // 3. Execute
-              std::optional<FilterResult> res;
-              if (useF32) res = GpuOps::filterColColF32(finalA, finalB, workingCount, opInt);
-              else res = GpuOps::filterColColU32(finalA, finalB, workingCount, opInt);
-
-              // 4. Cleanup
-              if (freeFinalA && finalA) finalA->release();
-              if (freeFinalB && finalB) finalB->release();
-
-              if (res) {
-                  if (ctx.activeRowsGPU) {
-                       // Combine indices
-                       MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
-                       ctx.activeRowsGPU.reset(newActive);
-                       ctx.activeRowsCountGPU = res->count;
-                  } else {
-                       ctx.activeRowsGPU = std::move(res->indices);
-                       ctx.activeRowsCountGPU = res->count;
-                  }
-                  return true;
-              }
-         }
-    }
+    if (filterCompareColVsCol(leftRaw, rightRaw, cmp, ctx, debug))
+        return true;
 
     // Identify column and literal
     std::string colName;
@@ -345,116 +834,12 @@ if (expr->kind == TypedExpr::Kind::Compare) {
     const TypedExpr* colExpr = nullptr;
     const TypedExpr* litExpr = nullptr;
 
-
-    // Handle String Filter (Like OR Eq)
-    if (cmp.op == engine::CompareOp::Like || cmp.op == engine::CompareOp::Eq) {
-         const TypedExpr* left = unwrapExpr(cmp.left.get());
-         const TypedExpr* right = unwrapExpr(cmp.right.get());
-         if (left->kind == TypedExpr::Kind::Column && right->kind == TypedExpr::Kind::Literal && 
-             std::holds_alternative<std::string>(right->asLiteral().value)) {
-
-             std::string colName = left->asColumn().column;
-             std::string pat = std::get<std::string>(right->asLiteral().value);
-
-
-             const std::vector<std::string>* vec = nullptr;
-             ctx.ensureStringCol(colName);
-             if (ctx.stringCols.count(colName)) {
-                 vec = &ctx.stringCols.at(colName);
-             } else {
-                 // Try suffixed / rhs
-                 std::string resolved = ctx.resolveColName(colName);
-                 if (!resolved.empty()) {
-                     ctx.ensureStringCol(resolved);
-                     if (ctx.stringCols.count(resolved)) { vec = &ctx.stringCols.at(resolved); colName=resolved; }
-                 }
-             }
-
-             if (vec) {
-                  if (env_truthy("GPUDB_DEBUG_OPS")) {
-                      std::cerr << "[Exec] Found string col " << colName << " size " << vec->size() << " pattern '" << pat << "'" << std::endl;
-                  }
-
-                  // Check for pre-flattened Arrow-style buffers
-                  MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
-                  auto fit = ctx.flatStringCols.find(colName);
-                  if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
-                      fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
-                  }
-
-                  engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Like) ? engine::GpuFilterOp::LIKE_PATTERN : engine::GpuFilterOp::EQ;
-                  auto res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
-
-                  if (res) {
-                      if (ctx.activeRowsGPU) {
-                          auto joinRes = GpuOps::joinHash( ctx.activeRowsGPU, nullptr, ctx.activeRowsCountGPU, res->indices, nullptr, res->count);
-                          MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
-
-                          ctx.activeRowsGPU.reset(newActive);
-
-                          ctx.activeRowsCountGPU = joinRes.count;
-                      } else {
-                          ctx.activeRowsGPU = std::move(res->indices);
-                          ctx.activeRowsCountGPU = res->count;
-                      }
-                      return true;
-                  }
-             }
-         }
-         if (cmp.op == engine::CompareOp::Like) return false;
-    }
+    // Handle String Filter (Like OR Eq) via extracted helper
+    if (filterCompareStringCol(cmp, ctx, debug)) return true;
+    if (cmp.op == engine::CompareOp::Like) return false;
 
     // Optimized Hash Filter Fallback: Col(StringHash) = "Literal"
-    if (cmp.op == engine::CompareOp::Eq || cmp.op == engine::CompareOp::Ne) {
-         const TypedExpr* left = unwrapExpr(cmp.left.get());
-         const TypedExpr* right = unwrapExpr(cmp.right.get());
-         if (left->kind == TypedExpr::Kind::Column && right->kind == TypedExpr::Kind::Literal && 
-             std::holds_alternative<std::string>(right->asLiteral().value)) {
-
-             std::string colName = left->asColumn().column;
-             std::string pat = std::get<std::string>(right->asLiteral().value);
-
-             // Try to find the U32 column (Hash) if String column wasn't found above
-             std::string actualCol = ctx.resolveColName(colName);
-
-             if (!actualCol.empty()) {
-                 // Detect StringChar columns — compare char code, not FNV1a hash
-                 bool isSingleChar = false;
-                 {
-                     std::string tbl = tableForColumn(actualCol);
-                     if (!tbl.empty())
-                         isSingleChar = SchemaRegistry::instance().isSingleCharColumn(tbl, actualCol);
-                 }
-                 uint32_t hashVal;
-                 if (isSingleChar && pat.size() == 1) {
-                     hashVal = static_cast<uint32_t>(static_cast<unsigned char>(pat[0]));
-                     if (env_truthy("GPUDB_DEBUG_OPS"))
-                         std::cerr << "[Exec] Found SingleChar col " << actualCol << " for pattern '" << pat << "' (charCode=" << hashVal << ")" << std::endl;
-                 } else {
-                     hashVal = GpuOps::fnv1a32(pat);
-                     if (env_truthy("GPUDB_DEBUG_OPS"))
-                         std::cerr << "[Exec] Found StringHash col " << actualCol << " for pattern '" << pat << "' (hashing=" << hashVal << ")" << std::endl;
-                 }
-                 engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Eq) ? engine::GpuFilterOp::EQ : engine::GpuFilterOp::NE;
-
-                 MTL::Buffer* colBuf = ctx.u32ColsGPU.at(actualCol);
-                 uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
-
-                 std::optional<FilterResult> res;
-                 if (ctx.activeRowsGPU) {
-                     res = GpuOps::filterU32Indexed(actualCol, colBuf, ctx.activeRowsGPU, count, op, hashVal);
-                 } else {
-                     res = GpuOps::filterU32(actualCol, colBuf, count, op, hashVal);
-                 }
-
-                 if (res) {
-                     ctx.activeRowsGPU = std::move(res->indices);
-                     ctx.activeRowsCountGPU = res->count;
-                     return true;
-                 }
-             }
-         }
-    }
+    if (filterCompareStringHash(cmp, ctx, debug)) return true;
 
     // Handle IN Operator via extracted helper
     if (cmp.op == engine::CompareOp::In) {
@@ -520,172 +905,11 @@ if (expr->kind == TypedExpr::Kind::Compare) {
         }
     }
      else if (leftUnwrapped->kind == TypedExpr::Kind::Column && rightUnwrapped->kind == TypedExpr::Kind::Column) {
-         std::string c1 = leftUnwrapped->asColumn().column;
-         std::string c2 = rightUnwrapped->asColumn().column;
-         if (debug) std::cerr << "[Exec] DEBUG ColCol: " << c1 << " vs " << c2 << "\n";
-
-         auto resolveBuf = [&](std::string& n, bool& isF) -> MTL::Buffer* {
-             std::string resolved = ctx.resolveGpuColName(n);
-             if (!resolved.empty()) {
-                 n = resolved;
-                 if (ctx.f32ColsGPU.count(resolved)) { isF=true; return ctx.f32ColsGPU[resolved]; }
-                 if (ctx.u32ColsGPU.count(resolved)) { isF=false; return ctx.u32ColsGPU[resolved]; }
-             }
-             // Try stripping _rhs_ suffix (e.g. col_rhs_23 -> col)
-             size_t rhsPos = n.rfind("_rhs_");
-             if (rhsPos != std::string::npos) {
-                 std::string base = n.substr(0, rhsPos);
-                 resolved = ctx.resolveGpuColName(base);
-                 if (!resolved.empty()) {
-                     n = resolved;
-                     if (ctx.f32ColsGPU.count(resolved)) { isF=true; return ctx.f32ColsGPU[resolved]; }
-                     if (ctx.u32ColsGPU.count(resolved)) { isF=false; return ctx.u32ColsGPU[resolved]; }
-                 }
-             }
-
-             // Fallback for aggregates in Col=Col comparison
-             if (n.find("min(") != std::string::npos || n.find("max(") != std::string::npos ||
-                 n.find("sum(") != std::string::npos || n.find("avg(") != std::string::npos ||
-                 n.find("count(") != std::string::npos || n.find("MIN(") != std::string::npos ||
-                 n.find("MAX(") != std::string::npos || n.find("SUM(") != std::string::npos) {
-
-                 std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
-                 if (ctx.f32ColsGPU.count(posKey)) { n=posKey; isF=true; ctx.aggregateCounter++; return ctx.f32ColsGPU[posKey]; }
-                 if (ctx.u32ColsGPU.count(posKey)) { n=posKey; isF=false; ctx.aggregateCounter++; return ctx.u32ColsGPU[posKey]; }
-             }
-
-             return nullptr;
-         };
-
-         bool f1=false, f2=false;
-         MTL::Buffer* b1 = resolveBuf(c1, f1);
-         MTL::Buffer* b2 = resolveBuf(c2, f2);
-
-         if (!b1 || !b2) {
-             if (debug) {
-                 if (!b1) std::cerr << "[Exec] Failed to resolve " << c1 << "\n";
-                 if (!b2) std::cerr << "[Exec] Failed to resolve " << c2 << "\n";
-
-                 if (debug) std::cerr << "Available F32 Cols: ";
-                 if (debug) for(const auto& kv : ctx.f32ColsGPU) std::cerr << "'" << kv.first << "' ";
-                 if (debug) std::cerr << "\n";
-                 if (debug) std::cerr << "Available U32 Cols: ";
-                 if (debug) for(const auto& kv : ctx.u32ColsGPU) std::cerr << "'" << kv.first << "' ";
-                 if (debug) std::cerr << "\n";
-             }
-             return false;
-         }
-
-         uint32_t currentCount = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
-         MTL::Buffer* input1 = b1;
-         MTL::Buffer* input2 = b2;
-         std::vector<MTL::Buffer*> temp;
-
-         if (ctx.activeRowsGPU) {
-             input1 = f1 ? GpuOps::gatherF32(b1, ctx.activeRowsGPU, currentCount)
-                         : GpuOps::gatherU32(b1, ctx.activeRowsGPU, currentCount);
-             temp.push_back(input1);
-
-             input2 = f2 ? GpuOps::gatherF32(b2, ctx.activeRowsGPU, currentCount)
-                         : GpuOps::gatherU32(b2, ctx.activeRowsGPU, currentCount);
-             temp.push_back(input2);
-         }
-
-         std::optional<FilterResult> res;
-         if (f1 || f2) {
-             if (!f1) { MTL::Buffer* t = GpuOps::castU32ToF32(input1, currentCount); temp.push_back(t); input1 = t; }
-             if (!f2) { MTL::Buffer* t = GpuOps::castU32ToF32(input2, currentCount); temp.push_back(t); input2 = t; }
-             res = GpuOps::filterColColF32(input1, input2, currentCount, (int)op);
-         } else {
-             res = GpuOps::filterColColU32(input1, input2, currentCount, (int)op);
-         }
-
-         for(auto* t : temp) if(t) t->release();
-
-         if (res) {
-             if (ctx.activeRowsGPU) {
-                  MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
-                  ctx.activeRowsGPU.reset(newActive);
-             } else {
-                  ctx.activeRowsGPU = std::move(res->indices);
-             }
-             ctx.activeRowsCountGPU = res->count;
-             return true;
-         }
-         return false;
+         return filterCompareColColResolved(
+             leftUnwrapped->asColumn().column, rightUnwrapped->asColumn().column,
+             op, ctx, debug);
     } else {
-         if (debug) std::cerr << "[Exec] GPU Filter: Generic Expression Path\n";
-         uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
-         if (count == 0) return true;
-
-         MTL::Buffer* leftBuf = nullptr;
-         float leftLitVal = 0.0f;
-         bool leftIsLit = false;
-
-         if (leftUnwrapped->kind == TypedExpr::Kind::Literal) {
-             leftIsLit = true;
-             const auto& lit = leftUnwrapped->asLiteral();
-             if (std::holds_alternative<double>(lit.value)) leftLitVal = (float)std::get<double>(lit.value);
-             else if (std::holds_alternative<int64_t>(lit.value)) leftLitVal = (float)std::get<int64_t>(lit.value);
-         } else {
-             leftBuf = GpuExecutor::evaluateExpression(cmp.left, ctx);
-             if (!leftBuf) return false;
-         }
-
-         MTL::Buffer* rightBuf = nullptr;
-         float rightLitVal = 0.0f;
-         bool rightIsLit = false;
-
-         if (rightUnwrapped->kind == TypedExpr::Kind::Literal) {
-             rightIsLit = true;
-             const auto& lit = rightUnwrapped->asLiteral();
-             if (std::holds_alternative<double>(lit.value)) rightLitVal = (float)std::get<double>(lit.value);
-             else if (std::holds_alternative<int64_t>(lit.value)) rightLitVal = (float)std::get<int64_t>(lit.value);
-         } else {
-             rightBuf = GpuExecutor::evaluateExpression(cmp.right, ctx); 
-             if (!rightBuf) { if(leftBuf) leftBuf->release(); return false; }
-         }
-
-         std::optional<FilterResult> res;
-
-         if (leftIsLit && rightBuf) {
-             // Lit op Col -> Flip Op -> Col flippedOp Lit
-             engine::GpuFilterOp flipped;
-             bool valid = true;
-             switch(op) {
-                 case engine::GpuFilterOp::EQ: flipped = engine::GpuFilterOp::EQ; break;
-                 case engine::GpuFilterOp::NE: flipped = engine::GpuFilterOp::NE; break;
-                 case engine::GpuFilterOp::LT: flipped = engine::GpuFilterOp::GT; break; 
-                 case engine::GpuFilterOp::LE: flipped = engine::GpuFilterOp::GE; break;
-                 case engine::GpuFilterOp::GT: flipped = engine::GpuFilterOp::LT; break;
-                 case engine::GpuFilterOp::GE: flipped = engine::GpuFilterOp::LE; break;
-                 default: valid = false; break;
-             }
-             if(valid) res = GpuOps::filterF32("expr", rightBuf, count, flipped, leftLitVal);
-         } 
-         else if (leftBuf && rightIsLit) {
-             res = GpuOps::filterF32("expr", leftBuf, count, op, rightLitVal);
-         } 
-         else if (leftBuf && rightBuf) {
-             res = GpuOps::filterColColF32(leftBuf, rightBuf, count, (int)op);
-         }
-
-         if (leftBuf) leftBuf->release();
-         if (rightBuf) rightBuf->release();
-
-         if (res) {
-             if (debug) std::cerr << "[Exec] Generic Filter Result (likely p_size): " << res->count << " rows\n";
-             if (ctx.activeRowsGPU) {
-                  if (debug) std::cerr << "[Exec] Intersecting Generic with " << ctx.activeRowsCountGPU << " rows\n";
-                  MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
-                  ctx.activeRowsGPU.reset(newActive);
-             } else {
-                  ctx.activeRowsGPU = std::move(res->indices);
-             }
-             ctx.activeRowsCountGPU = res->count;
-             return true;
-         }
-         return false; 
+         return filterCompareGenericExpression(cmp.left, cmp.right, leftUnwrapped, rightUnwrapped, op, ctx, debug);
     }
 
     if (colExpr) colName = colExpr->asColumn().column;
@@ -737,206 +961,14 @@ if (expr->kind == TypedExpr::Kind::Compare) {
          return false;
     }
 
-    // Find buffer
-    MTL::Buffer* buf = nullptr;
-    if (ctx.f32ColsGPU.count(colName)) {
-        buf = ctx.f32ColsGPU[colName];
-        isF32 = true;
-    } else if (ctx.u32ColsGPU.count(colName)) {
-        buf = ctx.u32ColsGPU[colName];
-        isF32 = false;
-    } else {
-        if (debug) std::cerr << "[Exec] DEBUG FIND BUF: colName " << colName << " not found in GPU cols\n";
-        // Fallback for suffixed columns
-        {
-            std::string resolved = ctx.resolveGpuColName(colName);
-            if (!resolved.empty()) {
-                colName = resolved;
-                if (ctx.f32ColsGPU.count(resolved)) { buf = ctx.f32ColsGPU[resolved]; isF32=true; }
-                else { buf = ctx.u32ColsGPU[resolved]; isF32=false; }
-            }
-        }
+    // Find buffer via extracted helper
+    MTL::Buffer* buf = resolveFilterGpuBuffer(colName, isF32, ctx, debug);
+    if (!buf) return false;
 
-        // Fallback for aggregations (count_star() -> #1, sum -> #0 heuristic)
-        if (!buf) {
-             if (colName.find("count") != std::string::npos || colName.find("COUNT") != std::string::npos) {
-                 if (ctx.u32ColsGPU.count("#1")) { buf = ctx.u32ColsGPU["#1"]; isF32=false; colName="#1"; }
-                 else if (ctx.f32ColsGPU.count("#1")) { buf = ctx.f32ColsGPU["#1"]; isF32=true; colName="#1"; }
-                 else if (ctx.u32ColsGPU.count("#0")) { buf = ctx.u32ColsGPU["#0"]; isF32=false; colName="#0"; }
-                 else if (ctx.f32ColsGPU.count("#0")) { buf = ctx.f32ColsGPU["#0"]; isF32=true; colName="#0"; }
-             } else if (colName.find("sum") != std::string::npos || colName.find("SUM") != std::string::npos) {
-                 if (ctx.f32ColsGPU.count("#0")) { buf = ctx.f32ColsGPU["#0"]; isF32=true; colName="#0"; }
-                 else if (ctx.u32ColsGPU.count("#0")) { buf = ctx.u32ColsGPU["#0"]; isF32=false; colName="#0"; }
-             }
-        }
+    if (debug) std::cerr << "[Exec] GPU Filter checking col: " << colName << " isF32=" << isF32 << "\n";
 
-        if (!buf) {
-            if (debug) std::cerr << "[Exec] DEBUG FIND BUF: FAILED for colName " << colName << "\n";
-            return false;
-        }
-    }
-
-    // Extract literal
-    const auto& lit = litExpr->asLiteral();
-    std::optional<FilterResult> res;
-
-    uint32_t currentCount = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
-
-    if (isF32) {
-        float val = 0.0f;
-        if (std::holds_alternative<double>(lit.value)) val = (float)std::get<double>(lit.value);
-        else if (std::holds_alternative<int64_t>(lit.value)) val = (float)std::get<int64_t>(lit.value);
-        else if (std::holds_alternative<std::string>(lit.value)) {
-            try {
-                val = std::stof(std::get<std::string>(lit.value));
-            } catch(...) {
-                // Literal string not a valid float — val stays 0
-            }
-        }
-
-        // Handle scalar broadcast filter (single value buffer vs multiple rows)
-        if (buf && buf->length() == sizeof(float) && currentCount > 1) {
-            float colVal = *static_cast<const float*>(buf->contents());
-            bool pass = false;
-            switch(op) {
-                case engine::GpuFilterOp::EQ: pass = (colVal == val); break;
-                case engine::GpuFilterOp::NE: pass = (colVal != val); break;
-                case engine::GpuFilterOp::LT: pass = (colVal < val); break;
-                case engine::GpuFilterOp::LE: pass = (colVal <= val); break;
-                case engine::GpuFilterOp::GT: pass = (colVal > val); break;
-                case engine::GpuFilterOp::GE: pass = (colVal >= val); break;
-                default: break;
-            }
-            if (!pass) {
-                ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
-                ctx.activeRowsCountGPU = 0;
-            }
-            return true;
-        }
-
-        try {
-            if (ctx.activeRowsGPU) {
-                res = GpuOps::filterF32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, op, val);
-            } else {
-                res = GpuOps::filterF32(colName, buf, currentCount, op, val);
-            }
-        } catch(...) {
-            if(debug) std::cerr << "[Exec] Exception in filterF32\n";
-            res = std::nullopt;
-        }
-
-        if (!res && debug) {
-            std::cerr << "[Exec] DEBUG: filterF32 failed. bufLen=" << buf->length() << " count=" << currentCount << " val=" << val << " op=" << (int)op << "\n";
-        }
-
-        if (!res) {
-             if(debug) std::cerr << "[Exec] GPU Filter F32 failed for " << colName << ". CPU fallback disabled.\n";
-             throw std::runtime_error("GPU F32 Filter failed: " + colName);
-        }
-    } else {
-        uint32_t val = 0;
-        if (std::holds_alternative<int64_t>(lit.value)) val = (uint32_t)std::get<int64_t>(lit.value);
-        else if (std::holds_alternative<double>(lit.value)) val = (uint32_t)std::get<double>(lit.value);
-        else if (std::holds_alternative<std::string>(lit.value)) {
-            std::string s = std::get<std::string>(lit.value);
-            // Handle Date Literal format YYYY-MM-DD -> YYYYMMDD
-            if (s.length() == 10 && s[4] == '-' && s[7] == '-') {
-                 std::string d = s.substr(0,4) + s.substr(5,2) + s.substr(8,2);
-                 try { val = std::stoul(d); } catch(...) {
-                     // Malformed date string — val stays 0
-                 }
-            } else {
-                 // Check for single char column
-                 std::string tableName = tableForColumn(colName);
-                 bool isSingleChar = false;
-                 if (!tableName.empty()) {
-                     const auto& schema = SchemaRegistry::instance();
-                     isSingleChar = schema.isSingleCharColumn(tableName, colName);
-                 }
-
-                 if (isSingleChar && s.size() == 1) {
-                     val = static_cast<uint32_t>(static_cast<unsigned char>(s[0]));
-                 } else {
-                     try { 
-                         size_t idx = 0;
-                         val = std::stoul(s, &idx);
-                         if (idx != s.size()) {
-                             val = GpuOps::fnv1a32(s);
-                         }
-                     } catch(...) {
-                        // Not a valid integer — fall back to FNV hash of the string
-                         val = GpuOps::fnv1a32(s);
-                     }
-                 }
-            }
-        }
-
-        // Check for Date column with Days-Since-Epoch literal (small integer)
-        // Planner often converts DATE 'YYYY-MM-DD' to integer days-since-epoch
-        // But engine stores dates as YYYYMMDD integers. We must convert if needed.
-        if (val > 0 && val < 100000) {
-            std::string tableNameD = tableForColumn(colName);
-            if (!tableNameD.empty()) {
-                 const auto& schema = SchemaRegistry::instance();
-                 if (schema.getColumnType(tableNameD, colName) == ColumnType::Date) {
-                     using namespace std::chrono;
-                     sys_days sd = sys_days(days(val));
-                     year_month_day ymd{sd};
-                     val = (int)ymd.year() * 10000 + (unsigned)ymd.month() * 100 + (unsigned)ymd.day();
-                 }
-            }
-        }
-
-        // Handle scalar broadcast filter (U32)
-        if (buf && buf->length() == sizeof(uint32_t) && currentCount > 1) {
-            if (debug) std::cerr << "[Exec] DEBUG: Scalar broadcast detected. bufLen=" << buf->length() << " currentCount=" << currentCount << "\n";
-            uint32_t colVal = *static_cast<const uint32_t*>(buf->contents());
-            bool pass = false;
-            switch(op) {
-                case engine::GpuFilterOp::EQ: pass = (colVal == val); break;
-                case engine::GpuFilterOp::NE: pass = (colVal != val); break;
-                case engine::GpuFilterOp::LT: pass = (colVal < val); break;
-                case engine::GpuFilterOp::LE: pass = (colVal <= val); break;
-                case engine::GpuFilterOp::GT: pass = (colVal > val); break;
-                case engine::GpuFilterOp::GE: pass = (colVal >= val); break;
-                default: break;
-            }
-            if (!pass) {
-                ctx.activeRowsGPU.reset(GpuOps::createBuffer(nullptr, 4));
-                ctx.activeRowsCountGPU = 0;
-            }
-            return true;
-        }
-
-        if (debug) std::cerr << "[Exec] DEBUG: About to filter. activeRowsGPU=" << (ctx.activeRowsGPU ? "set" : "null") << " bufLen=" << buf->length() << " count=" << currentCount << " val=" << val << " op=" << (int)op << "\n";
-
-        if (ctx.activeRowsGPU) {
-            res = GpuOps::filterU32Indexed(colName, buf, ctx.activeRowsGPU, currentCount, op, val);
-        } else {
-            res = GpuOps::filterU32(colName, buf, currentCount, op, val);
-        }
-        if (!res && debug) {
-            std::cerr << "[Exec] DEBUG: filterU32 failed. bufLen=" << buf->length() << " count=" << currentCount << " val=" << val << " op=" << (int)op << "\n";
-        }
-
-        if (!res) {
-             if(debug) std::cerr << "[Exec] GPU Filter U32 failed for " << colName << ". CPU fallback disabled.\n";
-             throw std::runtime_error("GPU U32 Filter failed: " + colName);
-        }
-    }
-
-    if (res) {
-        ctx.activeRowsGPU = std::move(res->indices); // Transfer ownership
-        ctx.activeRowsCountGPU = res->count;
-        if (debug && res->indices) {
-            uint32_t* idx = (uint32_t*)res->indices->contents();
-            std::cerr << "[Exec] Filter result indices first 5: ";
-            for (uint32_t i = 0; i < std::min(5u, res->count); ++i) std::cerr << idx[i] << " ";
-            if (debug) std::cerr << "\n";
-        }
-        return true;
-    }
-    return false;
+    // Apply literal filter via extracted helper
+    return applyLiteralFilter(buf, colName, isF32, litExpr->asLiteral(), op, ctx, debug);
 }
     return false;
 }
@@ -1114,7 +1146,7 @@ static MTL::Buffer* evalColumnExpr(const TypedExprPtr& expr, EvalContext& ctx, u
                 size_t n = b->length() / sizeof(float);
                 bool varying = false;
                 float first = ptr[0];
-                for (size_t i = 1; i < std::min(n, (size_t)100); ++i) {  // Check first 100 values
+                for (size_t i = 1; i < std::min(n, engine::config::kColumnSampleSize); ++i) {
                     if (ptr[i] != first) { varying = true; break; }
                 }
                 if (varying) {
@@ -1583,6 +1615,84 @@ if (expr->kind == TypedExpr::Kind::Function) {
     return nullptr; // unreachable: call site guarantees expr->kind == Function
 }
 
+// -- Extracted: filterStringFunction --
+// Handles LIKE, NOTLIKE, SUFFIX, PREFIX, CONTAINS filter functions via GPU string ops.
+static bool filterStringFunction(
+    const std::string& fnName, const engine::FunctionCall& fn,
+    EvalContext& ctx, bool debug)
+{
+    engine::GpuFilterOp op = engine::GpuFilterOp::EQ;
+    if (fnName == "NOTLIKE") op = engine::GpuFilterOp::NE;
+    else if (fnName == "LIKE" || fnName == "SUFFIX" || fnName == "CONTAINS") op = engine::GpuFilterOp::LIKE_PATTERN;
+
+    const TypedExpr* left = unwrapExpr(fn.args[0].get());
+    const TypedExpr* right = unwrapExpr(fn.args[1].get());
+
+    if (left->kind != TypedExpr::Kind::Column || right->kind != TypedExpr::Kind::Literal)
+        return false;
+
+    std::string colName = left->asColumn().column;
+    std::string pat;
+    if (std::holds_alternative<std::string>(right->asLiteral().value))
+         pat = std::get<std::string>(right->asLiteral().value);
+
+    const std::vector<std::string>* vec = nullptr;
+    ctx.ensureStringCol(colName);
+    if (ctx.stringCols.count(colName)) {
+        vec = &ctx.stringCols.at(colName);
+    } else {
+        std::string resolved = ctx.resolveColName(colName);
+        if (!resolved.empty()) {
+            ctx.ensureStringCol(resolved);
+            if (ctx.stringCols.count(resolved)) { vec = &ctx.stringCols.at(resolved); colName = resolved; }
+        }
+    }
+
+    if (!vec && debug) {
+        std::cerr << "[Exec] DEBUG: String lookup failed for " << colName << ". Available keys: ";
+        for (const auto& kv : ctx.stringCols) std::cerr << kv.first << " ";
+        std::cerr << "\n";
+    }
+
+    if (!vec) return false;
+
+    if (debug) std::cerr << "[Exec] Found string col " << colName << " size " << vec->size()
+                         << " pattern '" << pat << "'" << std::endl;
+
+    // Check for pre-flattened Arrow-style buffers
+    MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+    auto fit = ctx.flatStringCols.find(colName);
+    if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
+        fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+    }
+
+    std::optional<FilterResult> res;
+    if (fnName == "PREFIX") {
+        res = GpuOps::filterStringPrefix(colName, *vec, pat, false, fChars, fOff, fLen);
+    } else {
+        res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
+    }
+
+    if (!res) return false;
+
+    if (debug) std::cerr << "[Exec] String Filter Result Count: " << res->count << "\n";
+
+    if (ctx.activeRowsGPU) {
+        if (debug) std::cerr << "[Exec] Intersecting with existing " << ctx.activeRowsCountGPU << " rows\n";
+        auto joinRes = GpuOps::joinHash(
+            ctx.activeRowsGPU, nullptr, ctx.activeRowsCountGPU,
+            res->indices, nullptr, res->count);
+        if (debug) std::cerr << "[Exec] Intersection Result: " << joinRes.count << " rows\n";
+        MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
+        ctx.activeRowsGPU.reset(newActive);
+        ctx.activeRowsCountGPU = joinRes.count;
+    } else {
+        ctx.activeRowsGPU = std::move(res->indices);
+        ctx.activeRowsCountGPU = res->count;
+    }
+    return true;
+}
+
 bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (!expr) return true;
@@ -1712,82 +1822,7 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
 
         // Handle LIKE, NOTLIKE, SUFFIX, PREFIX, CONTAINS
         if ((fn.name == "LIKE" || fn.name == "NOTLIKE" || fn.name == "SUFFIX" || fn.name == "PREFIX" || fn.name == "CONTAINS") && fn.args.size() == 2) {
-             engine::GpuFilterOp op = engine::GpuFilterOp::EQ;
-             if (fn.name == "NOTLIKE") op = engine::GpuFilterOp::NE;
-             else if (fn.name == "LIKE" || fn.name == "SUFFIX" || fn.name == "CONTAINS") op = engine::GpuFilterOp::LIKE_PATTERN;
-
-             const TypedExpr* left = unwrapExpr(fn.args[0].get());
-             const TypedExpr* right = unwrapExpr(fn.args[1].get());
-             
-             if (left->kind == TypedExpr::Kind::Column && right->kind == TypedExpr::Kind::Literal) {
-                 std::string colName = left->asColumn().column;
-                 std::string pat = "";
-                 if (std::holds_alternative<std::string>(right->asLiteral().value)) {
-                      pat = std::get<std::string>(right->asLiteral().value);
-                 }
-                 
-                 const std::vector<std::string>* vec = nullptr;
-                 ctx.ensureStringCol(colName);
-                 if (ctx.stringCols.count(colName)) {
-                     vec = &ctx.stringCols.at(colName);
-                 } else {
-                     // Try suffixed / rhs
-                     std::string resolved = ctx.resolveColName(colName);
-                     if (!resolved.empty()) {
-                         ctx.ensureStringCol(resolved);
-                         if (ctx.stringCols.count(resolved)) { vec = &ctx.stringCols.at(resolved); colName=resolved; }
-                     }
-                 }
-
-                 if (!vec && debug) {
-                     std::cerr << "[Exec] DEBUG: String lookup failed for " << colName << ". Available keys: ";
-                     if (debug) for(const auto& kv : ctx.stringCols) std::cerr << kv.first << " ";
-                     if (debug) std::cerr << "\n";
-                 }
-
-                 if (vec) {
-                      if (debug) {
-                          std::cerr << "[Exec] Found string col " << colName << " size " << vec->size() << " pattern '" << pat << "'" << std::endl;
-                      }
-                      
-                      // Check for pre-flattened Arrow-style buffers
-                      MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
-                      auto fit = ctx.flatStringCols.find(colName);
-                      if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
-                          fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
-                      }
-
-                      std::optional<FilterResult> res;
-                      if (fn.name == "PREFIX") {
-                          res = GpuOps::filterStringPrefix(colName, *vec, pat, false, fChars, fOff, fLen);
-                      } else {
-                          res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
-                      }
-                      
-                      if (res) {
-                          if (debug) std::cerr << "[Exec] String Filter Result Count: " << res->count << "\n";
-                          // Handle context intersection (GPU Join logic)
-                          if (ctx.activeRowsGPU) {
-                              if (debug) std::cerr << "[Exec] Intersecting with existing " << ctx.activeRowsCountGPU << " rows\n";
-                              auto joinRes = GpuOps::joinHash(
-                                  ctx.activeRowsGPU, nullptr, ctx.activeRowsCountGPU,
-                                  res->indices, nullptr, res->count
-                              );
-                              if (debug) std::cerr << "[Exec] Intersection Result: " << joinRes.count << " rows\n";
-                              
-                              MTL::Buffer* newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
-                              
-                              ctx.activeRowsGPU.reset(newActive);
-                              
-                              ctx.activeRowsCountGPU = joinRes.count;
-                          } else {
-                              ctx.activeRowsGPU = std::move(res->indices);
-                              ctx.activeRowsCountGPU = res->count;
-                          }
-                          return true;
-                      }
-                 }
-             }
+             return filterStringFunction(fn.name, fn, ctx, debug);
         }
         return false;
     }
@@ -1869,6 +1904,75 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
 // Expression Evaluation
 // ============================================================================
 
+// -- Extracted: evalAggregateExpr --
+// Resolves an aggregate expression by alias, positional key (#N), or standard
+// aggregate prefix (SUM_#, COUNT_#, etc.), searching GPU and CPU columns.
+static MTL::Buffer* evalAggregateExpr(
+    const engine::AggregateExpr& agg, EvalContext& ctx, uint32_t count, [[maybe_unused]] bool debug)
+{
+    // Try alias
+    if (!agg.alias.empty() && ctx.f32ColsGPU.count(agg.alias)) {
+        MTL::Buffer* buf = ctx.f32ColsGPU[agg.alias];
+        buf->retain(); return buf;
+    }
+
+    // Try positional scalar aggregate lookup (#N)
+    bool hasScalarAggregates = (ctx.f32Cols.count("#0") || ctx.f32ColsGPU.count("#0") ||
+                                ctx.u32Cols.count("#0") || ctx.u32ColsGPU.count("#0"));
+
+    if (hasScalarAggregates) {
+         std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
+         if (ctx.f32ColsGPU.count(posKey)) {
+             MTL::Buffer* buf = ctx.f32ColsGPU[posKey];
+             buf->retain(); ctx.aggregateCounter++; return buf;
+         }
+         if (ctx.f32Cols.count(posKey) && !ctx.f32Cols[posKey].empty()) {
+             float val = ctx.f32Cols[posKey][0];
+             ctx.aggregateCounter++;
+             return GpuOps::createFilledF32(val, count);
+         }
+         if (ctx.u32Cols.count(posKey) && !ctx.u32Cols[posKey].empty()) {
+             float val = (float)ctx.u32Cols[posKey][0];
+             ctx.aggregateCounter++;
+             return GpuOps::createFilledF32(val, count);
+         }
+         if (ctx.u32ColsGPU.count(posKey)) {
+             ctx.aggregateCounter++;
+             return GpuOps::castU32ToF32(ctx.u32ColsGPU[posKey], count);
+         }
+    }
+
+    // Try standard aggregate prefixes
+    std::string prefix;
+    switch (agg.func) {
+        case AggFunc::Sum: prefix = "SUM_#"; break;
+        case AggFunc::Count:
+        case AggFunc::CountStar: prefix = "COUNT_#"; break;
+        case AggFunc::Avg: prefix = "AVG_#"; break;
+        case AggFunc::Min: prefix = "MIN_#"; break;
+        case AggFunc::Max: prefix = "MAX_#"; break;
+        default: prefix = "AGG_#"; break;
+    }
+
+    for (const auto& [name, buf] : ctx.f32ColsGPU) {
+        if (name.rfind(prefix, 0) == 0) { buf->retain(); return buf; }
+    }
+    for (const auto& [name, vec] : ctx.f32Cols) {
+        if (name.rfind(prefix, 0) == 0 && !vec.empty())
+            return GpuOps::createFilledF32(vec[0], count);
+    }
+    for (const auto& [name, vec] : ctx.u32Cols) {
+        if (name.rfind(prefix, 0) == 0 && !vec.empty())
+            return GpuOps::createFilledF32((float)vec[0], count);
+    }
+    for (const auto& [name, buf] : ctx.u32ColsGPU) {
+        if (name.rfind(prefix, 0) == 0)
+            return GpuOps::castU32ToF32(buf, count);
+    }
+
+    return nullptr;
+}
+
 MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx) {
     // RAII guard: batch GPU arithmetic ops within expression evaluation.
     // Top-level call enables batching; nested recursive calls are no-ops.
@@ -1906,89 +2010,8 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
     }
 
     if (expr->kind == TypedExpr::Kind::Aggregate) {
-        const auto& agg = expr->asAggregate();
-        // Look for alias
-        if (!agg.alias.empty() && ctx.f32ColsGPU.count(agg.alias)) {
-            MTL::Buffer* buf = ctx.f32ColsGPU[agg.alias];
-            buf->retain(); return buf;
-        }
-
-        // Try positional scalar aggregate lookup (#N)
-        // Check if environment has scalar aggregates
-        bool hasScalarAggregates = false;
-        if (ctx.f32Cols.count("#0") || ctx.f32ColsGPU.count("#0") || ctx.u32Cols.count("#0") || ctx.u32ColsGPU.count("#0")) hasScalarAggregates = true;
-        
-        if (hasScalarAggregates) {
-             std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
-             
-             // Check if posKey exists in any map
-             if (ctx.f32ColsGPU.count(posKey)) {
-                 MTL::Buffer* buf = ctx.f32ColsGPU[posKey];
-                 buf->retain(); ctx.aggregateCounter++; return buf;
-             }
-             if (ctx.f32Cols.count(posKey) && !ctx.f32Cols[posKey].empty()) {
-                 float val = ctx.f32Cols[posKey][0];
-                 MTL::Buffer* outBuf = GpuOps::createFilledF32(val, count);
-                 ctx.aggregateCounter++;
-                 return outBuf;
-             }
-             if (ctx.u32Cols.count(posKey) && !ctx.u32Cols[posKey].empty()) {
-                 float val = (float)ctx.u32Cols[posKey][0];
-                 MTL::Buffer* outBuf = GpuOps::createFilledF32(val, count);
-                 ctx.aggregateCounter++;
-                 return outBuf;
-             }
-             if (ctx.u32ColsGPU.count(posKey)) {
-                 ctx.aggregateCounter++;
-                 return GpuOps::castU32ToF32(ctx.u32ColsGPU[posKey], count);
-             }
-        }
-
-        // Try standard aggregate prefixes
-        std::string prefix;
-        switch (agg.func) {
-            case AggFunc::Sum: prefix = "SUM_#"; break;
-            case AggFunc::Count:
-            case AggFunc::CountStar: prefix = "COUNT_#"; break;
-            case AggFunc::Avg: prefix = "AVG_#"; break;
-            case AggFunc::Min: prefix = "MIN_#"; break;
-            case AggFunc::Max: prefix = "MAX_#"; break;
-            default: prefix = "AGG_#"; break;
-        }
-        
-        // Also enable heuristic lookup for #0, #1 etc if we failed positional logic but they exist
-        // This is a safety net for when ctx.aggregateCounter gets desynchronized
-        // TODO: implement robust aggregate resolution
-        
-        for (const auto& [name, buf] : ctx.f32ColsGPU) {
-            if (name.rfind(prefix, 0) == 0) {
-                buf->retain();
-                return buf;
-            }
-        }
-        
-        // Check CPU columns (ctx.f32Cols) - especially for scalar aggregates
-        for (const auto& [name, vec] : ctx.f32Cols) {
-            if (name.rfind(prefix, 0) == 0 && !vec.empty()) {
-                float val = vec[0];
-                return GpuOps::createFilledF32(val, count);
-            }
-        }
-
-        // Check U32 (e.g. COUNT) columns on CPU
-        for (const auto& [name, vec] : ctx.u32Cols) {
-            if (name.rfind(prefix, 0) == 0 && !vec.empty()) {
-                float val = (float)vec[0];
-                return GpuOps::createFilledF32(val, count);
-            }
-        }
-
-        // Check U32 (e.g. COUNT) and cast
-         for (const auto& [name, buf] : ctx.u32ColsGPU) {
-            if (name.rfind(prefix, 0) == 0) {
-                return GpuOps::castU32ToF32(buf, count);
-            }
-        }
+        MTL::Buffer* result = evalAggregateExpr(expr->asAggregate(), ctx, count, debug);
+        if (result) return result;
     }
 
     if (expr->kind == TypedExpr::Kind::Compare) {
