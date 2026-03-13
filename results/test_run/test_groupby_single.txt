@@ -1,41 +1,37 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|cnt|total_qty|
-N|3043852.00|77624808.00|
-A|1478493.00|37733796.00|
-R|1478870.00|37720548.00|
+N|3043852.00|77626160.00|
+A|1478493.00|37733768.00|
+R|1478870.00|37719584.00|
 ---------------------------------------------------
-Planning time: 0.53 ms
-Data Load Time (Disk+Upload): 2305.45 ms
-GPU kernels time: 155.54 ms
-CPU postprocess time: 127.72 ms
-Total Internal Pipeline time: 2588.70 ms
-Total Host Execution time: 2588.72 ms
-Total Wall time (Plan+Exec): 2589.25 ms
+Planning time: 0.51 ms
+Data Load Time (Disk+Upload): 2130.28 ms
+GPU kernels time: 181.60 ms
+CPU postprocess time: 122.86 ms
+Total Internal Pipeline time: 2434.74 ms
+Total Host Execution time: 2434.76 ms
+Total Wall time (Plan+Exec): 2435.27 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.184 ms (0.118%) [1 calls]
-  groupby        :  150.138 ms (96.528%) [3 calls]
-  sort           :    5.217 ms (3.354%) [2 calls]
+  cast           :    0.173 ms (0.095%) [1 calls]
+  groupby        :  159.391 ms (87.768%) [2 calls]
+  sort           :   22.040 ms (12.136%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 155.539 ms
-  Kernel invocations: 6
+  TOTAL GPU TIME: 181.604 ms
+  Kernel invocations: 5
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty      146.935        6001215         40.843
-ops::ht_mark_valid                   2.372       16777216       7071.782
-ops::ht_extract_compact              0.831              3          0.004
-ops::cast_u32_to_f32                 0.184              3          0.016
+ops::groupby_agg_multi_key_ty      158.104        6001215         37.957
+ops::ht_extract_compact              1.287              3          0.002
+ops::cast_u32_to_f32                 0.173              3          0.017
 block_sort_kv_u64                    0.000              3          0.000
-orderby_gpu_gather                   5.217              9          0.002
+orderby_gpu_gather                  22.040              9          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 155.539 ms
+TOTAL: 181.604 ms

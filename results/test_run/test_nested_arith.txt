@@ -1,0 +1,63 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+n_nationkey|complex_expr|div_expr|
+0|0.00|0.50|
+1|0.00|1.00|
+2|0.00|1.50|
+3|27.00|0.80|
+4|26.00|1.50|
+5|30.00|1.75|
+6|17.00|2.67|
+7|19.00|3.00|
+8|63.00|2.00|
+9|69.00|2.20|
+10|25.00|4.00|
+11|81.00|2.60|
+12|0.00|8.50|
+13|37.00|6.00|
+14|78.00|4.75|
+15|123.00|4.00|
+16|43.00|7.00|
+17|90.00|5.50|
+18|94.00|5.75|
+19|0.00|12.00|
+---------------------------------------------------
+Planning time: 0.76 ms
+Data Load Time (Disk+Upload): 13.20 ms
+GPU kernels time: 10.33 ms
+CPU postprocess time: 1.93 ms
+Total Internal Pipeline time: 25.46 ms
+Total Host Execution time: 25.48 ms
+Total Wall time (Plan+Exec): 26.24 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.033 ms (0.322%) [4 calls]
+  filter         :    8.439 ms (81.693%) [1 calls]
+  gather         :    1.551 ms (15.014%) [6 calls]
+  sort           :    0.307 ms (2.970%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 10.330 ms
+  Kernel invocations: 13
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_gt_u32                   8.439             25          0.003
+ops::gather_col_u32                  0.423             20          0.047
+ops::gather_col_u32                  0.205             20          0.097
+ops::cast_u32_to_f32                 0.006             20          3.117
+ops::gather_col_u32                  0.306             20          0.065
+ops::cast_u32_to_f32                 0.010             20          2.060
+ops::gather_col_u32                  0.198             20          0.101
+ops::cast_u32_to_f32                 0.005             20          3.721
+ops::gather_col_u32                  0.228             20          0.088
+ops::cast_u32_to_f32                 0.012             20          1.696
+ops::gather_col_u32                  0.192             20          0.104
+block_sort_kv_u64                    0.000             20          0.000
+orderby_gpu_gather                   0.307             60          0.196
+─────────────────────────────────────────────────────────────────
+TOTAL: 10.330 ms

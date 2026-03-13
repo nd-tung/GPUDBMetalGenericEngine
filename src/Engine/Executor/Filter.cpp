@@ -4,6 +4,7 @@
 
 #include <iostream>
 #include <set>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -11,18 +12,18 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     
     if (!filter.predicate) {
-        if (debug) std::cerr << "[Exec] Filter: no predicate\n";
+        LOG_DEBUG("Exec", "Filter: no predicate\n");
         return true;  // No-op filter
     }
     
     if (debug) {
-        std::cerr << "[Exec] Filter predicate kind=" << static_cast<int>(filter.predicate->kind) << "\n";
-        std::cerr << "[Exec] Filter predicateStr=" << filter.predicateStr << "\n";
+        LOG_INFO("Exec", "Filter predicate kind=" << static_cast<int>(filter.predicate->kind));
+        LOG_INFO("Exec", "Filter predicateStr=" << filter.predicateStr);
     }
     
     // Optimization: Empty input -> Empty output
     if (ctx.rowCount == 0) {
-        if (debug) std::cerr << "[Exec] Filter input empty, returning early.\n";
+        LOG_DEBUG("Exec", "Filter input empty, returning early.\n");
         return true;
     }
     
@@ -42,7 +43,7 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
     // Try GPU Filter first
     if (!ctx.u32ColsGPU.empty() || !ctx.f32ColsGPU.empty()) {
         if (executeFilterRecursive(pred, ctx)) {
-            if (debug) std::cerr << "[Exec] GPU Filter success, count=" << ctx.activeRowsCountGPU << "\n";
+            LOG_DEBUG("Exec", "GPU Filter success, count=" << ctx.activeRowsCountGPU);
             // Lazy sync: only update rowCount here.
             // CPU activeRows vector is populated on demand via ctx.ensureActiveRowsCPU().
             if (ctx.activeRowsGPU) {
@@ -53,7 +54,7 @@ bool GpuExecutor::executeFilter(const IRFilter& filter, EvalContext& ctx) {
             }
             return true;
         } else {
-            std::cerr << "[Exec] GPU Filter failed/unsupported: " << filter.predicateStr << "\n";
+            LOG_ERROR("Exec", "GPU Filter failed/unsupported: " << filter.predicateStr);
             ENGINE_THROW("GPU Filter failed, and CPU fallback is disabled.");
         }
     }

@@ -366,4 +366,88 @@ kernel void gather_flat_string_chars(
     }
 }
 
+// ============================================================================
+// E1a: FNV1a-64 hash of flat string columns (collision-resistant)
+// ============================================================================
+kernel void string_fnv1a_u64(
+    const device uint8_t*  chars    [[buffer(0)]],
+    const device uint32_t* offsets  [[buffer(1)]],
+    const device uint32_t* lengths  [[buffer(2)]],
+    device ulong*          hashes   [[buffer(3)]],
+    constant uint32_t&     rowCount [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]) {
+    if (tid >= rowCount) return;
+    uint32_t off = offsets[tid];
+    uint32_t len = lengths[tid];
+    ulong h = 14695981039346656037UL; // FNV1a-64 offset basis
+    for (uint32_t i = 0; i < len; i++) {
+        h ^= ulong(chars[off + i]);
+        h *= 1099511628211UL;         // FNV1a-64 prime
+    }
+    if (h == 0UL) h = 1UL;
+    hashes[tid] = h;
+}
+
+// ============================================================================
+// E1a helper: XOR-fold 64-bit hashes to 32-bit
+// ============================================================================
+kernel void fold_u64_to_u32(
+    const device ulong*    in      [[buffer(0)]],
+    device uint32_t*       out     [[buffer(1)]],
+    constant uint32_t&     count   [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+    if (tid >= count) return;
+    ulong h = in[tid];
+    uint32_t folded = uint32_t(h) ^ uint32_t(h >> 32);
+    if (folded == 0u) folded = 1u;
+    if (folded == 0xFFFFFFFFu) folded = 0xFFFFFFFEu;
+    out[tid] = folded;
+}
+
+// ============================================================================
+// E2a: Mark group boundaries in sorted key array.
+// out[0] = 0, out[i] = 1 if keys[i] != keys[i-1], else 0.
+// Works for both ulong prefix keys and uint32_t keys.
+// ============================================================================
+kernel void mark_sorted_boundaries_u64(
+    const device ulong*    keys    [[buffer(0)]],
+    device uint32_t*       marks   [[buffer(1)]],
+    constant uint32_t&     count   [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+    if (tid >= count) return;
+    if (tid == 0) {
+        marks[0] = 0;
+    } else {
+        marks[tid] = (keys[tid] != keys[tid - 1]) ? 1 : 0;
+    }
+}
+
+// ============================================================================
+// E2a: Scatter ranks back to original row positions.
+// rank[sortedIndices[tid]] = cumulativeRanks[tid]
+// ============================================================================
+kernel void scatter_rank_by_index(
+    const device uint32_t* cumulativeRanks [[buffer(0)]],
+    const device uint32_t* sortedIndices   [[buffer(1)]],
+    device uint32_t*       rank            [[buffer(2)]],
+    constant uint32_t&     count           [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+    if (tid >= count) return;
+    rank[sortedIndices[tid]] = cumulativeRanks[tid];
+}
+
+// ============================================================================
+// E3a: Offset-shift kernel — add a constant to each offset value.
+// Used for adjusting offsets when concatenating flat-string buffers.
+// ============================================================================
+kernel void offset_shift_u32(
+    const device uint32_t* inOffsets  [[buffer(0)]],
+    device uint32_t*       outOffsets [[buffer(1)]],
+    constant uint32_t&     shift     [[buffer(2)]],
+    constant uint32_t&     count     [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+    if (tid >= count) return;
+    outOffsets[tid] = inOffsets[tid] + shift;
+}
+
 #endif // STRINGKERNELS_H

@@ -151,6 +151,20 @@ struct EvalContext {
         auto dit = dictCols.find(colName);
         if (dit != dictCols.end() && dit->second.valid()) {
             stringCols[colName] = dit->second.materialize();
+            return;
+        }
+        // Lazy-materialize from flatStringCols if available
+        auto fit = flatStringCols.find(colName);
+        if (fit != flatStringCols.end() && fit->second.chars && fit->second.rowCount > 0) {
+            const auto& flat = fit->second;
+            const uint32_t* offs = static_cast<const uint32_t*>(flat.offsets->contents());
+            const uint32_t* lens = static_cast<const uint32_t*>(flat.lengths->contents());
+            const char* ch = static_cast<const char*>(flat.chars->contents());
+            std::vector<std::string> strs(flat.rowCount);
+            for (uint32_t i = 0; i < flat.rowCount; ++i) {
+                strs[i].assign(ch + offs[i], lens[i]);
+            }
+            stringCols[colName] = std::move(strs);
         }
     }
 
@@ -172,9 +186,9 @@ struct EvalContext {
             if (dict.idsGPU) {
                 uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
                 if (bufRows > compactCount) {
-                    MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, activeRowsGPU, compactCount, true);
+                    GpuBuffer compacted = GpuOps::gatherU32(dict.idsGPU, activeRowsGPU, compactCount, true);
                     if (compacted) {
-                        dict.idsGPU.reset(compacted);
+                        dict.idsGPU = std::move(compacted);
                         dict.rowCount = compactCount;
                         dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
                     }
@@ -187,9 +201,9 @@ struct EvalContext {
     void compactDictCols(MTL::Buffer* indexBuf, uint32_t newCount) {
         for (auto& [name, dict] : dictCols) {
             if (dict.idsGPU) {
-                MTL::Buffer* gathered = GpuOps::gatherU32(dict.idsGPU, indexBuf, newCount, false);
+                GpuBuffer gathered = GpuOps::gatherU32(dict.idsGPU, indexBuf, newCount, false);
                 if (gathered) {
-                    dict.idsGPU.reset(gathered);
+                    dict.idsGPU = std::move(gathered);
                     dict.rowCount = newCount;
                     dict.ids.clear();
                 }
@@ -241,13 +255,13 @@ struct EvalContext {
     void gatherAllGPU(MTL::Buffer* indices, uint32_t count) {
         for (auto& [name, buf] : u32ColsGPU) {
             if (!buf) continue;
-            MTL::Buffer* gathered = GpuOps::gatherU32(buf, indices, count);
-            buf.reset(gathered);
+            GpuBuffer gathered = GpuOps::gatherU32(buf, indices, count);
+            buf = std::move(gathered);
         }
         for (auto& [name, buf] : f32ColsGPU) {
             if (!buf) continue;
-            MTL::Buffer* gathered = GpuOps::gatherF32(buf, indices, count);
-            buf.reset(gathered);
+            GpuBuffer gathered = GpuOps::gatherF32(buf, indices, count);
+            buf = std::move(gathered);
         }
         compactDictCols(indices, count);
         compactFlatStringCols(indices, count);

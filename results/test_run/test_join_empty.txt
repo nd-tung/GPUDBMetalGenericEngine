@@ -1,0 +1,15 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+
+---------------------------------------------------
+Planning time: 0.49 ms
+Data Load Time (Disk+Upload): 12.75 ms
+GPU kernels time: 0.00 ms
+CPU postprocess time: 0.01 ms
+Total Internal Pipeline time: 12.76 ms
+Total Host Execution time: 12.77 ms
+Total Wall time (Plan+Exec): 13.26 ms
+---------------------------------------------------

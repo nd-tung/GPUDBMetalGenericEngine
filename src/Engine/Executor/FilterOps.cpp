@@ -5,6 +5,7 @@
 
 #include <cstring>
 #include <iostream>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -17,7 +18,7 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
     if (!store.device() || !store.library() || !store.queue()) return std::nullopt;
 
     if (env_truthy("GPUDB_DEBUG_OPS")) {
-        std::cerr << "[Exec] GPU filterU32: col=" << colName << " rowCount=" << rowCount << " val=" << literal << "\n";
+        LOG_INFO("Exec", "GPU filterU32: col=" << colName << " rowCount=" << rowCount << " val=" << literal);
     }
 
     const char* fn = nullptr;
@@ -32,23 +33,16 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
     }
 
     auto p_filter = makePSO(store.device(), store.library(), fn);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) {
+    if (!p_filter) {
         return std::nullopt;
     }
 
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
 
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outIdx->contents(), 0, rowCount * sizeof(uint32_t));
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
     auto filterStart = std::chrono::high_resolution_clock::now();
     {
         auto cmd = store.queue()->commandBuffer();
-        // Encoder 1: filter kernel → mask
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_filter);
         enc->setBuffer(col, 0, 0);
@@ -59,29 +53,18 @@ std::optional<FilterResult> GpuOps::filterU32(const std::string& colName,
         }
         dispatch1D(enc, rowCount);
         enc->endEncoding();
-        // Encoder 2: compact mask → indices (same cmd buffer, sequential execution)
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(outIdx, 0, 1);
-        enc2->setBuffer(outCnt, 0, 2);
-        enc2->setBytes(&rowCount, sizeof(rowCount), 3);
-        dispatch1D(enc2, rowCount);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
+    auto [outIdx, compactCount] = compactU8Deterministic(mask, rowCount);
     auto filterEnd = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record(fn, "filter",
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), rowCount);
 
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
 
     mask->release();
-    outCnt->release();
     return res;
 }
 
@@ -99,7 +82,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     size_t rowCount = data.size();
     if (rowCount == 0) return FilterResult{};
     if (env_truthy("GPUDB_DEBUG_OPS")) {
-        std::cerr << "[Exec] GPU filterString: rowCount=" << rowCount << " pattern=" << pattern << "\n";
+        LOG_INFO("Exec", "GPU filterString: rowCount=" << rowCount << " pattern=" << pattern);
     }
     
     // Use pre-flattened GPU buffers (always built at scan time, rebuilt after join)
@@ -183,9 +166,7 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     uint32_t rc = static_cast<uint32_t>(rowCount);
 
     // 4. Dispatch Kernel
-    if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] GPU filterString: dispatching kernel rowCount=" << rowCount
-                                                   << (useMultiContains ? " (multi-contains, " + std::to_string(numSegments) + " segments)" : "")
-                                                   << "\n";
+    LOG_DEBUG("Exec", "GPU filterString: dispatching kernel rowCount=" << rowCount << (useMultiContains ? " (multi-contains, " + std::to_string(numSegments) + " segments)" : ""));
     
     const char* kernelName = useMultiContains ? "ops::filter_string_multi_contains" : "ops::filter_string_contains";
     if (!useMultiContains) {
@@ -201,9 +182,8 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     }
 
     auto p_filter = makePSO(store.device(), store.library(), kernelName);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
     
-    if (!p_filter || !p_compact) {
+    if (!p_filter) {
         if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
         bufPattern->release();
         if (bufPatOffsets) bufPatOffsets->release();
@@ -214,11 +194,6 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
 
-    // Prepare compact output
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
     // Check if we need mask flip (NOTLIKE with multi-segment)
     bool needFlip = (useMultiContains && op == engine::GpuFilterOp::NE);
     MTL::ComputePipelineState* p_flip = nullptr;
@@ -228,10 +203,9 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     
     auto filterStart = std::chrono::high_resolution_clock::now();
 
-    // Fused: FILTER [→ FLIP] → COMPACT in one command buffer
+    // FILTER [→ FLIP] in one command buffer
     {
         auto cmd = store.queue()->commandBuffer();
-        // Encoder 1: filter
         auto enc1 = cmd->computeCommandEncoder();
         enc1->setComputePipelineState(p_filter);
         enc1->setBuffer(bufChars, 0, 0);
@@ -252,7 +226,6 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
         dispatch1D(enc1, rowCount);
         enc1->endEncoding();
 
-        // Encoder 2 (optional): flip mask for NOTLIKE
         if (needFlip && p_flip) {
             auto encFlip = cmd->computeCommandEncoder();
             encFlip->setComputePipelineState(p_flip);
@@ -261,22 +234,14 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
             dispatch1D(encFlip, rowCount);
             encFlip->endEncoding();
             if (env_truthy("GPUDB_DEBUG_OPS"))
-                std::cerr << "[Exec] GPU filterString: flipped mask for NOTLIKE multi-contains\n";
+                LOG_INFO("Exec", "GPU filterString: flipped mask for NOTLIKE multi-contains\n");
         }
 
-        // Final encoder: compact
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(outIdx, 0, 1);
-        enc2->setBuffer(outCnt, 0, 2);
-        enc2->setBytes(&rc, sizeof(rc), 3);
-        dispatch1D(enc2, rowCount);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
+
+    // Deterministic compaction
+    auto [outIdx, compactCount] = compactU8Deterministic(mask, rc);
     
     auto filterEnd = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record(kernelName, "filter", 
@@ -290,10 +255,8 @@ std::optional<FilterResult> GpuOps::filterString(const std::string& /*colName*/,
     mask->release();
     
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-
-    outCnt->release();
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
 
     return res;
 }
@@ -307,7 +270,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
                                                           MTL::Buffer* preLengths) {
     auto& store = GpuColumnStore::instance();
     if (!store.device() || !store.library() || !store.queue()) {
-        std::cerr << "[GpuOps] Device/Lib/Queue invalid\n";
+        LOG_ERROR("GpuOps", "Device/Lib/Queue invalid\n");
         return std::nullopt;
     }
 
@@ -315,7 +278,7 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     if (rowCount == 0) return FilterResult{};
     
     if (env_truthy("GPUDB_DEBUG_OPS")) {
-        std::cerr << "[GpuOps] filterStringPrefix pattern='" << pattern << "' invert=" << invert << " rowCount=" << rowCount << "\n";
+        LOG_INFO("GpuOps", "filterStringPrefix pattern='" << pattern << "' invert=" << invert << " rowCount=" << rowCount);
     }
     
     // Use pre-flattened GPU buffers (always built at scan time, rebuilt after join)
@@ -358,15 +321,13 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     const char* kernelName = invert ? "ops::filter_string_not_prefix" : "ops::filter_string_prefix";
 
     if (env_truthy("GPUDB_DEBUG_OPS")) {
-        std::cerr << "[GpuOps] Requesting kernel: " << kernelName << "\n";
+        LOG_INFO("GpuOps", "Requesting kernel: " << kernelName);
     }
 
     auto p_filter = makePSO(store.device(), store.library(), kernelName);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
     
-    if (!p_filter || !p_compact) {
-        if(!p_filter) std::cerr << "[GpuOps] Failed to make PSO for " << kernelName << "\n";
-        if(!p_compact) std::cerr << "[GpuOps] Failed to make PSO for compact\n";
+    if (!p_filter) {
+        LOG_ERROR("GPU", "Failed to make PSO for " << kernelName);
         if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
         bufPattern->release();
         return std::nullopt;
@@ -375,14 +336,8 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount);
 
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
-    // Fused: FILTER → COMPACT in one command buffer (2 encoders)
     {
         auto cmd = store.queue()->commandBuffer();
-        // Encoder 1: filter
         auto enc1 = cmd->computeCommandEncoder();
         enc1->setComputePipelineState(p_filter);
         enc1->setBuffer(bufChars, 0, 0);
@@ -394,19 +349,11 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
         enc1->setBytes(&rc, sizeof(rc), 6);
         dispatch1D(enc1, rowCount);
         enc1->endEncoding();
-        // Encoder 2: compact
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(outIdx, 0, 1);
-        enc2->setBuffer(outCnt, 0, 2);
-        enc2->setBytes(&rc, sizeof(rc), 3);
-        dispatch1D(enc2, rowCount);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
+
+    // Deterministic compaction
+    auto [outIdx, compactCount] = compactU8Deterministic(mask, rc);
 
     if (ownBufs) { bufChars->release(); bufOffsets->release(); bufLengths->release(); }
     bufPattern->release();
@@ -414,10 +361,9 @@ std::optional<FilterResult> GpuOps::filterStringPrefix(const std::string& /*colN
     mask->release();
     
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
 
-    outCnt->release();
     return res;
 }
 
@@ -442,23 +388,16 @@ std::optional<FilterResult> GpuOps::filterU32Indexed(const std::string& colName,
     }
 
     auto p_filter = makePSO(store.device(), store.library(), fn);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices_indexed");
-    if (!p_filter || !p_compact) {
+    if (!p_filter) {
         return std::nullopt;
     }
 
     auto mask = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, static_cast<size_t>(count) * sizeof(uint8_t));
 
-    auto outIdx = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
-
     auto filterStart = std::chrono::high_resolution_clock::now();
-    // Fused: FILTER → COMPACT in one command buffer (2 encoders)
     {
         auto cmd = store.queue()->commandBuffer();
-        // Encoder 1: filter
         auto enc1 = cmd->computeCommandEncoder();
         enc1->setComputePipelineState(p_filter);
         enc1->setBuffer(col, 0, 0);
@@ -468,33 +407,20 @@ std::optional<FilterResult> GpuOps::filterU32Indexed(const std::string& colName,
         enc1->setBytes(&count, sizeof(count), 4);
         dispatch1D(enc1, count);
         enc1->endEncoding();
-        // Encoder 2: compact
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(indices, 0, 1);
-        enc2->setBuffer(outIdx, 0, 2);
-        enc2->setBuffer(outCnt, 0, 3);
-        enc2->setBytes(&count, sizeof(count), 4);
-        dispatch1D(enc2, count);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
+    auto [outIdx, compactCount] = compactU8DeterministicIndexed(mask, indices, count);
     auto filterEnd = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record(fn, "filter", 
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), count);
 
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
 
-    bool debug = env_truthy("GPUDB_DEBUG_OPS");
-    if (debug) std::cerr << "[Exec] GPU filterU32Indexed: col=" << colName << " rowCount=" << count << " val=" << literal << " result=" << res.count << "\n";
+    LOG_DEBUG("Exec", "GPU filterU32Indexed: col=" << colName << " rowCount=" << count << " val=" << literal << " result=" << res.count);
 
     mask->release();
-    outCnt->release();
     return res;
 }
 
@@ -518,17 +444,12 @@ std::optional<FilterResult> GpuOps::filterF32(const std::string& /*colName*/,
     }
 
     auto p_filter = makePSO(store.device(), store.library(), fn);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) {
+    if (!p_filter) {
         return std::nullopt;
     }
 
     auto mask = store.device()->newBuffer(rowCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, rowCount * sizeof(uint8_t));
-
-    auto outIdx = store.device()->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
 
     auto filterStart = std::chrono::high_resolution_clock::now();
     {
@@ -541,28 +462,18 @@ std::optional<FilterResult> GpuOps::filterF32(const std::string& /*colName*/,
         enc->setBytes(&rowCount, sizeof(rowCount), 3);
         dispatch1D(enc, rowCount);
         enc->endEncoding();
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(outIdx, 0, 1);
-        enc2->setBuffer(outCnt, 0, 2);
-        enc2->setBytes(&rowCount, sizeof(rowCount), 3);
-        dispatch1D(enc2, rowCount);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
+    auto [outIdx, compactCount] = compactU8Deterministic(mask, rowCount);
     auto filterEnd = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record(fn, "filter",
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), rowCount);
 
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
 
     mask->release();
-    outCnt->release();
     return res;
 }
 
@@ -587,17 +498,12 @@ std::optional<FilterResult> GpuOps::filterF32Indexed(const std::string& colName,
     }
 
     auto p_filter = makePSO(store.device(), store.library(), fn);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices_indexed");
-    if (!p_filter || !p_compact) {
+    if (!p_filter) {
         return std::nullopt;
     }
 
     auto mask = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint8_t), MTL::ResourceStorageModeShared);
     std::memset(mask->contents(), 0, static_cast<size_t>(count) * sizeof(uint8_t));
-
-    auto outIdx = store.device()->newBuffer(static_cast<size_t>(count) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outCnt->contents(), 0, sizeof(uint32_t));
 
     auto filterStart = std::chrono::high_resolution_clock::now();
     {
@@ -611,29 +517,18 @@ std::optional<FilterResult> GpuOps::filterF32Indexed(const std::string& colName,
         enc->setBytes(&count, sizeof(count), 4);
         dispatch1D(enc, count);
         enc->endEncoding();
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(indices, 0, 1);
-        enc2->setBuffer(outIdx, 0, 2);
-        enc2->setBuffer(outCnt, 0, 3);
-        enc2->setBytes(&count, sizeof(count), 4);
-        dispatch1D(enc2, count);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
+    auto [outIdx, compactCount] = compactU8DeterministicIndexed(mask, indices, count);
     auto filterEnd = std::chrono::high_resolution_clock::now();
     KernelTimer::instance().record(fn, "filter",
         std::chrono::duration<double, std::milli>(filterEnd - filterStart).count(), count);
 
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
 
     mask->release();
-    outCnt->release();
     (void)colName;
     return res;
 }
@@ -659,13 +554,9 @@ std::optional<FilterResult> GpuOps::filterColColU32(
     }
 
     auto p_filter = makePSO(store.device(), store.library(), kernelName);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) return std::nullopt;
+    if (!p_filter) return std::nullopt;
 
     auto mask = store.device()->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
 
     {
         auto cmd = store.queue()->commandBuffer();
@@ -677,25 +568,15 @@ std::optional<FilterResult> GpuOps::filterColColU32(
         enc->setBytes(&count, sizeof(count), 3);
         dispatch1D(enc, count);
         enc->endEncoding();
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(outIdx, 0, 1);
-        enc2->setBuffer(outCnt, 0, 2);
-        enc2->setBytes(&count, sizeof(count), 3);
-        dispatch1D(enc2, count);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
     
+    auto [outIdx, compactCount] = compactU8Deterministic(mask, count);
     mask->release();
 
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-    outCnt->release();
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
     return res;
 }
 
@@ -720,13 +601,9 @@ std::optional<FilterResult> GpuOps::filterColColF32(
     }
 
     auto p_filter = makePSO(store.device(), store.library(), kernelName);
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_filter || !p_compact) return std::nullopt;
+    if (!p_filter) return std::nullopt;
 
     auto mask = store.device()->newBuffer(count * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    auto outIdx = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
 
     {
         auto cmd = store.queue()->commandBuffer();
@@ -738,25 +615,15 @@ std::optional<FilterResult> GpuOps::filterColColF32(
         enc->setBytes(&count, sizeof(count), 3);
         dispatch1D(enc, count);
         enc->endEncoding();
-        auto enc2 = cmd->computeCommandEncoder();
-        enc2->setComputePipelineState(p_compact);
-        enc2->setBuffer(mask, 0, 0);
-        enc2->setBuffer(outIdx, 0, 1);
-        enc2->setBuffer(outCnt, 0, 2);
-        enc2->setBytes(&count, sizeof(count), 3);
-        dispatch1D(enc2, count);
-        enc2->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd);
     }
     
+    auto [outIdx, compactCount] = compactU8Deterministic(mask, count);
     mask->release();
 
     FilterResult res;
-    res.indices.reset(outIdx);
-    res.count = *reinterpret_cast<uint32_t*>(outCnt->contents());
-    outCnt->release();
+    res.indices = std::move(outIdx);
+    res.count = compactCount;
     return res;
 }
 

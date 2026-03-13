@@ -19,7 +19,8 @@ CXX = xcrun -sdk macosx clang++
 # macOS deployment target
 MACOSX_MIN ?= 14.0
 # Use -O2 instead of -O3 to avoid Apple clang optimizer bug causing segfault
-CXXFLAGS = -std=c++20 -Wall -Wextra -O2 -mmacosx-version-min=$(MACOSX_MIN)
+# Observed with Apple clang 15.x (Xcode 15); re-test with newer toolchains.
+CXXFLAGS = -std=c++20 -Wall -Wextra -Wshadow -O2 -mmacosx-version-min=$(MACOSX_MIN) -MMD -MP
 
 # DuckDB (embedded library via Homebrew)
 DUCKDB_PREFIX ?= $(shell brew --prefix duckdb 2>/dev/null || echo /opt/homebrew)
@@ -44,6 +45,7 @@ FRAMEWORKS = -framework Metal -framework Foundation -framework QuartzCore
 # Source files
 SOURCES = $(shell find $(SOURCE_DIR) -name '*.cpp')
 OBJECTS = $(SOURCES:$(SOURCE_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+DEPS    = $(OBJECTS:.o=.d)
 KERNELS = $(wildcard $(KERNEL_DIR)/*.metal) $(wildcard $(KERNEL_DIR)/*.h)
 
 # Target executable
@@ -122,3 +124,24 @@ build: all
 # Explicit metallib target (for users with full Xcode)
 .PHONY: metallib
 metallib: $(KERNEL_METALLIB)
+
+# Auto-generated dependency includes (header change triggers recompilation)
+-include $(DEPS)
+
+# --- Sanitizer build targets ---
+# Usage: make sanitize-address   (detects memory errors)
+#        make sanitize-thread    (detects data races)
+#        make sanitize-undefined (detects UB)
+.PHONY: sanitize-address sanitize-thread sanitize-undefined
+
+sanitize-address: CXXFLAGS += -fsanitize=address -fno-omit-frame-pointer -g
+sanitize-address: LDFLAGS  += -fsanitize=address
+sanitize-address: clean all
+
+sanitize-thread: CXXFLAGS += -fsanitize=thread -g
+sanitize-thread: LDFLAGS  += -fsanitize=thread
+sanitize-thread: clean all
+
+sanitize-undefined: CXXFLAGS += -fsanitize=undefined -g
+sanitize-undefined: LDFLAGS  += -fsanitize=undefined
+sanitize-undefined: clean all

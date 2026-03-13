@@ -26,11 +26,10 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
     uint32_t newCount = static_cast<uint32_t>(end - offset);
 
     // Build GPU index buffer [offset, offset+1, ..., end-1]
-    MTL::Buffer* indices = GpuOps::iotaU32(newCount);
+    GpuBuffer indices = GpuOps::iotaU32(newCount);
     if (indices && offset > 0) {
-        MTL::Buffer* shifted = GpuOps::arithAddConstU32(indices, static_cast<uint32_t>(offset), newCount);
-        indices->release();
-        indices = shifted;
+        GpuBuffer shifted = GpuOps::arithAddConstU32(indices, static_cast<uint32_t>(offset), newCount);
+        indices = std::move(shifted);
     }
 
     bool hasGPU = (indices != nullptr);
@@ -39,13 +38,12 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
     for (size_t i = 0; i < table.u32Cols.size(); ++i) {
         MTL::Buffer* gpuBuf = (i < table.u32ColsGPU.size()) ? table.u32ColsGPU[i] : nullptr;
         if (hasGPU && gpuBuf) {
-            MTL::Buffer* gathered = GpuOps::gatherU32(gpuBuf, indices, newCount);
+            GpuBuffer gathered = GpuOps::gatherU32(gpuBuf, indices, newCount);
             if (gathered) {
-                // Update CPU vector from gathered GPU buffer (shared memory)
-                table.u32Cols[i].resize(newCount);
-                std::memcpy(table.u32Cols[i].data(), gathered->contents(), newCount * sizeof(uint32_t));
+                // Skip CPU download — GPU buffer is authoritative; lazy-fetch at output
+                table.u32Cols[i].clear();
                 if (i < table.u32ColsGPU.size()) {
-                    table.u32ColsGPU[i].reset(gathered);
+                    table.u32ColsGPU[i] = std::move(gathered);
                 }
                 continue;
             }
@@ -59,12 +57,12 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
     for (size_t i = 0; i < table.f32Cols.size(); ++i) {
         MTL::Buffer* gpuBuf = (i < table.f32ColsGPU.size()) ? table.f32ColsGPU[i] : nullptr;
         if (hasGPU && gpuBuf) {
-            MTL::Buffer* gathered = GpuOps::gatherF32(gpuBuf, indices, newCount);
+            GpuBuffer gathered = GpuOps::gatherF32(gpuBuf, indices, newCount);
             if (gathered) {
-                table.f32Cols[i].resize(newCount);
-                std::memcpy(table.f32Cols[i].data(), gathered->contents(), newCount * sizeof(float));
+                // Skip CPU download — GPU buffer is authoritative; lazy-fetch at output
+                table.f32Cols[i].clear();
                 if (i < table.f32ColsGPU.size()) {
-                    table.f32ColsGPU[i].reset(gathered);
+                    table.f32ColsGPU[i] = std::move(gathered);
                 }
                 continue;
             }
@@ -79,7 +77,6 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
         col = std::vector<std::string>(col.begin() + offset, col.begin() + end);
     }
     
-    if (indices) indices->release();
     table.rowCount = newCount;
     return true;
 }

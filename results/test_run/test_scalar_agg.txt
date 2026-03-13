@@ -1,0 +1,28 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar avg(n_regionkey): 0.00
+---------------------------------------------------
+Planning time: 0.52 ms
+Data Load Time (Disk+Upload): 13.28 ms
+GPU kernels time: 0.14 ms
+CPU postprocess time: 9.82 ms
+Total Internal Pipeline time: 23.24 ms
+Total Host Execution time: 23.26 ms
+Total Wall time (Plan+Exec): 23.78 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.139 ms (100.000%) [1 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 0.139 ms
+  Kernel invocations: 1
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::cast_u32_to_f32                 0.139             25          0.180
+─────────────────────────────────────────────────────────────────
+TOTAL: 0.139 ms

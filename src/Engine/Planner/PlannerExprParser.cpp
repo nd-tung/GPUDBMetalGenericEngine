@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <regex>
 #include <cctype>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -421,8 +422,8 @@ static TypedExprPtr parseBinaryArithmetic(const std::string& s, bool debug) {
             default: op = BinaryOp::Add;
         }
         if (debug) {
-            std::cerr << "[parseExpression] Binary split at pos " << opPos << " op='" << opChar << "'\n";
-            std::cerr << "[parseExpression]   left.size=" << left.size() << " right.size=" << right.size() << "\n";
+            LOG_INFO("parseExpression", "Binary split at pos " << opPos << " op='" << opChar << "'\n");
+            LOG_INFO("parseExpression", "left.size=" << left.size() << " right.size=" << right.size());
         }
         return TypedExpr::binary(op, Planner::parseExpression(left), Planner::parseExpression(right));
     }
@@ -443,7 +444,7 @@ static TypedExprPtr parseLiteralOrDate(const std::string& s) {
         }
     } catch (...) {
         if (env_truthy("GPUDB_DEBUG_PLANNER"))
-            std::cerr << "[Planner] parseExpression: numeric parse failed for '" << s.substr(0, 60) << "'\n";
+            LOG_ERROR("Planner", "parseExpression: numeric parse failed for '" << s.substr(0, 60) << "'\n");
     }
 
     static const std::regex dateRe1(R"(DATE\s*'(\d{4}-\d{2}-\d{2})')", std::regex::icase);
@@ -494,7 +495,7 @@ TypedExprPtr Planner::parseExpression(const std::string& exprStr) {
     
     bool debug = env_truthy("GPUDB_DEBUG_PARSE");
     if (debug) {
-        std::cerr << "[parseExpression] input: '" << s.substr(0, 80) << (s.size() > 80 ? "..." : "") << "'\n";
+        LOG_INFO("parseExpression", "input: '" << s.substr(0, 80) << (s.size() > 80 ? "..." : "") << "'\n");
     }
     
     std::string upper = s;
@@ -551,7 +552,7 @@ TypedExprPtr Planner::parseExpression(const std::string& exprStr) {
         auto cmpResult = parseComparisonExpression(s);
         if (cmpResult) {
             if (debug) {
-                std::cerr << "[parseExpression] comparison matched\n";
+                LOG_INFO("parseExpression", "comparison matched\n");
             }
             return cmpResult;
         }

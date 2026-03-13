@@ -1,8 +1,5 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -11,45 +8,44 @@ o_year|mkt_share|
 1996|0.04|
 ---------------------------------------------------
 Planning time: 2.47 ms
-Data Load Time (Disk+Upload): 3381.99 ms
-GPU kernels time: 8.43 ms
-CPU postprocess time: 38.52 ms
-Total Internal Pipeline time: 3428.93 ms
-Total Host Execution time: 3430.60 ms
-Total Wall time (Plan+Exec): 3433.07 ms
+Data Load Time (Disk+Upload): 3149.10 ms
+GPU kernels time: 11.37 ms
+CPU postprocess time: 22.51 ms
+Total Internal Pipeline time: 3182.98 ms
+Total Host Execution time: 3184.72 ms
+Total Wall time (Plan+Exec): 3187.19 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    2.130 ms (25.280%) [6 calls]
-  gather         :    0.170 ms (2.015%) [1 calls]
-  groupby        :    0.579 ms (6.867%) [3 calls]
-  hash_join_probe_u32:    5.352 ms (63.511%) [7 calls]
-  sort           :    0.196 ms (2.327%) [2 calls]
+  filter         :    4.741 ms (41.684%) [6 calls]
+  gather         :    0.200 ms (1.756%) [1 calls]
+  groupby        :    0.529 ms (4.652%) [2 calls]
+  hash_join_probe_u32:    5.684 ms (49.978%) [7 calls]
+  sort           :    0.220 ms (1.931%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 8.426 ms
-  Kernel invocations: 19
+  TOTAL GPU TIME: 11.373 ms
+  Kernel invocations: 18
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.324              5          0.015
-hash_join_probe_write_multi          0.249             25          0.101
-ops::filter_string_eq                0.336         200000        595.534
-hash_join_probe_write_multi          3.840        6001215       1562.664
-ops::filter_ge_u32                   0.571        1500000       2626.777
-ops::filter_le_u32_indexed           0.439         818669       1865.912
-hash_join_probe_write_multi          0.454         457263       1007.280
-ops::filter_le_u32                   0.263         150000        570.431
-hash_join_probe_write_multi          0.212         149999        708.796
-hash_join_probe_write_multi          0.215          13389         62.226
-hash_join_probe_write_multi          0.196          10000         51.118
-hash_join_probe_write_multi          0.186           2603         13.976
-ops::filter_string_eq                0.197           2603         13.199
-ops::gather_col_f32                  0.170            107          0.630
-ops::groupby_agg_multi_key_ty        0.239           2603         10.891
-ops::ht_mark_valid                   0.171           8192         47.848
-ops::ht_extract_compact              0.168              2          0.012
+ops::filter_string_eq                1.004              5          0.005
+hash_join_probe_write_multi          0.239             25          0.105
+ops::filter_string_eq                0.679         200000        294.388
+hash_join_probe_write_multi          4.219        6001215       1422.454
+ops::filter_ge_u32                   1.125        1500000       1332.791
+ops::filter_le_u32_indexed           0.843         818669        971.521
+hash_join_probe_write_multi          0.370         457263       1235.429
+ops::filter_le_u32                   0.586         150000        256.027
+hash_join_probe_write_multi          0.237         149999        632.683
+hash_join_probe_write_multi          0.214          13389         62.565
+hash_join_probe_write_multi          0.188          10000         53.227
+hash_join_probe_write_multi          0.217           2603         12.009
+ops::filter_string_eq                0.503           2603          5.175
+ops::gather_col_f32                  0.200            107          0.536
+ops::groupby_agg_multi_key_ty        0.322           2603          8.085
+ops::ht_extract_compact              0.207              2          0.010
 block_sort_kv_u64                    0.000              2          0.000
-orderby_gpu_gather                   0.196              4          0.020
+orderby_gpu_gather                   0.220              4          0.018
 ─────────────────────────────────────────────────────────────────
-TOTAL: 8.426 ms
+TOTAL: 11.373 ms

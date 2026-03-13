@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <regex>
 #include <cctype>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -173,7 +174,7 @@ static bool handleCTE(const json& node, TraverseContext& ctx) {
     if (node.contains("extra_info") && node["extra_info"].is_object()) {
         auto& ei = node["extra_info"];
         if (env_truthy("GPUDB_DEBUG_PLANNER")) {
-            std::cerr << "DEBUG: CTE Node extra_info keys:\n";
+            LOG_INFO("PLANNER", "DEBUG: CTE Node extra_info keys:\n");
             for (auto& elt : ei.get_object()) std::cerr << "  CTE Key: " << elt.first << "\n";
         }
         if (ei.contains("CTE Name")) cteName = ei["CTE Name"].get_string();
@@ -339,7 +340,6 @@ static void handleDelimJoinTraversal(const json& node, const std::string& /*name
     auto& capturedRightTable = jc.capturedRightTable;
     auto& capturedRHS = jc.capturedRHS;
     auto& rhsTables = jc.rhsTables;
-    auto& rhsProjections = jc.rhsProjections;
 
     debug_log("Processing DELIM_JOIN. Children: " + std::to_string(kids.size()) + " Swap: " + std::to_string(swapInputs));
 

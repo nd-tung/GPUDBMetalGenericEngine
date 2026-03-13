@@ -1,0 +1,56 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+n_regionkey|n_name|
+0|ALGERIA|
+0|ETHIOPIA|
+0|KENYA|
+0|MOROCCO|
+0|MOZAMBIQUE|
+1|CANADA|
+1|BRAZIL|
+1|ARGENTINA|
+1|UNITED STATES|
+1|PERU|
+2|INDIA|
+2|VIETNAM|
+2|CHINA|
+2|INDONESIA|
+2|JAPAN|
+3|FRANCE|
+3|UNITED KINGDOM|
+3|RUSSIA|
+3|ROMANIA|
+3|GERMANY|
+4|JORDAN|
+4|IRAQ|
+4|IRAN|
+4|SAUDI ARABIA|
+4|EGYPT|
+---------------------------------------------------
+Planning time: 0.40 ms
+Data Load Time (Disk+Upload): 22.21 ms
+GPU kernels time: 0.45 ms
+CPU postprocess time: 2.05 ms
+Total Internal Pipeline time: 24.71 ms
+Total Host Execution time: 24.73 ms
+Total Wall time (Plan+Exec): 25.12 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  gather         :    0.205 ms (45.360%) [1 calls]
+  sort           :    0.247 ms (54.640%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 0.451 ms
+  Kernel invocations: 3
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+block_sort_kv_u64                    0.000             25          0.000
+orderby_gpu_gather                   0.247             25          0.101
+ops::gather_col_u32                  0.205             25          0.122
+─────────────────────────────────────────────────────────────────
+TOTAL: 0.451 ms

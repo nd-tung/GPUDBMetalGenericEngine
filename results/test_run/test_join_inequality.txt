@@ -1,63 +1,60 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 ps_supplycost|p_retailprice|margin|s_name|p_name|
 49.99|1950.96|1900.97|Supplier#000006476|sky misty honeydew lawn dodger|
-49.99|1945.89|1895.90|Supplier#000000413|azure firebrick orchid powder sky|
-49.99|1736.64|1686.65|Supplier#000008682|ivory sienna sandy black seashell|
 49.99|1634.62|1584.63|Supplier#000003160|gainsboro lace cyan drab maroon|
 49.99|1584.55|1534.56|Supplier#000002582|powder white steel brown blush|
 49.99|1935.90|1885.91|Supplier#000005901|peach spring light white steel|
+49.99|1945.89|1895.90|Supplier#000000413|azure firebrick orchid powder sky|
+49.99|1736.64|1686.65|Supplier#000008682|ivory sienna sandy black seashell|
 49.98|1920.97|1870.99|Supplier#000009492|sandy floral beige steel blush|
 49.98|1569.62|1519.64|Supplier#000008129|orchid lawn grey mint light|
 49.98|1724.66|1674.68|Supplier#000008694|plum chartreuse deep brown hot|
-49.97|1591.63|1541.66|Supplier#000008649|peru coral grey white gainsboro|
 49.97|1657.73|1607.76|Supplier#000007731|sandy navajo salmon dim cream|
+49.97|1591.63|1541.66|Supplier#000008649|peru coral grey white gainsboro|
 49.97|1816.86|1766.89|Supplier#000006369|ghost dim medium puff brown|
 49.97|1977.95|1927.98|Supplier#000001957|seashell navajo plum dim black|
 49.97|1822.77|1772.80|Supplier#000005318|beige frosted maroon chiffon spring|
 49.97|1721.62|1671.65|Supplier#000001143|firebrick deep antique medium linen|
 ---------------------------------------------------
 Planning time: 0.87 ms
-Data Load Time (Disk+Upload): 519.63 ms
-GPU kernels time: 4.97 ms
-CPU postprocess time: 77.38 ms
-Total Internal Pipeline time: 601.98 ms
-Total Host Execution time: 614.58 ms
-Total Wall time (Plan+Exec): 615.44 ms
+Data Load Time (Disk+Upload): 486.86 ms
+GPU kernels time: 6.20 ms
+CPU postprocess time: 65.05 ms
+Total Internal Pipeline time: 558.10 ms
+Total Host Execution time: 571.55 ms
+Total Wall time (Plan+Exec): 572.42 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    2.183 ms (43.924%) [2 calls]
-  gather         :    1.897 ms (38.179%) [9 calls]
-  hash_join_probe_u32:    0.494 ms (9.939%) [2 calls]
-  sort           :    0.396 ms (7.958%) [2 calls]
+  filter         :    3.595 ms (58.003%) [2 calls]
+  gather         :    1.818 ms (29.330%) [9 calls]
+  hash_join_probe_u32:    0.396 ms (6.381%) [2 calls]
+  sort           :    0.390 ms (6.285%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 4.970 ms
+  TOTAL GPU TIME: 6.198 ms
   Kernel invocations: 15
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_f32                   1.072         200000        186.516
-ops::filter_lt_f32                   1.111         800000        720.342
-hash_join_probe_write_multi          0.249          38769        155.647
-hash_join_probe_write_multi          0.245          19362         79.069
+ops::filter_gt_f32                   1.555         200000        128.586
+ops::filter_lt_f32                   2.040         800000        392.181
+hash_join_probe_write_multi          0.180          38769        215.783
+hash_join_probe_write_multi          0.216          19362         89.708
 radix_sort_u64                       0.000          19362          0.000
-orderby_gpu_gather                   0.396         135534        342.690
-ops::gather_col_u32                  0.217          19362         89.192
-ops::gather_col_u32                  0.237          19362         81.797
-ops::gather_col_u32                  0.242             15          0.062
+orderby_gpu_gather                   0.390         135534        347.894
+ops::gather_col_u32                  0.208          19362         92.863
+ops::gather_col_u32                  0.213          19362         91.062
+ops::gather_col_u32                  0.221             15          0.068
+ops::gather_col_u32                  0.192             15          0.078
+ops::gather_col_u32                  0.196             15          0.077
 ops::gather_col_u32                  0.203             15          0.074
-ops::gather_col_u32                  0.200             15          0.075
-ops::gather_col_u32                  0.198             15          0.076
-ops::gather_col_f32                  0.199             15          0.076
-ops::gather_col_f32                  0.203             15          0.074
-ops::gather_col_f32                  0.199             15          0.075
+ops::gather_col_f32                  0.197             15          0.076
+ops::gather_col_f32                  0.195             15          0.077
+ops::gather_col_f32                  0.193             15          0.078
 ─────────────────────────────────────────────────────────────────
-TOTAL: 4.970 ms
+TOTAL: 6.198 ms

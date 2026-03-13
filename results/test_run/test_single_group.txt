@@ -1,0 +1,40 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+r_regionkey|r_regionkey|min_key|min_key|cnt|max_key|max_key|cnt|
+2|2|2.00|2.00|1.00|2.00|2.00|1.00|
+---------------------------------------------------
+Planning time: 0.52 ms
+Data Load Time (Disk+Upload): 12.93 ms
+GPU kernels time: 14.61 ms
+CPU postprocess time: 3.71 ms
+Total Internal Pipeline time: 31.25 ms
+Total Host Execution time: 31.26 ms
+Total Wall time (Plan+Exec): 31.78 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.917 ms (6.275%) [3 calls]
+  filter         :    9.297 ms (63.645%) [1 calls]
+  gather         :    2.667 ms (18.259%) [3 calls]
+  groupby        :    1.727 ms (11.821%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 14.607 ms
+  Kernel invocations: 9
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_eq_u32                   9.297              5          0.001
+ops::gather_col_u32                  0.838              1          0.001
+ops::gather_col_u32                  0.735              1          0.001
+ops::cast_u32_to_f32                 0.006              1          0.170
+ops::gather_col_u32                  1.094              1          0.001
+ops::cast_u32_to_f32                 0.022              1          0.045
+ops::groupby_agg_multi_key_ty        0.890              1          0.001
+ops::ht_extract_compact              0.836              1          0.001
+ops::cast_u32_to_f32                 0.889              1          0.001
+─────────────────────────────────────────────────────────────────
+TOTAL: 14.607 ms

@@ -8,6 +8,7 @@
 #include <regex>
 #include <cctype>
 #include <set>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -18,14 +19,14 @@ bool handleScan(const json& /*node*/, const std::string& name, const std::string
     if (nameLower == "column_data_scan") {
         debug_log("DEBUG: COLUMN_DATA_SCAN found");
         if (!extraInfo.is_null()) {
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DEBUG: COLUMN_DATA_SCAN extra_info keys: ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("column_index")) std::cerr << "column_index, ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("values")) std::cerr << "values, ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("columns")) std::cerr << "columns, ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("Columns")) std::cerr << "Columns, ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("result_chunk")) std::cerr << "result_chunk, ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("Result Chunk")) std::cerr << "Result Chunk, ";
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << std::endl;
+             LOG_DEBUG("PLANNER", "COLUMN_DATA_SCAN extra_info keys: ");
+             if (extraInfo.contains("column_index")) LOG_DEBUG("PLANNER", "column_index, ");
+             if (extraInfo.contains("values")) LOG_DEBUG("PLANNER", "values, ");
+             if (extraInfo.contains("columns")) LOG_DEBUG("PLANNER", "columns, ");
+             if (extraInfo.contains("Columns")) LOG_DEBUG("PLANNER", "Columns, ");
+             if (extraInfo.contains("result_chunk")) LOG_DEBUG("PLANNER", "result_chunk, ");
+             if (extraInfo.contains("Result Chunk")) LOG_DEBUG("PLANNER", "Result Chunk, ");
+             LOG_DEBUG("PLANNER", std::endl);
         }
     }
 
@@ -70,10 +71,10 @@ bool handleScan(const json& /*node*/, const std::string& name, const std::string
             }
 
             std::string filterStr;
-            for (auto& s : candidateFilters) {
-                 if (s.find("optional:") != std::string::npos) s = trim_str(s.substr(s.find("optional:")+9));
+            for (auto& cf : candidateFilters) {
+                 if (cf.find("optional:") != std::string::npos) cf = trim_str(cf.substr(cf.find("optional:")+9));
                  if (!filterStr.empty()) filterStr += " AND ";
-                 filterStr += s;
+                 filterStr += cf;
             }
             if (!filterStr.empty()) {
                 ctx.plan.nodes.push_back(IRNode::filter(Planner::parseExpression(filterStr), filterStr));
@@ -101,16 +102,16 @@ bool handleScan(const json& /*node*/, const std::string& name, const std::string
                  if (extraInfo["CTE Index"].is_number()) idx = (int64_t)extraInfo["CTE Index"].get_number();
                  if (ctx.cteMap.count(idx)) {
                      scan.table = ctx.cteMap[idx];
-                     if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DEBUG: Resolved CTE_SCAN table from index " << idx << " -> " << scan.table << "\n";
+                     LOG_DEBUG("PLANNER", "Resolved CTE_SCAN table from index " << idx << " -> " << scan.table);
                  } else {
-                     if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DEBUG: FAILED to resolve CTE Index " << idx << ". Map size=" << ctx.cteMap.size() << "\n";
+                     LOG_DEBUG("PLANNER", "FAILED to resolve CTE Index " << idx << ". Map size=" << ctx.cteMap.size());
                  }
              }
         }
     }
 
     // Infer table from column prefixes if needed
-    if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DEBUG: Scan table determined as: '" << scan.table << "'\n";
+    LOG_DEBUG("PLANNER", "Scan table determined as: '" << scan.table << "'\n");
 
     // Also handle DELIM_SCAN where table is a template source "tmpl_..." but logically is "orders" etc.
     if ((scan.table.empty() || scan.table.find("tmpl_") == 0) && !myProjs.empty()) {
@@ -195,7 +196,7 @@ bool handleScan(const json& /*node*/, const std::string& name, const std::string
         ctx.plan.tables.push_back({scan.table, scan.columns});
     }
 
-    if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DEBUG: Pushing SCAN node for " << name << ". Table=" << scan.table << "\n";
+    LOG_DEBUG("PLANNER", "Pushing SCAN node for " << name << ". Table=" << scan.table);
     ctx.plan.nodes.push_back(std::move(scanNode));
     debug_log("Generating Scan: " + ctx.plan.nodes.back().asScan().table + " at index " + std::to_string(ctx.plan.nodes.size()-1) + " Plan: " + std::to_string((uintptr_t)&ctx.plan));
 
@@ -211,8 +212,8 @@ void handleFilter(const json& /*node*/, const std::string& name,
                          const json& extraInfo, const std::string& extraStr,
                          std::vector<std::string>& childProjs, TraverseContext& ctx) {
     if (!extraInfo.is_null()) {
-         if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("Expression")) std::cerr << "Expression: " << extraInfo["Expression"].get_string() << std::endl;
-         if (env_truthy("GPUDB_DEBUG_PLANNER")) if (extraInfo.contains("Condition")) std::cerr << "Condition: " << extraInfo["Condition"].get_string() << std::endl;
+         if (extraInfo.contains("Expression")) LOG_DEBUG("PLANNER", "Expression: " << extraInfo["Expression"].get_string());
+         if (extraInfo.contains("Condition")) LOG_DEBUG("PLANNER", "Condition: " << extraInfo["Condition"].get_string());
     }
 
     std::string projsStr;
@@ -1027,9 +1028,9 @@ void handleJoinEmit(const json& /*node*/, const std::string& name, const std::st
     }
 
     if (nameLower.find("join") != std::string::npos) {
-        if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "[Planner] Creating JOIN '" << name << "'. CapturedRightTable: '" << capturedRightTable << "'" << std::endl;
-        if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "[Planner] Pre-resolved Condition: '" << condStr << "'" << std::endl;
-        if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "[Planner] ChildProjs size: " << childProjs.size() << std::endl;
+        LOG_DEBUG("Planner", "Creating JOIN '" << name << "'. CapturedRightTable: '" << capturedRightTable << "'");
+        LOG_DEBUG("Planner", "Pre-resolved Condition: '" << condStr << "'");
+        LOG_DEBUG("Planner", "ChildProjs size: " << childProjs.size());
         if (env_truthy("GPUDB_DEBUG_PLANNER")) for(size_t i=0; i<childProjs.size(); ++i) std::cerr << "  #" << i << ": " << childProjs[i] << std::endl;
     }
 
@@ -1075,24 +1076,21 @@ void handleJoinEmit(const json& /*node*/, const std::string& name, const std::st
                  condStr.replace(pos, 8, rhsCol);
                  pos += rhsCol.size();
              }
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "[Planner] Replaced SUBQUERY with '" << rhsCol << "' in Join Condition -> " << condStr << std::endl;
+             LOG_DEBUG("Planner", "Replaced SUBQUERY with '" << rhsCol << "' in Join Condition -> " << condStr);
          } else {
-             if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "[Planner] Keeping SUBQUERY token (RHS is complex: '" << rhsCol.substr(0, 40) << "...')" << std::endl;
+             LOG_DEBUG("Planner", "Keeping SUBQUERY token (RHS is complex: '" << rhsCol.substr(0, 40) << "...')");
          }
     }
 
     if (nameLower.find("join") != std::string::npos) {
-        if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "[Planner] Resolved Condition: '" << condStr << "'" << std::endl;
+        LOG_DEBUG("Planner", "Resolved Condition: '" << condStr << "'");
     }
 
     if (nameLower.find("join") != std::string::npos) {
-         if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DEBUG_JOIN_EMISSION: Node='" << name << "'"
-                   << " capturedRHS=" << (capturedRHS ? "true" : "false")
-                   << " capturedRightTable='" << capturedRightTable << "'"
-                   << std::endl;
+         LOG_DEBUG("PLANNER", "DEBUG_JOIN_EMISSION: Node='" << name << "'" << " capturedRHS=" << (capturedRHS ? "true" : "false") << " capturedRightTable='" << capturedRightTable << "'");
 
          if (capturedRHS && capturedRightTable.empty()) {
-              std::cerr << "CRITICAL ERROR: capturedRHS is TRUE but capturedRightTable is EMPTY for " << name << std::endl;
+              LOG_ERROR("PLANNER", "CRITICAL ERROR: capturedRHS is TRUE but capturedRightTable is EMPTY for " << name);
          }
     }
 

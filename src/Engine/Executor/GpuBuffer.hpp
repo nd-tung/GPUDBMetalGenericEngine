@@ -66,6 +66,10 @@ public:
     void reset(MTL::Buffer* b = nullptr) noexcept {
         if (buf_ != b) { if (buf_) buf_->release(); buf_ = b; }
     }
+    /// Overload: accept a GpuBuffer by copy (retains properly).
+    void reset(const GpuBuffer& o) noexcept { *this = o; }
+    /// Overload: accept a GpuBuffer by move (steals ownership).
+    void reset(GpuBuffer&& o) noexcept { *this = std::move(o); }
 
     /// Convenience: assign nullptr to release.
     GpuBuffer& operator=(std::nullptr_t) noexcept { reset(); return *this; }

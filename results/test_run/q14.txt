@@ -1,39 +1,36 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 Scalar promo_revenue: 16.38
 ---------------------------------------------------
-Planning time: 1.21 ms
-Data Load Time (Disk+Upload): 2853.17 ms
-GPU kernels time: 4.32 ms
-CPU postprocess time: 33.42 ms
-Total Internal Pipeline time: 2890.92 ms
-Total Host Execution time: 2892.41 ms
-Total Wall time (Plan+Exec): 2893.62 ms
+Planning time: 1.23 ms
+Data Load Time (Disk+Upload): 2656.26 ms
+GPU kernels time: 5.89 ms
+CPU postprocess time: 22.63 ms
+Total Internal Pipeline time: 2684.78 ms
+Total Host Execution time: 2686.28 ms
+Total Wall time (Plan+Exec): 2687.52 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    3.147 ms (72.800%) [2 calls]
-  gather         :    0.909 ms (21.022%) [4 calls]
-  hash_join_probe_u32:    0.267 ms (6.178%) [1 calls]
+  filter         :    4.721 ms (80.193%) [2 calls]
+  gather         :    0.882 ms (14.987%) [4 calls]
+  hash_join_probe_u32:    0.284 ms (4.820%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 4.322 ms
+  TOTAL GPU TIME: 5.887 ms
   Kernel invocations: 7
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                   2.269        6001215       2645.116
-ops::filter_lt_u32_indexed           0.878        2817779       3210.076
-hash_join_probe_write_multi          0.267          75983        284.537
-ops::gather_col_f32                  0.234          12519         53.443
-ops::gather_col_f32                  0.224          12519         55.982
-ops::gather_col_f32                  0.225          12519         55.640
-ops::gather_col_f32                  0.226          12519         55.455
+ops::filter_ge_u32                   3.304        6001215       1816.417
+ops::filter_lt_u32_indexed           1.417        2817779       1988.846
+hash_join_probe_write_multi          0.284          75983        267.781
+ops::gather_col_f32                  0.231          12519         54.185
+ops::gather_col_f32                  0.221          12519         56.604
+ops::gather_col_f32                  0.222          12519         56.445
+ops::gather_col_f32                  0.208          12519         60.127
 ─────────────────────────────────────────────────────────────────
-TOTAL: 4.322 ms
+TOTAL: 5.887 ms

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -28,7 +29,7 @@ std::string resolveColRef(const std::string& ref, const std::vector<std::string>
                 }
             } catch (...) {
                 if (env_truthy("GPUDB_DEBUG_PLANNER"))
-                    std::cerr << "[Planner] resolveProjectionRefs: failed to parse index '" << numStr << "'\n";
+                    LOG_ERROR("Planner", "resolveProjectionRefs: failed to parse index '" << numStr << "'\n");
             }
         }
         pos++;

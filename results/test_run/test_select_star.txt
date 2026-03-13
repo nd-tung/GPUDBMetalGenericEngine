@@ -1,8 +1,5 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -14,10 +11,10 @@ r_regionkey|r_comment|r_name|
 4|uickly special accounts cajole carefully blithely close requests. carefully final asymptotes haggle furiousl|MIDDLE EAST|
 ---------------------------------------------------
 Planning time: 0.29 ms
-Data Load Time (Disk+Upload): 22.44 ms
+Data Load Time (Disk+Upload): 23.46 ms
 GPU kernels time: 0.00 ms
 CPU postprocess time: 0.02 ms
-Total Internal Pipeline time: 22.46 ms
-Total Host Execution time: 22.48 ms
-Total Wall time (Plan+Exec): 22.77 ms
+Total Internal Pipeline time: 23.48 ms
+Total Host Execution time: 23.51 ms
+Total Wall time (Plan+Exec): 23.80 ms
 ---------------------------------------------------

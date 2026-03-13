@@ -4,6 +4,7 @@
 #include "JoinInternal.hpp"
 #include <future>
 #include <thread>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -45,11 +46,10 @@ static void extractJoinKeyPairs(const TypedExprPtr& expr,
 // Extracted helpers for executeJoin()
 // ============================================================================
 
-static void materializeJoinContext(EvalContext& ctx, const char* label, bool debug) {
+static void materializeJoinContext(EvalContext& ctx, const char* label, bool /*debug*/) {
     if (!ctx.activeRowsGPU) return;  // No filter applied — nothing to materialize
     uint32_t count = ctx.activeRowsCountGPU;
-    if (debug) std::cerr << "[Exec] Join: materializing " << label 
-                         << " ctx (" << count << " active rows from " << ctx.rowCount << ")\n";
+    LOG_DEBUG("Exec", "Join: materializing " << label  << " ctx (" << count << " active rows from " << ctx.rowCount << ")\n");
     // If the filter matched 0 rows, clear everything and set rowCount=0
     if (count == 0) {
         for (auto& [name, vec] : ctx.u32Cols) vec.clear();
@@ -69,9 +69,9 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
         if (!buf) continue;
         uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
         if (bufRows > count) {
-            MTL::Buffer* compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count, false);
+            GpuBuffer compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count, false);
             if (compacted) {
-                buf.reset(compacted);
+                buf = std::move(compacted);
             }
         }
     }
@@ -80,9 +80,9 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
         if (!buf) continue;
         uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
         if (bufRows > count) {
-            MTL::Buffer* compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, count, false);
+            GpuBuffer compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, count, false);
             if (compacted) {
-                buf.reset(compacted);
+                buf = std::move(compacted);
             }
         }
     }
@@ -91,9 +91,9 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
         if (dict.idsGPU) {
             uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
             if (bufRows > count) {
-                MTL::Buffer* compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, false);
+                GpuBuffer compacted = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, count, false);
                 if (compacted) {
-                    dict.idsGPU.reset(compacted);
+                    dict.idsGPU = std::move(compacted);
                     dict.rowCount = count;
                     dict.ids.clear();  // Invalidate CPU mirror (lazy sync)
                 }
@@ -101,7 +101,7 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
         } else if (dict.ids.size() > count) {
             // CPU-only fallback (no GPU buffer) — needs sync first
             GpuOps::sync();
-            uint32_t* indices2 = (uint32_t*)ctx.activeRowsGPU->contents();
+            uint32_t* indices2 = static_cast<uint32_t*>(ctx.activeRowsGPU->contents());
             std::vector<uint32_t> c;
             c.reserve(count);
             for (uint32_t i = 0; i < count; ++i)
@@ -118,15 +118,14 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
             if (vec.size() > count) {
                 auto itGpu = ctx.u32ColsGPU.find(name);
                 if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
-                    // GPU buffer already compacted above — sync CPU from it (zero-cost on unified mem)
-                    vec.resize(count);
-                    std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(uint32_t));
+                    // GPU buffer already compacted — skip CPU download, lazy-fetch later
+                    vec.clear();
                 } else {
                     MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
+                    GpuBuffer dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
                     vec.resize(count);
                     std::memcpy(vec.data(), dst->contents(), count * sizeof(uint32_t));
-                    src->release(); dst->release();
+                    src->release();
                 }
             }
         }
@@ -135,14 +134,14 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
             if (vec.size() > count) {
                 auto itGpu = ctx.f32ColsGPU.find(name);
                 if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
-                    vec.resize(count);
-                    std::memcpy(vec.data(), itGpu->second->contents(), count * sizeof(float));
+                    // GPU buffer already compacted — skip CPU download, lazy-fetch later
+                    vec.clear();
                 } else {
                     MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                    MTL::Buffer* dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
+                    GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
                     vec.resize(count);
                     std::memcpy(vec.data(), dst->contents(), count * sizeof(float));
-                    src->release(); dst->release();
+                    src->release();
                 }
             }
         }
@@ -160,11 +159,8 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
                         fit->second.chars, fit->second.offsets, fit->second.lengths,
                         ctx.activeRowsGPU, count, true);
                     if (r.chars) {
-                        const uint32_t* offs = static_cast<const uint32_t*>(r.offsets->contents());
-                        const uint32_t* lens = static_cast<const uint32_t*>(r.lengths->contents());
-                        const char* ch = static_cast<const char*>(r.chars->contents());
-                        vec.resize(count);
-                        for (uint32_t i = 0; i < count; ++i) vec[i].assign(ch + offs[i], lens[i]);
+                        // Skip CPU string reconstruction — flatStringCol is authoritative
+                        vec.clear();
                         // Update flatStringCols to compacted version
                         fit->second.takeFrom(r.chars, r.offsets, r.lengths,
                                              r.rowCount, r.totalBytes);
@@ -172,7 +168,7 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool deb
                     }
                 }
                 // CPU fallback
-                uint32_t* indices = (uint32_t*)ctx.activeRowsGPU->contents();
+                uint32_t* indices = static_cast<uint32_t*>(ctx.activeRowsGPU->contents());
                 std::vector<std::string> c;
                 c.reserve(count);
                 for (uint32_t i = 0; i < count; ++i)
@@ -208,7 +204,7 @@ static void applyPostJoinFilter(
     EvalContext& outCtx, bool debug
 ) {
     if (debug) {
-        std::cerr << "[Exec] Join: applying post-join filter, current rows=" << outCtx.rowCount << "\n";
+        LOG_INFO("Exec", "Join: applying post-join filter, current rows=" << outCtx.rowCount);
     }
 
     // Rewrite column references in the residual filter to resolve to actual outCtx columns.
@@ -264,9 +260,7 @@ static void applyPostJoinFilter(
 
                 if (newLName != lName || newRName != rName) {
                     if (debug) {
-                        std::cerr << "[Exec] Join: rewrote residual col: " 
-                                  << lName << " -> " << newLName << ", "
-                                  << rName << " -> " << newRName << "\n";
+                        LOG_INFO("Exec", "Join: rewrote residual col: "  << lName << " -> " << newLName << ", " << rName << " -> " << newRName);
                     }
                     return TypedExpr::compare(cmp.op, 
                                               TypedExpr::column(newLName), 
@@ -289,19 +283,19 @@ static void applyPostJoinFilter(
 
     TypedExprPtr rewrittenFilter = rewriteResidualCols(postJoinFilter);
     if (debug && rewrittenFilter != postJoinFilter) {
-        std::cerr << "[Exec] Join: rewrote post-join filter column references\n";
+        LOG_INFO("Exec", "Join: rewrote post-join filter column references\n");
     }
 
     // Upload CPU columns to GPU for filtering (they were gathered from join)
     for (const auto& [name, vec] : outCtx.u32Cols) {
         if (!vec.empty() && outCtx.u32ColsGPU.find(name) == outCtx.u32ColsGPU.end()) {
-            MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
+            GpuBuffer buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
             if (buf) outCtx.u32ColsGPU[name].reset(buf);
         }
     }
     for (const auto& [name, vec] : outCtx.f32Cols) {
         if (!vec.empty() && outCtx.f32ColsGPU.find(name) == outCtx.f32ColsGPU.end()) {
-            MTL::Buffer* buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
+            GpuBuffer buf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
             if (buf) outCtx.f32ColsGPU[name].reset(buf);
         }
     }
@@ -310,8 +304,7 @@ static void applyPostJoinFilter(
     IRFilter postFilter{rewrittenFilter, ""};
     bool filterOk = GpuExecutor::executeFilter(postFilter, outCtx);
     if (debug) {
-        std::cerr << "[Exec] Join: post-join filter " << (filterOk?"ok":"failed") 
-                  << ", rows after=" << outCtx.rowCount << "\n";
+        LOG_ERROR("Exec", "Join: post-join filter " << (filterOk?"ok":"failed")  << ", rows after=" << outCtx.rowCount);
     }
 }
 
@@ -341,8 +334,8 @@ static JoinKeyExtraction extractJoinConditionKeys(const IRJoin& join, bool debug
             out.hasPostJoinFilter = true;
             out.postJoinFilter = join.condition;
             if (debug) {
-                std::cerr << "[Exec] Join: detected non-equality condition, treating as cross-join + filter\n";
-                std::cerr << "[Exec] Join: conditionStr=" << join.conditionStr << "\n";
+                LOG_INFO("Exec", "Join: detected non-equality condition, treating as cross-join + filter\n");
+                LOG_INFO("Exec", "Join: conditionStr=" << join.conditionStr);
             }
         }
     }
@@ -361,8 +354,7 @@ static JoinKeyExtraction extractJoinConditionKeys(const IRJoin& join, bool debug
                 out.postJoinFilter = combined;
             }
             if (debug)
-                std::cerr << "[Exec] Join: extracted " << residuals.size()
-                          << " residual condition(s) as post-join filter\n";
+                LOG_INFO("Exec", "Join: extracted " << residuals.size() << " residual condition(s) as post-join filter\n");
         }
     }
 
@@ -402,14 +394,14 @@ static JoinKeyExtraction extractJoinConditionKeys(const IRJoin& join, bool debug
 
     // Complex non-equality fallback
     if (!out.isCrossJoin && out.keyPairs.empty() && join.condition) {
-        if (debug) std::cerr << "[Exec] Join: no equi-join keys found but has condition, treating as cross-join + filter\n";
+        LOG_DEBUG("Exec", "Join: no equi-join keys found but has condition, treating as cross-join + filter\n");
         out.isCrossJoin = true;
         out.hasPostJoinFilter = true;
         out.postJoinFilter = join.condition;
     }
 
     if (!out.isCrossJoin && out.keyPairs.empty()) {
-        if (debug) std::cerr << "[Exec] Join: no key pairs found\n";
+        LOG_DEBUG("Exec", "Join: no key pairs found\n");
         out.failed = true;
     }
 
@@ -422,41 +414,38 @@ static void postProcessSemiAntiJoin(
     JoinResult& jRes, uint32_t& resCount,
     uint32_t lCount, uint32_t rCount,
     bool isSemiJoin, bool isAntiJoin, bool gpuSemiAntiDone,
-    const IRJoin& join, bool debug)
+    const IRJoin& join, bool /*debug*/)
 {
     auto& store = GpuColumnStore::instance();
 
     // SEMI JOIN: deduplicate probeIndices, keeping first match per probe row.
     if (isSemiJoin && resCount > 0 && jRes.probeIndices && !gpuSemiAntiDone) {
-        if (debug) std::cerr << "[Exec] Semi Join: Deduplicating " << resCount << " probe indices\n";
+        LOG_DEBUG("Exec", "Semi Join: Deduplicating " << resCount << " probe indices\n");
         std::vector<MTL::Buffer*> dedupKeys = { jRes.probeIndices };
         uint32_t uniqueCount = 0;
-        MTL::Buffer* uniqueIdx = GpuOps::dedupByKeys(dedupKeys, resCount, uniqueCount);
+        GpuBuffer uniqueIdx = GpuOps::dedupByKeys(dedupKeys, resCount, uniqueCount);
         if (uniqueIdx && uniqueCount > 0) {
             auto newProbe = GpuOps::gatherU32(jRes.probeIndices, uniqueIdx, uniqueCount);
             auto newBuild = GpuOps::gatherU32(jRes.buildIndices, uniqueIdx, uniqueCount);
-            uniqueIdx->release();
             if (newProbe && newBuild) {
-                jRes.probeIndices.reset(newProbe);
-                jRes.buildIndices.reset(newBuild);
+                jRes.probeIndices = std::move(newProbe);
+                jRes.buildIndices = std::move(newBuild);
                 resCount = uniqueCount;
                 jRes.count = uniqueCount;
             }
         } else if (uniqueIdx) {
-            uniqueIdx->release();
         }
-        if (debug) std::cerr << "[Exec] Semi Join: After dedup: " << resCount << " unique rows\n";
+        LOG_DEBUG("Exec", "Semi Join: After dedup: " << resCount << " unique rows\n");
     }
 
     // ANTI JOIN: Find rows that did NOT match.
     if (isAntiJoin && rCount > 0 && jRes.probeIndices && !gpuSemiAntiDone) {
         if (join.rightVariant) {
             // RIGHT ANTI: find build (right) rows not matched
-            if (debug) std::cerr << "[Exec] Right Anti Join: Finding non-matching rows from "
-                                 << rCount << " right rows, " << resCount << " matches\n";
+            LOG_DEBUG("Exec", "Right Anti Join: Finding non-matching rows from " << rCount << " right rows, " << resCount << " matches\n");
             auto antiRes = GpuOps::findUnmatchedIndices(jRes.buildIndices, resCount, rCount);
             uint32_t antiCount = antiRes.count;
-            if (debug) std::cerr << "[Exec] Right Anti Join: " << antiCount << " non-matching right rows\n";
+            LOG_DEBUG("Exec", "Right Anti Join: " << antiCount << " non-matching right rows\n");
             jRes.buildIndices = std::move(antiRes.indices);
             jRes.probeIndices.reset(store.device()->newBuffer(
                 std::max(antiCount, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
@@ -465,11 +454,10 @@ static void postProcessSemiAntiJoin(
             jRes.count = antiCount;
         } else {
             // LEFT ANTI (default): find probe (left) rows not matched
-            if (debug) std::cerr << "[Exec] Anti Join: Finding non-matching rows from "
-                                 << lCount << " left rows, " << resCount << " matches\n";
+            LOG_DEBUG("Exec", "Anti Join: Finding non-matching rows from " << lCount << " left rows, " << resCount << " matches\n");
             auto antiRes = GpuOps::findUnmatchedIndices(jRes.probeIndices, resCount, lCount);
             uint32_t antiCount = antiRes.count;
-            if (debug) std::cerr << "[Exec] Anti Join: " << antiCount << " non-matching rows\n";
+            LOG_DEBUG("Exec", "Anti Join: " << antiCount << " non-matching rows\n");
             jRes.probeIndices = std::move(antiRes.indices);
             jRes.buildIndices.reset(store.device()->newBuffer(
                 std::max(antiCount, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
@@ -544,14 +532,11 @@ static ResolvedJoinKeys resolveJoinKeyColumns(
                 usedLeftCols.insert(leftResolved);
                 usedRightCols.insert(rightResolved);
                 if (debug) {
-                    std::cerr << "[Exec] Join: fuzzy resolved " << k1 << "=" << k2 << " to ("
-                              << leftResolved << ", " << rightResolved << ")\n";
+                    LOG_INFO("Exec", "Join: fuzzy resolved " << k1 << "=" << k2 << " to (" << leftResolved << ", " << rightResolved << ")\n");
                 }
             } else {
                 if (debug) {
-                    std::cerr << "[Exec] Join: cannot resolve key pair " << k1 << "=" << k2
-                              << " k1InLeft=" << k1InLeft << " k2InRight=" << k2InRight
-                              << " k2InLeft=" << k2InLeft << " k1InRight=" << k1InRight << "\n";
+                    LOG_WARN("Exec", "Join: cannot resolve key pair " << k1 << "=" << k2 << " k1InLeft=" << k1InLeft << " k2InRight=" << k2InRight << " k2InLeft=" << k2InLeft << " k1InRight=" << k1InRight);
                 }
                 result.failed = true;
                 return result;
@@ -559,7 +544,7 @@ static ResolvedJoinKeys resolveJoinKeyColumns(
         }
     }
 
-    if (debug) std::cerr << "[Exec] Join: resolved " << result.keys.size() << " key pair(s)\n";
+    LOG_DEBUG("Exec", "Join: resolved " << result.keys.size() << " key pair(s)\n");
     return result;
 }
 
@@ -567,14 +552,13 @@ static ResolvedJoinKeys resolveJoinKeyColumns(
 // Creates Cartesian product index buffers for a cross join on GPU.
 static JoinResult buildCrossJoinIndices(
     EvalContext& leftCtx, EvalContext& rightCtx,
-    uint32_t lCount, uint32_t rCount, bool debug) {
-    if (debug) std::cerr << "[Exec] GPU Join: Cross Join 1=1 (" << lCount << " x " << rCount << ")\n";
+    uint32_t lCount, uint32_t rCount, bool /*debug*/) {
+    LOG_DEBUG("Exec", "GPU Join: Cross Join 1=1 (" << lCount << " x " << rCount << ")\n");
     uint64_t totalCount = (uint64_t)lCount * (uint64_t)rCount;
 
     auto device = GpuColumnStore::instance().device();
     if (totalCount > UINT32_MAX) {
-        std::cerr << "[Exec] WARNING: Cross join produces " << totalCount
-                  << " rows, exceeding uint32_t max. Clamping to " << UINT32_MAX << ".\n";
+        LOG_WARN("Exec", "WARNING: Cross join produces " << totalCount << " rows, exceeding uint32_t max. Clamping to " << UINT32_MAX << ".\n");
         totalCount = UINT32_MAX;
     }
     JoinResult jRes;
@@ -585,8 +569,8 @@ static JoinResult buildCrossJoinIndices(
     MTL::Buffer* lIndicesGPU = leftCtx.activeRowsGPU;
     MTL::Buffer* rIndicesGPU = rightCtx.activeRowsGPU;
     bool createdL = false, createdR = false;
-    if (!lIndicesGPU) { lIndicesGPU = GpuOps::iotaU32(lCount); createdL = true; }
-    if (!rIndicesGPU) { rIndicesGPU = GpuOps::iotaU32(rCount); createdR = true; }
+    if (!lIndicesGPU) { lIndicesGPU = GpuOps::iotaU32(lCount).detach(); createdL = true; }
+    if (!rIndicesGPU) { rIndicesGPU = GpuOps::iotaU32(rCount).detach(); createdR = true; }
 
     GpuOps::crossProduct(lIndicesGPU, rIndicesGPU,
                          jRes.probeIndices, jRes.buildIndices,
@@ -603,14 +587,14 @@ static void swapDelimCorrelationColumns(
     EvalContext& outCtx,
     const std::unordered_set<std::string>& delimCols,
     const std::unordered_map<std::string, std::string>& rightColumnMapping,
-    bool debug) {
+    bool /*debug*/) {
     for (const auto& col : delimCols) {
         auto rmIt = rightColumnMapping.find(col);
         if (rmIt != rightColumnMapping.end() && rmIt->second != col) {
             const std::string& renamedCol = rmIt->second;
             if (outCtx.u32Cols.count(col) && outCtx.u32Cols.count(renamedCol)) {
                 std::swap(outCtx.u32Cols[col], outCtx.u32Cols[renamedCol]);
-                if (debug) std::cerr << "[Exec] Join: DELIM priority swap: " << col << " <-> " << renamedCol << "\n";
+                LOG_DEBUG("Exec", "Join: DELIM priority swap: " << col << " <-> " << renamedCol);
             }
             if (outCtx.u32ColsGPU.count(col) && outCtx.u32ColsGPU.count(renamedCol))
                 std::swap(outCtx.u32ColsGPU[col], outCtx.u32ColsGPU[renamedCol]);
@@ -635,7 +619,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
     if (join.type != JoinType::Inner && join.type != JoinType::Left &&
         join.type != JoinType::Right && join.type != JoinType::Semi && 
         join.type != JoinType::Anti && join.type != JoinType::Mark) {
-        if (debug) std::cerr << "[Exec] Join: unsupported join type\n";
+        LOG_DEBUG("Exec", "Join: unsupported join type\n");
         return false;
     }
     
@@ -643,19 +627,30 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
     const bool isRightJoin = (join.type == JoinType::Right);
     const bool isSemiJoin = (join.type == JoinType::Semi || join.type == JoinType::Mark);
     const bool isAntiJoin = (join.type == JoinType::Anti);
+
+    // Early exit: if either side has zero rows, the join result is trivially empty
+    // (ANTI join with empty left still produces 0 rows; LEFT with empty left = 0 rows)
+    {
+        uint32_t earlyL = leftCtx.activeRowsCountGPU > 0 ? leftCtx.activeRowsCountGPU : (uint32_t)leftCtx.rowCount;
+        uint32_t earlyR = rightCtx.activeRowsCountGPU > 0 ? rightCtx.activeRowsCountGPU : (uint32_t)rightCtx.rowCount;
+        if (earlyL == 0 || earlyR == 0) {
+            LOG_DEBUG("Exec", "Join: empty input (left=" << earlyL << " right=" << earlyR << "), returning 0-row result\n");
+            outCtx.rowCount = 0;
+            outCtx.activeRows.clear();
+            outCtx.activeRowsGPU.reset();
+            outCtx.activeRowsCountGPU = 0;
+            return true;
+        }
+    }
     
     if (debug) {
-        std::cerr << "[Exec] Join: type=" << static_cast<int>(join.type) 
-                  << " isLeft=" << isLeftJoin << " isRight=" << isRightJoin 
-                  << " isSemi=" << isSemiJoin << " isAnti=" << isAntiJoin << "\n";
-        if (debug) std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, "
-                  << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows";
+        LOG_INFO("Exec", "Join: type=" << static_cast<int>(join.type)  << " isLeft=" << isLeftJoin << " isRight=" << isRightJoin  << " isSemi=" << isSemiJoin << " isAnti=" << isAntiJoin);
+        LOG_DEBUG("Exec", "Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, " << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows");
         if (debug) for (const auto& [k, v] : leftCtx.u32Cols) std::cerr << " " << k;
-        if (debug) std::cerr << "\n";
-        if (debug) std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
-                  << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows";
+        LOG_DEBUG("JOIN", "\n");
+        LOG_DEBUG("Exec", "Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, " << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows");
         if (debug) for (const auto& [k, v] : rightCtx.u32Cols) std::cerr << " " << k;
-        if (debug) std::cerr << "\n";
+        LOG_DEBUG("JOIN", "\n");
     }
     
     // Extract all join key pairs from the condition
@@ -668,18 +663,16 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
     TypedExprPtr postJoinFilter = std::move(keyExtraction.postJoinFilter);
     
     if (debug) {
-        std::cerr << "[Exec] Join: " << keyPairs.size() << " key pair(s):\n";
+        LOG_INFO("Exec", "Join: " << keyPairs.size() << " key pair(s):\n");
         for (const auto& [l, r] : keyPairs) {
-            std::cerr << "[Exec] Join:   " << l << " = " << r << std::endl;
+            LOG_INFO("Exec", "Join:   " << l << " = " << r);
         }
-        if (debug) std::cerr << "[Exec] Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, " 
-                  << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows";
+        LOG_DEBUG("Exec", "Join: leftCtx has " << leftCtx.u32Cols.size() << " u32 cols, "  << leftCtx.f32Cols.size() << " f32 cols, " << leftCtx.rowCount << " rows");
         if (debug) for (const auto& [n,_] : leftCtx.u32Cols) std::cerr << " " << n;
-        if (debug) std::cerr << std::endl;
-        if (debug) std::cerr << "[Exec] Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, "
-                  << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows";
+        LOG_DEBUG("JOIN", std::endl);
+        LOG_DEBUG("Exec", "Join: rightCtx has " << rightCtx.u32Cols.size() << " u32 cols, " << rightCtx.f32Cols.size() << " f32 cols, " << rightCtx.rowCount << " rows");
         if (debug) for (const auto& [n,_] : rightCtx.u32Cols) std::cerr << " " << n;
-        if (debug) std::cerr << std::endl;
+        LOG_DEBUG("JOIN", std::endl);
     }
     
     // Resolve join key columns (with suffix fallback, fuzzy matching, f32→u32 conversion)
@@ -688,9 +681,29 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
 
     std::vector<std::pair<std::string, std::string>>& resolvedKeys = resolved.keys;
 
-    // Get vectors for all keys
+    // Get vectors for all keys (lazy-fetch from GPU if CPU vec is empty)
     std::vector<const std::vector<uint32_t>*> leftKeyVecs, rightKeyVecs;
     for (const auto& [lk, rk] : resolvedKeys) {
+        // Lazy fetch left key from GPU if needed
+        if (leftCtx.u32Cols[lk].empty() && leftCtx.u32ColsGPU.count(lk)) {
+            MTL::Buffer* buf = leftCtx.u32ColsGPU.at(lk);
+            size_t count = buf->length() / sizeof(uint32_t);
+            if (count > 0) {
+                std::vector<uint32_t> down(count);
+                std::memcpy(down.data(), buf->contents(), count * sizeof(uint32_t));
+                leftCtx.u32Cols[lk] = std::move(down);
+            }
+        }
+        // Lazy fetch right key from GPU if needed
+        if (rightCtx.u32Cols[rk].empty() && rightCtx.u32ColsGPU.count(rk)) {
+            MTL::Buffer* buf = rightCtx.u32ColsGPU.at(rk);
+            size_t count = buf->length() / sizeof(uint32_t);
+            if (count > 0) {
+                std::vector<uint32_t> down(count);
+                std::memcpy(down.data(), buf->contents(), count * sizeof(uint32_t));
+                rightCtx.u32Cols[rk] = std::move(down);
+            }
+        }
         leftKeyVecs.push_back(&leftCtx.u32Cols.at(lk));
         rightKeyVecs.push_back(&rightCtx.u32Cols.at(rk));
     }
@@ -723,9 +736,9 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
             jRes = buildCrossJoinIndices(leftCtx, rightCtx, lCount, rCount, debug);
         } else if (resolvedKeys.size() == 2) {
             if (debug) {
-                std::cerr << "[Exec] Multi-Key Join (2 keys)\n";
-                std::cerr << "[Exec] Multi-Key Join: key0=(" << resolvedKeys[0].first << ", " << resolvedKeys[0].second << ")\n";
-                std::cerr << "[Exec] Multi-Key Join: key1=(" << resolvedKeys[1].first << ", " << resolvedKeys[1].second << ")\n";
+                LOG_INFO("Exec", "Multi-Key Join (2 keys)\n");
+                LOG_INFO("Exec", "Multi-Key Join: key0=(" << resolvedKeys[0].first << ", " << resolvedKeys[0].second << ")\n");
+                LOG_INFO("Exec", "Multi-Key Join: key1=(" << resolvedKeys[1].first << ", " << resolvedKeys[1].second << ")\n");
             }
             MTL::Buffer* l1 = ensureGPU(leftCtx, resolvedKeys[0].first);
             MTL::Buffer* r1 = ensureGPU(rightCtx, resolvedKeys[0].second);
@@ -736,11 +749,11 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
             uint32_t lSize = (uint32_t)leftCtx.rowCount;
             uint32_t rSize = (uint32_t)rightCtx.rowCount;
             
-            if (debug) std::cerr << "[Exec] Multi-Key Join: packing left (" << lSize << " rows)...\n" << std::flush;
-            lBuf = GpuOps::packU32ToU64(l1, l2, lSize);
-            if (debug) std::cerr << "[Exec] Multi-Key Join: packing right (" << rSize << " rows)...\n" << std::flush;
-            rBuf = GpuOps::packU32ToU64(r1, r2, rSize);
-            if (debug) std::cerr << "[Exec] Multi-Key Join: packing done.\n" << std::flush;
+            LOG_DEBUG("Exec", "Multi-Key Join: packing left (" << lSize << " rows)...\n");
+            lBuf = GpuOps::packU32ToU64(l1, l2, lSize).detach();
+            LOG_DEBUG("Exec", "Multi-Key Join: packing right (" << rSize << " rows)...\n");
+            rBuf = GpuOps::packU32ToU64(r1, r2, rSize).detach();
+            LOG_DEBUG("Exec", "Multi-Key Join: packing done.\n");
         } else {
             lBuf = ensureGPU(leftCtx, resolvedKeys[0].first);
             rBuf = ensureGPU(rightCtx, resolvedKeys[0].second);
@@ -750,14 +763,14 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
         
         // Multi-match hash join; right=build, left=probe.
         
-        if (debug) if (!isCrossJoin && debug) std::cerr << "[Exec] GPU Join: Build (" << rCount << "), Probe (" << lCount << ")\n";
+        if (!isCrossJoin && debug) LOG_DEBUG("Exec", "GPU Join: Build (" << rCount << "), Probe (" << lCount << ")\n");
         if (debug) {
-            std::cerr << "[Exec] GPU Join: leftCtx.activeRowsGPU=" << (leftCtx.activeRowsGPU ? "SET" : "NULL") << " rightCtx.activeRowsGPU=" << (rightCtx.activeRowsGPU ? "SET" : "NULL") << "\n";
+            LOG_ERROR("Exec", "GPU Join: leftCtx.activeRowsGPU=" << (leftCtx.activeRowsGPU ? "SET" : "NULL") << " rightCtx.activeRowsGPU=" << (rightCtx.activeRowsGPU ? "SET" : "NULL"));
             if (leftCtx.activeRowsGPU) {
-                uint32_t* leftIndices = (uint32_t*)leftCtx.activeRowsGPU->contents();
-                if (debug) std::cerr << "[Exec] GPU Join: leftActiveIndices first 5: ";
+                uint32_t* leftIndices = static_cast<uint32_t*>(leftCtx.activeRowsGPU->contents());
+                LOG_DEBUG("Exec", "GPU Join: leftActiveIndices first 5: ");
                 if (debug) for (uint32_t i = 0; i < std::min(5u, leftCtx.activeRowsCountGPU); ++i) std::cerr << leftIndices[i] << " ";
-                if (debug) std::cerr << "\n";
+                LOG_DEBUG("JOIN", "\n");
             }
         }
         
@@ -788,7 +801,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
                     std::memset(jRes.buildIndices->contents(), 0,
                                 std::max(antiRes->count, 1u) * sizeof(uint32_t));
                 }
-                if (debug) std::cerr << "[Exec] GPU Anti Join (direct): " << jRes.count << " non-matching rows\n";
+                LOG_DEBUG("Exec", "GPU Anti Join (direct): " << jRes.count << " non-matching rows\n");
             }
             // GPU SEMI join shortcut: build HT from right, probe left, compact matches
             else if (isSemiJoin && resolvedKeys.size() == 1) {
@@ -802,20 +815,20 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
                     std::max(semiRes->count, 1u) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
                 std::memset(jRes.buildIndices->contents(), 0,
                             std::max(semiRes->count, 1u) * sizeof(uint32_t));
-                if (debug) std::cerr << "[Exec] GPU Semi Join (direct): " << jRes.count << " matched left rows\n";
+                LOG_DEBUG("Exec", "GPU Semi Join (direct): " << jRes.count << " matched left rows\n");
             }
             else if (resolvedKeys.size() == 2) {
                  jRes = GpuOps::joinHashU64(rBuf, buildActiveRows, rCount, lBuf, probeActiveRows, lCount);
                  lBuf->release(); rBuf->release();
             } else {
-                 jRes = GpuOps::joinHash(rBuf, buildActiveRows, rCount, lBuf, probeActiveRows, lCount);
+                 jRes = GpuOps::joinHash(rBuf, rCount, lBuf, lCount);
             }
             
 
         }
     } else {
         if (lCount > 0 && rCount == 0 && (isAntiJoin || isLeftJoin)) {
-             if (debug) std::cerr << "[Exec] GPU Join: Empty Build side for Anti/Left Join -> Returning all " << lCount << " left rows.\n";
+             LOG_DEBUG("Exec", "GPU Join: Empty Build side for Anti/Left Join -> Returning all " << lCount << " left rows.\n");
              jRes.count = lCount;
              
              if (leftCtx.activeRowsGPU) {
@@ -831,7 +844,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
              jRes.buildIndices.reset(store.device()->newBuffer(lCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
              std::memset(jRes.buildIndices->contents(), 0, lCount * sizeof(uint32_t));
         } else {
-            if (debug) std::cerr << "[Exec] GPU Join: Skipping (Build=" << rCount << ", Probe=" << lCount << ")\n";
+            LOG_DEBUG("Exec", "GPU Join: Skipping (Build=" << rCount << ", Probe=" << lCount << ")\n");
             jRes.count = 0;
             jRes.buildIndices = nullptr;
             jRes.probeIndices = nullptr;
@@ -840,7 +853,7 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
                                        
     if ((lCount > 0 && rCount > 0) && !jRes.buildIndices) ENGINE_THROW("GPU Join Kernel Failed");
     
-    if (debug) std::cerr << "[Exec] GPU Join Success: Result " << jRes.count << " rows.\n";
+    LOG_DEBUG("Exec", "GPU Join Success: Result " << jRes.count << " rows.\n");
     
     uint32_t resCount = jRes.count;
     
@@ -863,9 +876,9 @@ bool GpuExecutor::executeJoin(const IRJoin& join,
     if (earlyReturn) return true;
 
     if (debug) {
-        std::cerr << "[Exec] Join: After string gather, outCtx.stringCols sizes:\n";
+        LOG_INFO("Exec", "Join: After string gather, outCtx.stringCols sizes:\n");
         for (const auto& [name, vec] : outCtx.stringCols) {
-            std::cerr << "[Exec]   stringCol " << name << " size=" << vec.size() << "\n";
+            LOG_INFO("Exec", "stringCol " << name << " size=" << vec.size());
         }
     }
 

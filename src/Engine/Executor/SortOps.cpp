@@ -8,14 +8,14 @@
 
 namespace engine {
 
-MTL::Buffer* GpuOps::floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc) {
+GpuBuffer GpuOps::floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc) {
     auto& store = GpuColumnStore::instance();
     auto out = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     auto p = makePSO(store.device(), store.library(), "ops::float_to_sort_key_u32");
     if (!p) {
         // CPU fallback
         const float* src = (const float*)in->contents();
-        uint32_t* dst = (uint32_t*)out->contents();
+        uint32_t* dst = static_cast<uint32_t*>(out->contents());
         for (uint32_t i = 0; i < count; ++i) {
             uint32_t bits;
             std::memcpy(&bits, &src[i], sizeof(bits));
@@ -23,7 +23,7 @@ MTL::Buffer* GpuOps::floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool des
             else bits ^= 0x80000000u;
             dst[i] = desc ? ~bits : bits;
         }
-        return out;
+        return GpuBuffer(out);
     }
     uint32_t descFlag = desc ? 1 : 0;
     auto cmd = store.queue()->commandBuffer();
@@ -38,18 +38,18 @@ MTL::Buffer* GpuOps::floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool des
     cmd->commit();
     cmd->waitUntilCompleted();
     checkGpuStatus(cmd);
-    return out;
+    return GpuBuffer(out);
 }
 
-MTL::Buffer* GpuOps::invertU32(MTL::Buffer* in, uint32_t count) {
+GpuBuffer GpuOps::invertU32(MTL::Buffer* in, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto out = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     auto p = makePSO(store.device(), store.library(), "ops::invert_u32");
     if (!p) {
-        const uint32_t* src = (const uint32_t*)in->contents();
-        uint32_t* dst = (uint32_t*)out->contents();
+        const uint32_t* src = static_cast<const uint32_t*>(in->contents());
+        uint32_t* dst = static_cast<uint32_t*>(out->contents());
         for (uint32_t i = 0; i < count; ++i) dst[i] = ~src[i];
-        return out;
+        return GpuBuffer(out);
     }
     auto cmd = store.queue()->commandBuffer();
     auto enc = cmd->computeCommandEncoder();
@@ -62,12 +62,13 @@ MTL::Buffer* GpuOps::invertU32(MTL::Buffer* in, uint32_t count) {
     cmd->commit();
     cmd->waitUntilCompleted();
     checkGpuStatus(cmd);
-    return out;
+    return GpuBuffer(out);
 }
 
 static void blockSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto p = makePSO(store.device(), store.library(), "ops::block_sort_kv_u32");
+    if (!p) return;
 
     uint32_t tg = 1;
     while (tg < count) tg <<= 1;
@@ -89,6 +90,7 @@ static void blockSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count
 static void blockSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto p = makePSO(store.device(), store.library(), "ops::block_sort_kv_u64");
+    if (!p) return;
 
     uint32_t tg = 1;
     while (tg < count) tg <<= 1;
@@ -129,6 +131,7 @@ void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
 
     auto p_hist    = makePSO(dev, store.library(), "ops::radix_histogram_u32");
     auto p_scatter = makePSO(dev, store.library(), "ops::radix_scatter_u32");
+    if (!p_hist || !p_scatter) { keysAlt->release(); valsAlt->release(); histBuf->release(); return; }
 
     MTL::Buffer* srcK = keys;
     MTL::Buffer* srcV = indices;
@@ -152,14 +155,12 @@ void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
                                       MTL::Size::Make(BLK, 1, 1));
             enc->endEncoding();
             cmd->commit();
-            cmd->waitUntilCompleted();
-            checkGpuStatus(cmd);
         }
 
-        // Prefix sum
-        scanInPlace(histBuf, histSize);
+        // Prefix sum (async — no GPU sync)
+        scanInPlaceAsync(histBuf, histSize);
 
-        // Scatter
+        // Scatter (commit without wait — serial queue guarantees ordering)
         {
             auto cmd = store.queue()->commandBuffer();
             auto enc = cmd->computeCommandEncoder();
@@ -176,12 +177,18 @@ void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
                                       MTL::Size::Make(BLK, 1, 1));
             enc->endEncoding();
             cmd->commit();
-            cmd->waitUntilCompleted();
-            checkGpuStatus(cmd);
         }
 
         std::swap(srcK, dstK);
         std::swap(srcV, dstV);
+    }
+
+    // Single GPU sync point after all passes (was 8 syncs before)
+    {
+        auto cmd = store.queue()->commandBuffer();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+        checkGpuStatus(cmd);
     }
     // After 4 passes (even), result is back in original (keys, indices) buffers.
 
@@ -214,6 +221,7 @@ void GpuOps::radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
 
     auto p_hist    = makePSO(dev, store.library(), "ops::radix_histogram_u64");
     auto p_scatter = makePSO(dev, store.library(), "ops::radix_scatter_u64");
+    if (!p_hist || !p_scatter) { keysAlt->release(); valsAlt->release(); histBuf->release(); return; }
 
     MTL::Buffer* srcK = keys;
     MTL::Buffer* srcV = indices;
@@ -236,11 +244,9 @@ void GpuOps::radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
                                       MTL::Size::Make(BLK, 1, 1));
             enc->endEncoding();
             cmd->commit();
-            cmd->waitUntilCompleted();
-            checkGpuStatus(cmd);
         }
 
-        scanInPlace(histBuf, histSize);
+        scanInPlaceAsync(histBuf, histSize);
 
         {
             auto cmd = store.queue()->commandBuffer();
@@ -258,12 +264,18 @@ void GpuOps::radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
                                       MTL::Size::Make(BLK, 1, 1));
             enc->endEncoding();
             cmd->commit();
-            cmd->waitUntilCompleted();
-            checkGpuStatus(cmd);
         }
 
         std::swap(srcK, dstK);
         std::swap(srcV, dstV);
+    }
+
+    // Single GPU sync point after all passes (was 16 syncs before)
+    {
+        auto cmd = store.queue()->commandBuffer();
+        cmd->commit();
+        cmd->waitUntilCompleted();
+        checkGpuStatus(cmd);
     }
     // After 8 passes (even), result is back in original (keys, indices) buffers.
 

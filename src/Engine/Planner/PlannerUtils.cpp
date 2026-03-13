@@ -6,6 +6,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cctype>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -14,7 +15,7 @@ namespace engine {
 void debug_log(const std::string& msg) {
     static const bool enabled = env_truthy("GPUDB_DEBUG_PLANNER");
     if (!enabled) return;
-    std::cerr << "[Planner] " << msg << std::endl;
+    LOG_INFO("Planner", msg);
 }
 
 // --- String utilities ---

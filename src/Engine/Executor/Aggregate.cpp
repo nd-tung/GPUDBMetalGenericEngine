@@ -16,7 +16,7 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
     uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
     // Clamp if activeRowsCount exceeds rowCount
     if (ctx.activeRowsGPU != nullptr && ctx.activeRowsCountGPU > ctx.rowCount) {
-        if (env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] CountStar: activeRowsCountGPU " << ctx.activeRowsCountGPU << " > rowCount " << ctx.rowCount << ", ignoring GPU selection\n";
+        LOG_DEBUG("Exec", "CountStar: activeRowsCountGPU " << ctx.activeRowsCountGPU << " > rowCount " << ctx.rowCount << ", ignoring GPU selection\n");
         count = ctx.rowCount;
     }
 
@@ -27,7 +27,7 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
 
     // COUNT(*) can be done without evaluating expression
     if (agg.func == AggFunc::CountStar) {
-        if(env_truthy("GPUDB_DEBUG_OPS")) std::cerr << "[Exec] CountStar: ctx.rowCount=" << ctx.rowCount << " count=" << count << "\n";
+        LOG_DEBUG("Exec", "CountStar: ctx.rowCount=" << ctx.rowCount << " count=" << count);
         outValue = static_cast<double>(count);
         return true;
     }
@@ -76,7 +76,7 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
              // Treated as count(*); NULL handling not implemented
         } else if (agg.func == AggFunc::First) {
              if (count > 0) {
-                 float* ptr = (float*)gpuInput->contents();
+                 float* ptr = static_cast<float*>(gpuInput->contents());
                  outValue = (double)ptr[0];
              } else {
                  outValue = 0.0;

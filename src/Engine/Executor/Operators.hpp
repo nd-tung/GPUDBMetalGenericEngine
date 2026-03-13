@@ -56,10 +56,8 @@ public:
 
     static JoinResult joinHash(
         MTL::Buffer* buildKeys, 
-        MTL::Buffer* buildIndices, // Optional: if null, implied 0..N
         uint32_t buildCount,
         MTL::Buffer* probeKeys,
-        MTL::Buffer* probeIndices, // Optional: if null, implied 0..N
         uint32_t probeCount
     );
 
@@ -73,7 +71,7 @@ public:
         uint32_t probeCount
     );
 
-    static MTL::Buffer* packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count);
+    static GpuBuffer packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count);
 
     static uint32_t fnv1a32(std::string_view s);
 
@@ -161,16 +159,14 @@ public:
                                              uint32_t totalRows);
 
     // Bitcast f32 buffer to u32 buffer on GPU (IEEE 754 reinterpretation).
-    // Returns a new buffer; caller must release.
-    static MTL::Buffer* bitcastF32ToU32(MTL::Buffer* in, uint32_t count);
+    static GpuBuffer bitcastF32ToU32(MTL::Buffer* in, uint32_t count);
 
     // Convert f32 to sort-key u32 on GPU (IEEE 754 → order-preserving u32).
-    // desc=true flips for descending order. Returns new buffer; caller must release.
-    static MTL::Buffer* floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc);
+    // desc=true flips for descending order.
+    static GpuBuffer floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc);
 
     // Bitwise NOT (invert) u32 buffer on GPU for DESC ordering.
-    // Returns new buffer; caller must release.
-    static MTL::Buffer* invertU32(MTL::Buffer* in, uint32_t count);
+    static GpuBuffer invertU32(MTL::Buffer* in, uint32_t count);
 
     // GroupBy multi-key with typed aggregates (up to 8).
     // aggTypes[a]: 0 = SUM(f32) using aggInputsF32[a], 1 = COUNT(*) (u32).
@@ -181,15 +177,15 @@ public:
                                                                       uint32_t rowCount);
 
     // Utility: gather column buffers
-    static MTL::Buffer* gatherU32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync = true);
-    static MTL::Buffer* gatherF32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync = true);
+    static GpuBuffer gatherU32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync = true);
+    static GpuBuffer gatherF32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync = true);
 
     // Helper to synchronize command queue
     static void sync();
 
     // Utility: cast a u32 buffer into a f32 buffer (StorageModeShared).
     // Used to treat integer columns as float aggregate inputs in v0 group-by.
-    static MTL::Buffer* castU32ToF32(MTL::Buffer* in, uint32_t count);
+    static GpuBuffer castU32ToF32(MTL::Buffer* in, uint32_t count);
 
     // Filter Col vs Col (U32)
     static std::optional<FilterResult> filterColColU32(
@@ -206,23 +202,23 @@ public:
         int op);
 
     // Generic Mask Operations
-    static MTL::Buffer* logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* logicAndNotU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer logicAndNotU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
     
     // Index array to mask conversion
-    static MTL::Buffer* indicesToMask(MTL::Buffer* indices, uint32_t indexCount, uint32_t totalRows);
+    static GpuBuffer indicesToMask(MTL::Buffer* indices, uint32_t indexCount, uint32_t totalRows);
     
     // Compact u32 mask to indices
-    static std::pair<MTL::Buffer*, uint32_t> compactU32Mask(MTL::Buffer* mask, uint32_t totalRows);
+    static std::pair<GpuBuffer, uint32_t> compactU32Mask(MTL::Buffer* mask, uint32_t totalRows);
     
     // Fill operations
     static void fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count);
     static void fillF32(MTL::Buffer* buf, float val, uint32_t count);
-    static MTL::Buffer* createFilledU32(uint32_t val, uint32_t count);
-    static MTL::Buffer* createFilledF32(float val, uint32_t count);
+    static GpuBuffer createFilledU32(uint32_t val, uint32_t count);
+    static GpuBuffer createFilledF32(float val, uint32_t count);
     
     // Generate sequence 0, 1, 2, ... (iota)
-    static MTL::Buffer* iotaU32(uint32_t count);
+    static GpuBuffer iotaU32(uint32_t count);
     
     // Cross product
     static void crossProduct(MTL::Buffer* left, MTL::Buffer* right, 
@@ -240,28 +236,28 @@ public:
         uint32_t numAggsTotal);
 
     // Arithmetic Ops
-    static MTL::Buffer* arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t count);
-    static MTL::Buffer* nonNullIndicatorF32(MTL::Buffer* in, uint32_t count);
+    static GpuBuffer arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t count);
+    static GpuBuffer nonNullIndicatorF32(MTL::Buffer* in, uint32_t count);
 
-    static MTL::Buffer* arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
-    static MTL::Buffer* arithDivF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithDivF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithDivF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithDivF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
-    static MTL::Buffer* arithSubF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithSubF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithSubF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithSubF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
-    static MTL::Buffer* arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static MTL::Buffer* arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
 
     // Math Ops
-    static MTL::Buffer* mathFloorF32(MTL::Buffer* col, uint32_t count);
+    static GpuBuffer mathFloorF32(MTL::Buffer* col, uint32_t count);
 
     // Helpers
-    static MTL::Buffer* createBuffer(const void* data, size_t size);
+    static GpuBuffer createBuffer(const void* data, size_t size);
 
     // Reduction Ops (returns scalar on CPU)
     static float reduceSumF32(MTL::Buffer* in, uint32_t count);
@@ -270,11 +266,11 @@ public:
 
     // Date Extract
     // M11: Extract YEAR from u32 date → u32 year (handles YYYYMMDD and day-count)
-    static MTL::Buffer* extractYearU32(MTL::Buffer* dateCol, uint32_t count);
+    static GpuBuffer extractYearU32(MTL::Buffer* dateCol, uint32_t count);
 
     // H4: GPU dedup — returns gather indices for unique rows, sets uniqueCount
     // keys: vector of u32 GPU buffers (1 or 2 keys; falls back to CPU for 3+)
-    static MTL::Buffer* dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count,
+    static GpuBuffer dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count,
                                     uint32_t& uniqueCount);
 
     // GPU Radix Sort (stable, 8-bit radix)
@@ -285,31 +281,46 @@ public:
 
     // Flat-string SUBSTRING: adjusts offsets/lengths (zero-copy into same chars buffer).
     // startPos is 1-based (SQL convention). Returns (outOffsets, outLengths).
-    static std::pair<MTL::Buffer*, MTL::Buffer*> substringFlat(
+    static std::pair<GpuBuffer, GpuBuffer> substringFlat(
         MTL::Buffer* inOffsets, MTL::Buffer* inLengths,
         uint32_t startPos, uint32_t substrLen, uint32_t rowCount);
 
     // Hash-encode flat string columns to u32 (first 8 chars packed big-endian).
-    static MTL::Buffer* stringHashEncodeU32(
+    static GpuBuffer stringHashEncodeU32(
         MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
 
     // FNV1a-32 hash of flat string columns (full string, better distribution).
-    static MTL::Buffer* stringFnv1aU32(
+    static GpuBuffer stringFnv1aU32(
         MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
 
     // GPU gather for FlatStringCol: gather chars/offsets/lengths by an index buffer.
     // Produces a new compacted FlatStringCol. Uses gatherU32 for lengths,
     // prefix-sum for new offsets, and a char-copy kernel for the char buffer.
     struct FlatStringGatherResult {
-        MTL::Buffer* chars   = nullptr;
-        MTL::Buffer* offsets = nullptr;
-        MTL::Buffer* lengths = nullptr;
+        GpuBuffer chars;
+        GpuBuffer offsets;
+        GpuBuffer lengths;
         uint32_t rowCount    = 0;
         uint32_t totalBytes  = 0;
     };
     static FlatStringGatherResult gatherFlatString(
         MTL::Buffer* srcChars, MTL::Buffer* srcOffsets, MTL::Buffer* srcLengths,
         MTL::Buffer* indices, uint32_t count, bool sync = true);
+
+    // E1a: FNV1a-64 hash of flat string columns, XOR-folded to u32.
+    // Produces collision-resistant u32 keys suitable for group-by.
+    static GpuBuffer stringFnv1aU64Fold32(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
+
+    // E2a: GPU string rank by prefix-u64 sort.
+    // Returns u32 rank buffer, or empty GpuBuffer if ties detected (caller falls back to CPU).
+    static GpuBuffer stringRankByPrefix(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths,
+        uint32_t rowCount, bool ascending);
+
+    // E3a: Concatenate two flat-string results (e.g., matched + unmatched rows).
+    static FlatStringGatherResult concatFlatStrings(
+        const FlatStringGatherResult& a, const FlatStringGatherResult& b);
 };
 
 } // namespace engine

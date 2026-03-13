@@ -1,50 +1,46 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|l_linestatus|cnt|sum_qty|sum_price|avg_disc|
-A|F|111907.00|2858742.00|4285925376.00|0.05|
-R|F|112215.00|2857833.00|4286639872.00|0.05|
+A|F|111907.00|2858742.00|4285929472.00|0.05|
+R|F|112215.00|2857833.00|4286646272.00|0.05|
 ---------------------------------------------------
 Planning time: 0.83 ms
-Data Load Time (Disk+Upload): 2925.07 ms
-GPU kernels time: 21.35 ms
-CPU postprocess time: 24.14 ms
-Total Internal Pipeline time: 2970.56 ms
-Total Host Execution time: 2970.59 ms
-Total Wall time (Plan+Exec): 2971.42 ms
+Data Load Time (Disk+Upload): 2749.51 ms
+GPU kernels time: 23.34 ms
+CPU postprocess time: 9.04 ms
+Total Internal Pipeline time: 2781.88 ms
+Total Host Execution time: 2781.91 ms
+Total Wall time (Plan+Exec): 2782.74 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.365 ms (1.708%) [2 calls]
-  filter         :   10.874 ms (50.940%) [2 calls]
-  gather         :    2.622 ms (12.283%) [5 calls]
-  groupby        :    6.806 ms (31.884%) [3 calls]
-  sort           :    0.680 ms (3.185%) [2 calls]
+  cast           :    0.360 ms (1.543%) [2 calls]
+  filter         :   13.573 ms (58.163%) [2 calls]
+  gather         :    2.426 ms (10.395%) [5 calls]
+  groupby        :    6.408 ms (27.460%) [2 calls]
+  sort           :    0.569 ms (2.439%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 21.347 ms
-  Kernel invocations: 14
+  TOTAL GPU TIME: 23.335 ms
+  Kernel invocations: 13
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                   9.948        6001215        603.256
-ops::filter_lt_u32_indexed           0.926        4336142       4681.602
-ops::gather_col_u32                  0.581         224122        386.056
-ops::gather_col_u32                  0.594         224122        377.442
-ops::gather_col_f32                  0.482         224122        465.386
-ops::gather_col_f32                  0.493         224122        454.646
-ops::gather_col_f32                  0.473         224122        473.664
-ops::groupby_agg_multi_key_ty        6.301         224122         35.568
-ops::ht_mark_valid                   0.286         524288       1831.843
-ops::ht_extract_compact              0.219              2          0.009
+ops::filter_ge_u32                  11.204        6001215        535.653
+ops::filter_lt_u32_indexed           2.369        4336142       1830.368
+ops::gather_col_u32                  0.528         224122        424.574
+ops::gather_col_u32                  0.520         224122        431.315
+ops::gather_col_f32                  0.459         224122        487.841
+ops::gather_col_f32                  0.473         224122        473.665
+ops::gather_col_f32                  0.446         224122        502.798
+ops::groupby_agg_multi_key_ty        6.129         224122         36.566
+ops::ht_extract_compact              0.279              2          0.007
 ops::cast_u32_to_f32                 0.181              2          0.011
-ops::cast_u32_to_f32                 0.183              2          0.011
+ops::cast_u32_to_f32                 0.179              2          0.011
 block_sort_kv_u64                    0.000              2          0.000
-orderby_gpu_gather                   0.680             12          0.018
+orderby_gpu_gather                   0.569             12          0.021
 ─────────────────────────────────────────────────────────────────
-TOTAL: 21.347 ms
+TOTAL: 23.335 ms

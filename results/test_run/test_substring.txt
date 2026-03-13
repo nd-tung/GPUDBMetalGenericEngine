@@ -1,71 +1,67 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
 avg_bal|cnt|
-5012.34|5626.00|
-4985.22|5559.00|
+5012.35|5626.00|
+4985.21|5559.00|
 5055.97|5540.00|
-4965.71|5516.00|
-4965.32|5509.00|
-4936.90|5501.00|
+4965.70|5516.00|
+4965.33|5509.00|
+4936.91|5501.00|
 5033.42|5478.00|
 5054.86|5473.00|
-4941.88|5466.00|
+4941.89|5466.00|
 4957.25|5463.00|
-5008.92|5460.00|
+5008.93|5460.00|
 5008.07|5453.00|
 5021.93|5451.00|
-5067.83|5443.00|
-5000.17|5434.00|
+5067.84|5443.00|
+5000.16|5434.00|
 4990.99|5433.00|
-4991.81|5424.00|
 5007.57|5424.00|
+4991.82|5424.00|
 5035.17|5422.00|
-4956.15|5415.00|
+4956.16|5415.00|
 4994.15|5386.00|
 4996.84|5380.00|
-4960.10|5364.00|
+4960.11|5364.00|
 4974.51|5347.00|
-5007.11|5341.00|
+5007.10|5341.00|
 ---------------------------------------------------
-Planning time: 0.62 ms
-Data Load Time (Disk+Upload): 118.57 ms
-GPU kernels time: 7.38 ms
-CPU postprocess time: 14.39 ms
-Total Internal Pipeline time: 140.34 ms
-Total Host Execution time: 140.71 ms
-Total Wall time (Plan+Exec): 141.33 ms
+Planning time: 0.63 ms
+Data Load Time (Disk+Upload): 113.03 ms
+GPU kernels time: 7.30 ms
+CPU postprocess time: 12.72 ms
+Total Internal Pipeline time: 133.05 ms
+Total Host Execution time: 133.34 ms
+Total Wall time (Plan+Exec): 133.97 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.410 ms (5.555%) [2 calls]
-  filter         :    1.003 ms (13.586%) [1 calls]
-  gather         :    0.986 ms (13.359%) [4 calls]
-  groupby        :    4.453 ms (60.333%) [3 calls]
-  sort           :    0.529 ms (7.167%) [2 calls]
+  cast           :    0.644 ms (8.814%) [2 calls]
+  filter         :    1.144 ms (15.666%) [1 calls]
+  gather         :    1.006 ms (13.767%) [4 calls]
+  groupby        :    4.072 ms (55.756%) [2 calls]
+  sort           :    0.438 ms (5.998%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 7.381 ms
-  Kernel invocations: 12
+  TOTAL GPU TIME: 7.304 ms
+  Kernel invocations: 11
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_f32                   1.003         150000        149.583
-ops::gather_col_f32                  0.257         136308        530.639
-ops::gather_col_u32                  0.274         136308        498.156
-ops::gather_col_u32                  0.254         136308        536.732
-ops::groupby_agg_multi_key_ty        3.891         136308         35.029
-ops::ht_mark_valid                   0.305         524288       1718.036
-ops::ht_extract_compact              0.257             25          0.097
-ops::cast_u32_to_f32                 0.204             25          0.123
-ops::cast_u32_to_f32                 0.206             25          0.121
+ops::filter_gt_f32                   1.144         150000        131.100
+ops::gather_col_f32                  0.255         136308        534.629
+ops::gather_col_u32                  0.277         136308        492.234
+ops::gather_col_u32                  0.269         136308        507.665
+ops::groupby_agg_multi_key_ty        3.769         136308         36.168
+ops::ht_extract_compact              0.303             25          0.082
+ops::cast_u32_to_f32                 0.433             25          0.058
+ops::cast_u32_to_f32                 0.211             25          0.119
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.529             75          0.142
-ops::gather_col_u32                  0.202             25          0.124
+orderby_gpu_gather                   0.438             75          0.171
+ops::gather_col_u32                  0.205             25          0.122
 ─────────────────────────────────────────────────────────────────
-TOTAL: 7.381 ms
+TOTAL: 7.304 ms

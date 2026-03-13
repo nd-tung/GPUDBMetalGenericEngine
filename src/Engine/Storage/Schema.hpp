@@ -25,6 +25,13 @@ struct ColumnSchema {
     ColumnType type;
 };
 
+// Foreign-key relationship between a dimension table and a referencing table.
+struct FKRelationship {
+    std::string dimTable;   // dimension (parent) table, e.g. "supplier"
+    std::string dimKey;     // PK of dimension table,    e.g. "s_suppkey"
+    std::string fkColumn;   // FK in referencing table,  e.g. "ps_suppkey"
+};
+
 struct TableSchema {
     std::string name;
     std::vector<ColumnSchema> columns;
@@ -65,6 +72,24 @@ public:
         m_tables[schema.name] = std::move(schema);
     }
     
+    // Register a foreign-key relationship (thread-safe)
+    void registerFK(FKRelationship fk) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_foreignKeys.push_back(std::move(fk));
+    }
+    
+    // Find the FK relationship needed to resolve a column from a dimension table.
+    // Returns nullopt if no FK relationship is registered for the column's table.
+    std::optional<FKRelationship> findFKForColumn(const std::string& col) const {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        std::string table = tableForColumnUnlocked(col);
+        if (table.empty()) return std::nullopt;
+        for (const auto& fk : m_foreignKeys) {
+            if (fk.dimTable == table) return fk;
+        }
+        return std::nullopt;
+    }
+    
     // Get table schema (thread-safe)
     const TableSchema* getTable(const std::string& name) const {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -87,17 +112,8 @@ public:
     // Determine which table a column belongs to using column-name prefix matching.
     // Returns empty string if the column prefix is not recognized.
     std::string tableForColumn(const std::string& col) const {
-        // Strip trailing suffix like "_1", "_2" for multi-instance columns
-        std::string c = col;
-        if (c.size() > 2 && c[c.size()-2] == '_' && c.back() >= '0' && c.back() <= '9')
-            c = c.substr(0, c.size()-2);
-
-        for (const auto& [tblName, tblSchema] : m_tables) {
-            for (const auto& cs : tblSchema.columns) {
-                if (cs.name == c) return tblName;
-            }
-        }
-        return "";
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return tableForColumnUnlocked(col);
     }
 
     // GPU scan helpers: column type classification for numeric/date/char columns.
@@ -216,14 +232,33 @@ public:
             {"r_name", 1, ColumnType::StringHash},
             {"r_comment", 2, ColumnType::StringHash},
         }});
+
+        // Foreign-key relationships used by ad-hoc dimension lookups
+        registerFK({"supplier", "s_suppkey",   "ps_suppkey"});
+        registerFK({"nation",   "n_nationkey", "s_nationkey"});
+        registerFK({"region",   "r_regionkey", "n_regionkey"});
     }
     
     SchemaRegistry() = default;  // Starts empty; call initTPCH() to register TPC-H schema
     
 private:
+    // Must be called with m_mutex held.
+    std::string tableForColumnUnlocked(const std::string& col) const {
+        std::string c = col;
+        if (c.size() > 2 && c[c.size()-2] == '_' && c.back() >= '0' && c.back() <= '9')
+            c = c.substr(0, c.size()-2);
+        for (const auto& [tblName, tblSchema] : m_tables) {
+            for (const auto& cs : tblSchema.columns) {
+                if (cs.name == c) return tblName;
+            }
+        }
+        return "";
+    }
+
     static inline SchemaRegistry* s_override = nullptr;
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, TableSchema> m_tables;
+    std::vector<FKRelationship> m_foreignKeys;
 };
 
 } // namespace engine

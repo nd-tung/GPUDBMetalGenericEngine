@@ -1,5 +1,6 @@
 // GPU column staging implementation
 #include "GpuColumnStore.hpp"
+#include "Logger.hpp"
 #include <Metal/Metal.hpp>
 #include <Foundation/Foundation.hpp>
 #include <iostream>
@@ -69,7 +70,7 @@ void GpuColumnStore::initializeImpl() {
         pool->release();
         return;
     }
-    std::cerr << "[GPU] Device: " << m_device->name()->utf8String() << std::endl;
+    LOG_INFO("GPU", "Device: " << m_device->name()->utf8String());
     m_device->setShouldMaximizeConcurrentCompilation(true);
     m_queue = m_device->newCommandQueue();
 
@@ -78,13 +79,13 @@ void GpuColumnStore::initializeImpl() {
     auto path = NS::String::string("build/kernels.metallib", NS::UTF8StringEncoding);
     m_library = m_device->newLibrary(path, &error);
     if (m_library) {
-        std::cerr << "[GPU] Loaded pre-compiled Metal library (build/kernels.metallib)" << std::endl;
+        LOG_INFO("GPU", "Loaded pre-compiled Metal library (build/kernels.metallib)");
         pool->release();
         return;
     }
 
     // Strategy 2: Runtime compilation from .metal source (works with CommandLineTools only)
-    std::cerr << "[GPU] Pre-compiled metallib not found, compiling shaders at runtime..." << std::endl;
+    LOG_INFO("GPU", "Pre-compiled metallib not found, compiling shaders at runtime...");
     std::ifstream metalFile("kernels/Operators.metal");
     if (metalFile.is_open()) {
         std::ostringstream oss;
@@ -98,8 +99,8 @@ void GpuColumnStore::initializeImpl() {
         m_library = m_device->newLibrary(srcStr, opts, &compileError);
         opts->release();
         if (m_library) {
-            std::cerr << "[GPU] Runtime Metal shader compilation succeeded (" 
-                      << src.size() / 1024 << " KB source)." << std::endl;
+            LOG_INFO("GPU", "Runtime Metal shader compilation succeeded (" 
+                      << src.size() / 1024 << " KB source)");
         } else {
             std::cerr << "[GPU] Runtime compilation FAILED." << std::endl;
             if (compileError) std::cerr << "  Error: " << compileError->localizedDescription()->utf8String() << std::endl;

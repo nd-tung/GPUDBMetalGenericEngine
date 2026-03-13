@@ -1,0 +1,39 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+l_orderkey|l_partkey|l_extendedprice|
+4926503|198996|104749.50|
+---------------------------------------------------
+Planning time: 0.66 ms
+Data Load Time (Disk+Upload): 2860.98 ms
+GPU kernels time: 12.85 ms
+CPU postprocess time: 15.42 ms
+Total Internal Pipeline time: 2889.25 ms
+Total Host Execution time: 2889.28 ms
+Total Wall time (Plan+Exec): 2889.94 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  filter         :   11.141 ms (86.729%) [1 calls]
+  gather         :    0.790 ms (6.149%) [4 calls]
+  hash_join_probe_u32:    0.333 ms (2.594%) [1 calls]
+  sort           :    0.582 ms (4.529%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 12.846 ms
+  Kernel invocations: 8
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::filter_ge_u32                  11.141        6001215        538.650
+hash_join_probe_write_multi          0.333         686842       2061.561
+radix_sort_u64                       0.000         686842          0.000
+orderby_gpu_gather                   0.582        2747368       4722.592
+ops::gather_col_u32                  0.197              1          0.005
+ops::gather_col_u32                  0.195              1          0.005
+ops::gather_col_u32                  0.198              1          0.005
+ops::gather_col_f32                  0.199              1          0.005
+─────────────────────────────────────────────────────────────────
+TOTAL: 12.846 ms

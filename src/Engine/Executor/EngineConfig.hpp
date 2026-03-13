@@ -14,6 +14,14 @@ namespace engine::config {
     // rather than YYYYMMDD format
     constexpr uint32_t kDateFormatThreshold = 100000;
 
+    // Threshold to distinguish YYYYMMDD integer dates (> 19000000) from
+    // days-since-epoch values in CPU year-extraction fallback
+    constexpr uint32_t kYYYYMMDDThreshold = 19000000;
+
+    // Unix epoch year for days-since-epoch to year conversion
+    constexpr uint32_t kEpochYear = 1970;
+    constexpr double   kDaysPerYear = 365.25;
+
     // Sample size for detecting whether a column has varying values
     constexpr size_t kColumnSampleSize = 100;
 

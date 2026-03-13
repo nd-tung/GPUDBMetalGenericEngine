@@ -2,6 +2,7 @@
 // JoinPipeline.cpp — Join pipeline orchestration: table resolution, DELIM dedup
 // ============================================================================
 #include "JoinInternal.hpp"
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -35,8 +36,7 @@ void dedupDelimJoinRHS(
         if (rightCtx.activeRowsGPU && rightCtx.activeRowsCountGPU > 0) {
             uint32_t compactCount = rightCtx.activeRowsCountGPU;
             if (debug) {
-                std::cerr << "[Exec] Join: DELIM dedup: compacting rightCtx GPU buffers via activeRowsGPU ("
-                          << compactCount << " active rows)\n";
+                LOG_INFO("Exec", "Join: DELIM dedup: compacting rightCtx GPU buffers via activeRowsGPU (" << compactCount << " active rows)\n");
             }
             rightCtx.gatherAllGPU(rightCtx.activeRowsGPU, compactCount);
             rightCtx.clearActiveRows();
@@ -80,11 +80,11 @@ void dedupDelimJoinRHS(
             if (!found) {
                 auto tryUpload = [&](const std::string& name) -> bool {
                     if (rightCtx.u32Cols.count(name) && rightCtx.u32Cols.at(name).size() == rightCtx.rowCount) {
-                        MTL::Buffer* buf = GpuOps::createBuffer(rightCtx.u32Cols[name].data(),
+                        GpuBuffer buf = GpuOps::createBuffer(rightCtx.u32Cols[name].data(),
                                                                 rightCtx.rowCount * sizeof(uint32_t));
-                        rightCtx.u32ColsGPU[name].reset(buf);
+                        rightCtx.u32ColsGPU[name] = std::move(buf);
                         resolvedKeys.push_back(name);
-                        gpuKeys.push_back(buf);
+                        gpuKeys.push_back(rightCtx.u32ColsGPU[name]);
                         return true;
                     }
                     return false;
@@ -101,13 +101,13 @@ void dedupDelimJoinRHS(
         if (!resolvedKeys.empty()) {
             // GPU-based dedup using dedupByKeys (radix sort + mark unique)
             uint32_t newCount = 0;
-            MTL::Buffer* uniqueIdx = GpuOps::dedupByKeys(gpuKeys, rightCtx.rowCount, newCount);
+            GpuBuffer uniqueIdx = GpuOps::dedupByKeys(gpuKeys, rightCtx.rowCount, newCount);
 
             if (newCount < rightCtx.rowCount) {
                 if (debug) {
-                    std::cerr << "[Exec] Join: DELIM dedup RHS by [";
+                    LOG_INFO("Exec", "Join: DELIM dedup RHS by [");
                     for (size_t ri=0; ri<resolvedKeys.size(); ++ri) { if (ri) std::cerr << ","; std::cerr << resolvedKeys[ri]; }
-                    std::cerr << "]: " << rightCtx.rowCount << " -> " << newCount << "\n";
+                    LOG_INFO("JOIN", "]: " << rightCtx.rowCount << " -> " << newCount);
                 }
                 // GPU gather all GPU columns (u32, f32, dict, flat string)
                 rightCtx.gatherAllGPU(uniqueIdx, newCount);
@@ -136,7 +136,6 @@ void dedupDelimJoinRHS(
                     }
                 }
                 rightCtx.invalidateStringColsForDictFlat();
-                uniqueIdx->release();
 
                 rightCtx.rowCount = newCount;
                 rightCtx.activeRows.clear();
@@ -178,9 +177,7 @@ void dedupDelimJoinRHS(
                         else ++it2;
                     }
                     if (debug) {
-                        std::cerr << "[Exec] Join: stripped RHS to " << rightCtx.u32Cols.size()
-                                  << " u32, " << rightCtx.f32Cols.size() << " f32, "
-                                  << rightCtx.stringCols.size() << " string cols\n";
+                        LOG_INFO("Exec", "Join: stripped RHS to " << rightCtx.u32Cols.size() << " u32, " << rightCtx.f32Cols.size() << " f32, " << rightCtx.stringCols.size() << " string cols\n");
                     }
                 }
             }
@@ -203,17 +200,14 @@ bool detectTrivialSelfJoin(const IRJoin& join,
             if (colInContext) {
                 if (join.type != JoinType::Left) {
                     if (join.rightTable.empty()) {
-                        if (debug) std::cerr << "[Exec] Join: IS NOT DISTINCT FROM self-comparison: '"
-                                             << selfCol << "' (col in context)\n";
+                        LOG_DEBUG("Exec", "Join: IS NOT DISTINCT FROM self-comparison: '" << selfCol << "' (col in context)\n");
                         return true;
                     } else if (debug) {
-                        std::cerr << "[Exec] Join: IS NOT DISTINCT FROM self-comparison BUT explicit right table specified ("
-                                  << join.rightTable << "). Not skipping.\n";
+                        LOG_INFO("Exec", "Join: IS NOT DISTINCT FROM self-comparison BUT explicit right table specified (" << join.rightTable << "). Not skipping.\n");
                     }
                 }
             } else if (debug) {
-                std::cerr << "[Exec] Join: IS NOT DISTINCT FROM self-comparison: '"
-                          << selfCol << "' BUT col not in context, may need re-join\n";
+                LOG_INFO("Exec", "Join: IS NOT DISTINCT FROM self-comparison: '" << selfCol << "' BUT col not in context, may need re-join\n");
             }
         }
     }
@@ -234,17 +228,14 @@ bool detectTrivialSelfJoin(const IRJoin& join,
             }
             if (alreadyJoined && join.type != JoinType::Left) {
                 if (join.rightTable.empty()) {
-                    if (debug) std::cerr << "[Exec] Join: self-comparison detected for " << col
-                                         << " (table " << baseTable << " already joined, col in context)\n";
+                    LOG_DEBUG("Exec", "Join: self-comparison detected for " << col << " (table " << baseTable << " already joined, col in context)\n");
                     return true;
                 } else if (debug) {
-                    std::cerr << "[Exec] Join: self-comparison BUT explicit right table specified ("
-                              << join.rightTable << "). Not skipping.\n";
+                    LOG_INFO("Exec", "Join: self-comparison BUT explicit right table specified (" << join.rightTable << "). Not skipping.\n");
                 }
             }
         } else if (debug) {
-            std::cerr << "[Exec] Join: self-comparison for " << col
-                      << " but col not in context, may need re-join\n";
+            LOG_INFO("Exec", "Join: self-comparison for " << col << " but col not in context, may need re-join\n");
         }
     }
 
@@ -292,8 +283,7 @@ std::string inferRightTableForJoin(
             if (isInstance && !joinedTables.count(key) && ctxHasColumn(ctx, col)) {
                 rightTable = key;
                 if (debug)
-                    std::cerr << "[Exec] Join: pass1 found unjoined instance " << key
-                              << " for base " << baseTable << " (col " << col << ")\n";
+                    LOG_INFO("Exec", "Join: pass1 found unjoined instance " << key << " for base " << baseTable << " (col " << col << ")\n");
                 break;
             }
         }
@@ -311,8 +301,7 @@ std::string inferRightTableForJoin(
                 if (isInstance && !joinedTables.count(key) && ctxHasColumn(ctx, col)) {
                     rightTable = key;
                     if (debug)
-                        std::cerr << "[Exec] Join: pass2 found unjoined instance " << key
-                                  << " for base " << baseTable << " (col " << col << ")\n";
+                        LOG_INFO("Exec", "Join: pass2 found unjoined instance " << key << " for base " << baseTable << " (col " << col << ")\n");
                     break;
                 }
             }
@@ -374,8 +363,7 @@ static bool shouldSkipJoinCondition(
 
     // "p_size = p_partkey" (same table, different col) → skip
     if (allColsFromSameTable && !firstTable.empty() && !hasOrphanColumn && !hasSelfComparisonInCondition && !hasAlias) {
-        if (debug) std::cerr << "[Exec] Join: skipping malformed join (both columns from "
-                              << firstTable << ", different cols: " << colsList[0] << " vs " << colsList[1] << ")\n";
+        LOG_DEBUG("Exec", "Join: skipping malformed join (both columns from " << firstTable << ", different cols: " << colsList[0] << " vs " << colsList[1] << ")\n");
         return true;
     }
 
@@ -425,7 +413,7 @@ static bool shouldSkipJoinCondition(
                         for (const auto& sp : savedPipelines) if (checkCtx(sp)) { mappedFound = true; break; }
                     }
                     if (mappedFound) {
-                        if (debug) std::cerr << "[Exec] Join: resolved orphan '" << col << "' -> '" << mapped << "'\n";
+                        LOG_DEBUG("Exec", "Join: resolved orphan '" << col << "' -> '" << mapped << "'\n");
                         orphanFoundSomewhere = true;
                     }
                 }
@@ -435,11 +423,11 @@ static bool shouldSkipJoinCondition(
                 if (applyScalarSubqueryCrossJoinFilter(condCols, join, currentCtx, tableContexts, savedPipelines, savedPipelineTables, debug)) {
                     return true; // Handled as scalar subquery filter
                 }
-                if (debug) std::cerr << "[Exec] Join: skipping join with orphan column (not found anywhere)\n";
+                LOG_DEBUG("Exec", "Join: skipping join with orphan column (not found anywhere)\n");
                 return true;
             }
         } else if (debug) {
-            std::cerr << "[Exec] Join: orphan column found in some context, proceeding\n";
+            LOG_INFO("Exec", "Join: orphan column found in some context, proceeding\n");
         }
     }
 
@@ -476,7 +464,7 @@ static RightContextResolution resolveRightContextForJoin(
         if (isBaseTable && tableContexts.count(join.rightTable)) {
             res.unjoinedTable = join.rightTable;
             specificTableFound = true;
-            if (debug) std::cerr << "[Exec] Join: found explicit right table '" << join.rightTable << "' in tableContexts (base table priority)\n";
+            LOG_DEBUG("Exec", "Join: found explicit right table '" << join.rightTable << "' in tableContexts (base table priority)\n");
         }
 
         // For tmpl_ tables, check saved pipelines first
@@ -485,7 +473,7 @@ static RightContextResolution resolveRightContextForJoin(
                 if (savedPipelineTables[pi].count(join.rightTable)) {
                     res.savedPipelineIdx = pi;
                     specificTableFound = true;
-                    if (debug) std::cerr << "[Exec] Join: found explicit right table '" << join.rightTable << "' in saved pipeline #" << pi << "\n";
+                    LOG_DEBUG("Exec", "Join: found explicit right table '" << join.rightTable << "' in saved pipeline #" << pi);
                     break;
                 }
             }
@@ -495,7 +483,7 @@ static RightContextResolution resolveRightContextForJoin(
         if (!specificTableFound && tableContexts.count(join.rightTable)) {
             res.unjoinedTable = join.rightTable;
             specificTableFound = true;
-            if (debug) std::cerr << "[Exec] Join: found explicit right table '" << join.rightTable << "' in tableContexts\n";
+            LOG_DEBUG("Exec", "Join: found explicit right table '" << join.rightTable << "' in tableContexts\n");
         }
 
         // VALIDATE: If the explicit right table doesn't contain any condition columns
@@ -510,8 +498,7 @@ static RightContextResolution resolveRightContextForJoin(
                 }
             }
             if (!hasNewColumn) {
-                if (debug) std::cerr << "[Exec] Join: explicit right table '" << res.unjoinedTable
-                                      << "' has no new condition columns, falling through to heuristic\n";
+                LOG_DEBUG("Exec", "Join: explicit right table '" << res.unjoinedTable << "' has no new condition columns, falling through to heuristic\n");
                 res.unjoinedTable.clear();
                 specificTableFound = false;
             }
@@ -536,10 +523,7 @@ static RightContextResolution resolveRightContextForJoin(
                             if (isInstanceOf && freshCtx.rowCount > 10 && 
                                 joinedTables.find(key) == joinedTables.end()) {
                                 isAggregatedPipeline = true;
-                                if (debug) std::cerr << "[Exec] Join: savedPipeline " << pi 
-                                    << " has " << savedCtx.rowCount << " rows but fresh table '" 
-                                    << key << "' has " << freshCtx.rowCount 
-                                    << " rows — skipping aggregated pipeline\n";
+                                LOG_DEBUG("Exec", "Join: savedPipeline " << pi  << " has " << savedCtx.rowCount << " rows but fresh table '"  << key << "' has " << freshCtx.rowCount  << " rows — skipping aggregated pipeline\n");
                                 break;
                             }
                         }
@@ -578,19 +562,16 @@ static RightContextResolution resolveRightContextForJoin(
                         }
                     }
                     if (inSavedPipeline && !savedPipelineIsAggregated) {
-                        if (debug) std::cerr << "[Exec] Join: table " << key 
-                                              << " is in saved pipeline, skipping\n";
+                        LOG_DEBUG("Exec", "Join: table " << key  << " is in saved pipeline, skipping\n");
                         continue;
                     }
                     if (savedPipelineIsAggregated && debug) {
-                        std::cerr << "[Exec] Join: table " << key 
-                                  << " is in saved pipeline but pipeline was aggregated, using fresh table\n";
+                        LOG_INFO("Exec", "Join: table " << key  << " is in saved pipeline but pipeline was aggregated, using fresh table\n");
                     }
 
                     if (hasColumnOrSuffixed(ctx, col)) {
                         res.unjoinedTable = key;
-                        if (debug) std::cerr << "[Exec] Join: found unjoined table " << key 
-                                              << " with column " << col << "\n";
+                        LOG_DEBUG("Exec", "Join: found unjoined table " << key  << " with column " << col);
                         break;
                     }
                 }
@@ -622,8 +603,8 @@ bool GpuExecutor::executeJoinPipeline(
                 collectColumnsFromExpr(join.condition, condCols);
                 
                 if (debug) {
-                    std::cerr << "[Exec] Join: conditionStr=" << join.conditionStr << "\n";
-                    std::cerr << "[Exec] Join: type=";
+                    LOG_INFO("Exec", "Join: conditionStr=" << join.conditionStr);
+                    LOG_INFO("Exec", "Join: type=");
                     switch (join.type) {
                         if (debug) case JoinType::Inner: std::cerr << "Inner"; break;
                         if (debug) case JoinType::Left: std::cerr << "Left"; break;
@@ -632,16 +613,16 @@ bool GpuExecutor::executeJoinPipeline(
                         if (debug) case JoinType::Mark: std::cerr << "Mark"; break;
                         if (debug) default: std::cerr << "Unknown(" << static_cast<int>(join.type) << ")"; break;
                     }
-                    if (debug) std::cerr << "\n";
-                    if (debug) std::cerr << "[Exec] Join: condCols extracted: ";
+                    LOG_DEBUG("JOIN", "\n");
+                    LOG_DEBUG("Exec", "Join: condCols extracted: ");
                     if (debug) for (const auto& c : condCols) std::cerr << c << " ";
-                    if (debug) std::cerr << "(total=" << condCols.size() << ")\n";
+                    LOG_DEBUG("JOIN", "(total=" << condCols.size() << ")\n");
                 }
                 
                 // Skip trivial self-joins from DELIM_SCAN correlation markers.
                 if (detectTrivialSelfJoin(join, currentCtx, condCols, joinedTables, debug)) {
                     if (debug)
-                        std::cerr << "[Exec] Join: skipping trivial self-join (all columns already in pipeline)\n";
+                        LOG_INFO("Exec", "Join: skipping trivial self-join (all columns already in pipeline)\n");
                     return true;
                 }
                 
@@ -676,11 +657,10 @@ bool GpuExecutor::executeJoinPipeline(
                     rightCtx = savedPipelines[savedPipelineIdx];
                     rightJoinedTables = savedPipelineTables[savedPipelineIdx];
                     if (debug) {
-                        std::cerr << "[Exec] Join: using saved pipeline " << savedPipelineIdx 
-                                  << " with " << rightCtx.rowCount << " rows as right side\n";
-                        std::cerr << "[Exec] Join: saved pipeline tables: ";
+                        LOG_INFO("Exec", "Join: using saved pipeline " << savedPipelineIdx  << " with " << rightCtx.rowCount << " rows as right side\n");
+                        LOG_INFO("Exec", "Join: saved pipeline tables: ");
                         if (debug) for (const auto& t : rightJoinedTables) std::cerr << t << " ";
-                        if (debug) std::cerr << "\n";
+                        LOG_DEBUG("JOIN", "\n");
                     }
                 } else if (!unjoinedTableForJoin.empty()) {
                     // Use the unjoined table we found earlier (priority over other inference)
@@ -693,8 +673,7 @@ bool GpuExecutor::executeJoinPipeline(
                             std::string selfCol = parseSelfComparison(join.conditionStr);
                             if (!selfCol.empty()) {
                                 if (debug) {
-                                    std::cerr << "[Exec] Join: skipping spurious ANTI join with scalar table "
-                                              << unjoinedTableForJoin << " after GroupBy\n";
+                                    LOG_INFO("Exec", "Join: skipping spurious ANTI join with scalar table " << unjoinedTableForJoin << " after GroupBy\n");
                                 }
                                 skipSpuriousAntiJoin = true;
                             }
@@ -708,8 +687,7 @@ bool GpuExecutor::executeJoinPipeline(
                     rightCtx = tableContexts[unjoinedTableForJoin];
                     rightJoinedTables.insert(unjoinedTableForJoin);
                     if (debug) {
-                        std::cerr << "[Exec] Join: using pre-found unjoined table " << unjoinedTableForJoin
-                                  << " with " << rightCtx.rowCount << " rows as right side\n";
+                        LOG_INFO("Exec", "Join: using pre-found unjoined table " << unjoinedTableForJoin << " with " << rightCtx.rowCount << " rows as right side\n");
                     }
                 } else {
                     // Infer right table from join condition columns
@@ -718,12 +696,12 @@ bool GpuExecutor::executeJoinPipeline(
                     
                     if (rightTable.empty() || tableContexts.find(rightTable) == tableContexts.end()) {
                         if (debug) {
-                            std::cerr << "[Exec] Join: cannot determine right table. joinedTables=";
+                            LOG_WARN("Exec", "Join: cannot determine right table. joinedTables=");
                             for (const auto& t : joinedTables) std::cerr << t << " ";
-                            std::cerr << "\n";
-                            std::cerr << "[Exec] Join: available tableContexts=";
+                            LOG_INFO("JOIN", "\n");
+                            LOG_INFO("Exec", "Join: available tableContexts=");
                             for (const auto& [k, v] : tableContexts) std::cerr << k << " ";
-                            std::cerr << "\n";
+                            LOG_INFO("JOIN", "\n");
                         }
                         result.error = "Cannot determine right table for join";
                         return false;
@@ -738,7 +716,7 @@ bool GpuExecutor::executeJoinPipeline(
 
                 // Apply right filter if present (e.g. pushed down predicates)
                 if (join.rightFilter) {
-                    if (debug) std::cerr << "[Exec] Join: Applying right filter to right side (GPU)\n";
+                    LOG_DEBUG("Exec", "Join: Applying right filter to right side (GPU)\n");
                     
                     if (!executeFilterRecursive(join.rightFilter, rightCtx)) {
                          ENGINE_THROW("GPU Join Right Filter failed.");
@@ -758,7 +736,7 @@ bool GpuExecutor::executeJoinPipeline(
                         while (!lhs.empty() && std::isspace(lhs.back())) lhs.pop_back();
                         while (!rhs.empty() && std::isspace(rhs.front())) rhs.erase(0, 1);
                         if (lhs == rhs) {
-                            if (debug) std::cerr << "[Exec] SEMI join: swapping sides (right table becomes probe)\n";
+                            LOG_DEBUG("Exec", "SEMI join: swapping sides (right table becomes probe)\n");
                             std::swap(currentCtx, rightCtx);
                         }
                     }
@@ -771,12 +749,12 @@ bool GpuExecutor::executeJoinPipeline(
                 
                 currentCtx = std::move(joinCtx);
                 if (debug) {
-                    std::cerr << "[Exec] Join: currentCtx after move: rowCount=" << currentCtx.rowCount << " u32ColsGPU.size=" << currentCtx.u32ColsGPU.size() << "\n";
-                    std::cerr << "[Exec] Join: currentCtx.stringCols after move:\n";
+                    LOG_INFO("Exec", "Join: currentCtx after move: rowCount=" << currentCtx.rowCount << " u32ColsGPU.size=" << currentCtx.u32ColsGPU.size());
+                    LOG_INFO("Exec", "Join: currentCtx.stringCols after move:\n");
                     for (const auto& [n, v] : currentCtx.stringCols) {
-                        if (debug) std::cerr << "[Exec]   " << n << " size=" << v.size() << "\n";
+                        LOG_DEBUG("Exec", n << " size=" << v.size());
                     }
-                    if (debug) std::cerr << "[Exec] Join: currentCtx.currentTable='" << currentCtx.currentTable << "'\n";
+                    LOG_DEBUG("Exec", "Join: currentCtx.currentTable='" << currentCtx.currentTable << "'\n");
                 }
                 // Merge all joined tables from both sides
                 for (const auto& t : rightJoinedTables) {
@@ -784,9 +762,9 @@ bool GpuExecutor::executeJoinPipeline(
                 }
                 hasPipeline = true;  // We now have a joined result in the pipeline
                 if (debug) {
-                    std::cerr << "[Exec] Join: " << currentCtx.rowCount << " rows after. joinedTables=";
+                    LOG_INFO("Exec", "Join: " << currentCtx.rowCount << " rows after. joinedTables=");
                     for (const auto& t : joinedTables) std::cerr << t << " ";
-                    std::cerr << "\n";
+                    LOG_INFO("JOIN", "\n");
                 }
 
     return true;

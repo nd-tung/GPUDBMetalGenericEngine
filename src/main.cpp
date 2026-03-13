@@ -13,6 +13,7 @@
 #include "DuckDBAdapter.hpp"
 #include "KernelTimer.hpp"
 #include "EnvUtil.hpp"
+#include "Logger.hpp"
 
 static int executeQuery(const std::string& sql, const std::string& datasetPath) {
     using namespace engine;
@@ -28,13 +29,13 @@ static int executeQuery(const std::string& sql, const std::string& datasetPath) 
     double plan_ms = std::chrono::duration<double, std::milli>(t_plan_end - t_plan_start).count();
     
     if (env_truthy("GPUDB_DEBUG_PLAN")) {
-        std::cerr << "[Exec] Plan nodes: " << plan.nodes.size() << "\n";
+        LOG_INFO("Exec", "Plan nodes: " << plan.nodes.size());
         for (size_t i = 0; i < plan.nodes.size(); ++i) {
             const auto& n = plan.nodes[i];
-            std::cerr << "  [" << i << "] ";
+            LOG_INFO("ENGINE", "  [" << i << "] ");
             switch (n.type) {
                 case IRNode::Type::Scan: 
-                    std::cerr << "Scan table=" << n.asScan().table; 
+                    LOG_INFO("ENGINE", "Scan table=" << n.asScan().table);
                     if (n.asScan().filter) std::cerr << " [HAS_FILTER]";
                     break;
                 case IRNode::Type::Filter: std::cerr << "Filter pred=" << n.asFilter().predicateStr; break;
@@ -47,12 +48,12 @@ static int executeQuery(const std::string& sql, const std::string& datasetPath) 
                 case IRNode::Type::Project: std::cerr << "Project cols=" << n.asProject().exprs.size(); break;
                 default: std::cerr << "Unknown"; break;
             }
-            std::cerr << "\n";
+            LOG_INFO("ENGINE", "\n");
         }
     }
     
     if (!plan.isValid()) {
-        std::cerr << "[Exec] Plan parse error: " << plan.parseError << std::endl;
+        LOG_ERROR("Exec", "Plan parse error: " << plan.parseError);
         return 1;
     }
     
@@ -64,7 +65,7 @@ static int executeQuery(const std::string& sql, const std::string& datasetPath) 
     double exec_ms = std::chrono::duration<double, std::milli>(t_exec_end - t_exec_start).count();
     
     if (!result.success) {
-        std::cerr << "[Native] Execution failed: " << result.error << std::endl;
+        LOG_ERROR("Native", "Execution failed: " << result.error);
         return 1;
     }
     
@@ -190,7 +191,7 @@ int main(int argc, const char* argv[]) {
             // Arg is a SQL file path.
             std::string fileSql = read_file_text(arg);
             if (!fileSql.empty()) sql = fileSql;
-            else std::cerr << "Warning: failed to read SQL file: " << arg << std::endl;
+            else LOG_WARN("ENGINE", "failed to read SQL file: " << arg);
         }
         else if (arg.find("SELECT") != std::string::npos || arg.find("select") != std::string::npos) {
             // Arg is a SQL query if it contains SELECT (case-insensitive)

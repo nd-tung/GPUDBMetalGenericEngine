@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cstring>
 #include <iostream>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -21,14 +22,13 @@ namespace engine {
 // T = uint32_t calls gatherU32, T = float calls gatherF32.
 template<typename T>
 inline std::vector<T> gatherToVector(MTL::Buffer* buf, MTL::Buffer* indices, uint32_t count) {
-    MTL::Buffer* gathered;
+    GpuBuffer gathered;
     if constexpr (std::is_same_v<T, float>)
         gathered = GpuOps::gatherF32(buf, indices, count);
     else
         gathered = GpuOps::gatherU32(buf, indices, count);
     std::vector<T> result(count);
     std::memcpy(result.data(), gathered->contents(), count * sizeof(T));
-    gathered->release();
     return result;
 }
 
@@ -198,10 +198,10 @@ inline TypedExprPtr transformMultiInstancePredicate(const TypedExprPtr& pred,
     if (!pred) return pred;
     
     if (debug) {
-        std::cerr << "[Exec] transformMultiInstancePredicate: pred kind=" << static_cast<int>(pred->kind) << "\n";
-        std::cerr << "[Exec] availableCols: ";
+        LOG_INFO("Exec", "transformMultiInstancePredicate: pred kind=" << static_cast<int>(pred->kind));
+        LOG_INFO("Exec", "availableCols: ");
         for (const auto& c : availableCols) std::cerr << c << ", ";
-        std::cerr << "\n";
+        LOG_INFO("FILTER", "\n");
     }
     
     // Only handle Binary predicates (AND/OR)
@@ -229,7 +229,7 @@ inline TypedExprPtr transformMultiInstancePredicate(const TypedExprPtr& pred,
     
     if (!isColumnEqualsLiteral(bin.left, leftCol, leftLit)) {
         if (debug) {
-            std::cerr << "[Exec] transformMultiInstancePredicate: left side is not col=literal, recursing\n";
+            LOG_INFO("Exec", "transformMultiInstancePredicate: left side is not col=literal, recursing\n");
         }
         // Maybe left side is another AND - recurse
         auto newLeft = transformMultiInstancePredicate(bin.left, availableCols, debug);
@@ -285,9 +285,7 @@ inline TypedExprPtr transformMultiInstancePredicate(const TypedExprPtr& pred,
     }
     
     if (debug) {
-        std::cerr << "[Exec] transformMultiInstancePredicate: " << leftCol << "='" << leftLit 
-                  << "' AND " << rightCol << "='" << rightLit << "' -> using " << altCol 
-                  << " for second\n";
+        LOG_INFO("Exec", "transformMultiInstancePredicate: " << leftCol << "='" << leftLit  << "' AND " << rightCol << "='" << rightLit << "' -> using " << altCol  << " for second\n");
     }
     
     // Create transformed predicate: (leftCol = leftLit AND altCol = rightLit)

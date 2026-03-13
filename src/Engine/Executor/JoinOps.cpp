@@ -5,17 +5,15 @@
 
 #include <cstring>
 #include <iostream>
+#include "Logger.hpp"
 
 namespace engine {
 
 JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys, 
-                                     MTL::Buffer* /*buildIndices*/, 
                                      uint32_t buildCount,
                                      MTL::Buffer* probeKeys,
-                                     MTL::Buffer* /*probeIndices*/,
                                      uint32_t probeCount) {
     auto& store = GpuColumnStore::instance();
-    const bool debug = env_truthy("GPUDB_DEBUG_OPS");
     if (buildCount == 0 || probeCount == 0 || !store.device()) return JoinResult{};
 
     // Use multi-match join to correctly handle duplicate keys on the build side.
@@ -23,11 +21,12 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     
     // 1. Setup Hash Table for multi-match
     uint32_t capacity = 1024;
-    while (capacity < buildCount * 2) capacity <<= 1;
+    uint64_t minCap = static_cast<uint64_t>(buildCount) * 2;
+    while (capacity < minCap && capacity < (1u << 30)) capacity <<= 1;
     
-    auto bufHTKeys = store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto bufHTHead = store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto bufNext   = store.device()->newBuffer(buildCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    GpuBuffer bufHTKeys(store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer bufHTHead(store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer bufNext  (store.device()->newBuffer(buildCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     
     std::memset(bufHTKeys->contents(), 0, capacity * sizeof(uint32_t)); // 0 = empty sentinel
     std::memset(bufHTHead->contents(), 0, capacity * sizeof(uint32_t)); // 0 = null pointer
@@ -35,15 +34,13 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     // 2. Build Phase — build linked lists per key
     auto p_build = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
     if (!p_build) {
-        bufHTKeys->release(); bufHTHead->release(); bufNext->release();
         return JoinResult{};
     }
     
     // 3. Count Phase — count matches per probe row
-    auto bufCounts = store.device()->newBuffer(probeCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    GpuBuffer bufCounts(store.device()->newBuffer(probeCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     auto p_count = makePSO(store.device(), store.library(), "ops::hash_join_probe_count_multi");
     if (!p_count) {
-        bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufCounts->release();
         return JoinResult{};
     }
     
@@ -82,24 +79,20 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
     uint64_t totalPairs64 = scanInPlace(bufCounts, probeCount);
     uint32_t totalPairs = static_cast<uint32_t>(totalPairs64);
     
-    if (debug) std::cerr << "[GPU] joinHashMulti: buildCount=" << buildCount 
-                         << " probeCount=" << probeCount << " totalPairs=" << totalPairs << "\n";
+    LOG_DEBUG("GPU", "joinHashMulti: buildCount=" << buildCount  << " probeCount=" << probeCount << " totalPairs=" << totalPairs);
     
     if (totalPairs == 0) {
-        bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufCounts->release();
         auto emptyBuf = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
         return {GpuBuffer(emptyBuf), GpuBuffer(store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared)), 0};
     }
     
     // 5. Write Phase — write matched pairs (bufCounts now holds exclusive prefix sums = offsets)
     MTL::Buffer* bufOffsets = bufCounts;  // reuse in-place — scanInPlace converted counts → offsets
-    auto outProbeIndices = store.device()->newBuffer(totalPairs * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outBuildIndices = store.device()->newBuffer(totalPairs * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    GpuBuffer outProbeIndices(store.device()->newBuffer(totalPairs * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer outBuildIndices(store.device()->newBuffer(totalPairs * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     
     auto p_write = makePSO(store.device(), store.library(), "ops::hash_join_probe_write_multi");
     if (!p_write) {
-        bufHTKeys->release(); bufHTHead->release(); bufNext->release(); bufOffsets->release();
-        outProbeIndices->release(); outBuildIndices->release();
         return JoinResult{};
     }
     
@@ -127,12 +120,7 @@ JoinResult GpuOps::joinHash(MTL::Buffer* buildKeys,
             std::chrono::duration<double, std::milli>(end - start).count(), probeCount);
     }
     
-    bufHTKeys->release();
-    bufHTHead->release();
-    bufNext->release();
-    bufOffsets->release();  // bufCounts was reused as bufOffsets
-    
-    return {GpuBuffer(outBuildIndices), GpuBuffer(outProbeIndices), totalPairs};
+    return {std::move(outBuildIndices), std::move(outProbeIndices), totalPairs};
 }
 
 JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys, 
@@ -142,19 +130,21 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
                                         MTL::Buffer* probeIndices,
                                         uint32_t probeCount) {
     auto& store = GpuColumnStore::instance();
-    const bool debug = env_truthy("GPUDB_DEBUG_OPS");
-    if (debug) std::cerr << "[GPU] joinHashU64: buildCount=" << buildCount << " probeCount=" << probeCount << std::endl << std::flush;
+    LOG_DEBUG("GPU", "joinHashU64: buildCount=" << buildCount << " probeCount=" << probeCount);
     if (buildCount == 0 || probeCount == 0 || !store.device()) return JoinResult{};
 
     uint32_t capacity = 1024;
-    while (capacity < buildCount * 2) capacity <<= 1;
-    if (debug) std::cerr << "[GPU] joinHashU64: hash table capacity=" << capacity << std::endl << std::flush;
+    {
+        uint64_t minCap = static_cast<uint64_t>(buildCount) * 2;
+        while (capacity < minCap && capacity < (1u << 30)) capacity <<= 1;
+    }
+    LOG_DEBUG("GPU", "joinHashU64: hash table capacity=" << capacity);
     
     // Split hash table: separate buffers for low and high 32 bits of keys
     // This avoids 64-bit atomics which are not well supported on all Metal devices
-    auto bufHTKeysLow = store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto bufHTKeysHigh = store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto bufHTVals = store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    GpuBuffer bufHTKeysLow(store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer bufHTKeysHigh(store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer bufHTVals(store.device()->newBuffer(capacity * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     
     // Init Keys to EMPTY (0xFFFFFFFF for both parts = 64-bit EMPTY)
     std::memset(bufHTKeysLow->contents(), 0xFF, capacity * sizeof(uint32_t));
@@ -162,11 +152,10 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
     
     auto p_build = makePSO(store.device(), store.library(), "ops::join_build_u64");
     if (!p_build) {
-        bufHTKeysLow->release(); bufHTKeysHigh->release(); bufHTVals->release();
         return JoinResult{};
     }
     
-    if (debug) std::cerr << "[GPU] joinHashU64: starting build phase..." << std::endl << std::flush;
+    LOG_DEBUG("GPU", "joinHashU64: starting build phase...");
     {
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
@@ -181,67 +170,100 @@ JoinResult GpuOps::joinHashU64(MTL::Buffer* buildKeys,
         dispatch1D(enc, buildCount);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "joinHashU64_build");
     }
-    if (debug) std::cerr << "[GPU] joinHashU64: build phase done." << std::endl << std::flush;
+    LOG_DEBUG("GPU", "joinHashU64: build phase done.");
     
-    auto outBuildIndices = store.device()->newBuffer(probeCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outProbeIndices = store.device()->newBuffer(probeCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCount = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    std::memset(outCount->contents(), 0, 4);
+    // Deterministic probe: mark matches in mask + build map, then compact via prefix-sum
+    GpuBuffer probeMask(store.device()->newBuffer(probeCount * sizeof(uint8_t), MTL::ResourceStorageModeShared));
+    GpuBuffer buildMap(store.device()->newBuffer(probeCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     
-    auto p_probe = makePSO(store.device(), store.library(), "ops::join_probe_u64");
+    auto p_probe = makePSO(store.device(), store.library(), "ops::join_probe_u64_mark");
     if (!p_probe) {
-        bufHTKeysLow->release(); bufHTKeysHigh->release(); bufHTVals->release();
-        outBuildIndices->release(); outProbeIndices->release(); outCount->release();
         return JoinResult{};
     }
 
-    if (debug) std::cerr << "[GPU] joinHashU64: starting probe phase..." << std::endl << std::flush;
+    LOG_DEBUG("GPU", "joinHashU64: starting probe phase...");
     {
-        auto start = std::chrono::high_resolution_clock::now();
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(p_probe);
         enc->setBuffer(probeKeys, 0, 0);
         enc->setBuffer(probeIndices, 0, 1);
-        enc->setBuffer(bufHTKeysLow, 0, 2);   // Low 32 bits
+        enc->setBuffer(bufHTKeysLow, 0, 2);
         enc->setBuffer(bufHTVals, 0, 3);
         enc->setBytes(&capacity, 4, 4);
         enc->setBytes(&probeCount, 4, 5);
-        enc->setBuffer(outCount, 0, 6);
-        enc->setBuffer(outBuildIndices, 0, 7);
-        enc->setBuffer(outProbeIndices, 0, 8);
-        enc->setBuffer(bufHTKeysHigh, 0, 9);  // High 32 bits
+        enc->setBuffer(probeMask, 0, 6);
+        enc->setBuffer(buildMap, 0, 7);
+        enc->setBuffer(bufHTKeysHigh, 0, 8);
         dispatch1D(enc, probeCount);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "joinHashU64_probe");
-        auto end = std::chrono::high_resolution_clock::now();
-        KernelTimer::instance().record("ops::join_probe_u64", "hash_join_probe_u64", 
-            std::chrono::duration<double, std::milli>(end - start).count(), probeCount);
     }
-    if (debug) std::cerr << "[GPU] joinHashU64: probe phase done." << std::endl << std::flush;
+    LOG_DEBUG("GPU", "joinHashU64: probe phase done.");
     
-    uint32_t totalPairs = *reinterpret_cast<uint32_t*>(outCount->contents());
-    if (debug) std::cerr << "[GPU] joinHashU64: result count=" << totalPairs << std::endl << std::flush;
+    // Compute prefix sums from mask
+    auto [offsets, totalPairs] = prefixSumFromU8Mask(probeMask, probeCount);
+    LOG_DEBUG("GPU", "joinHashU64: result count=" << totalPairs);
     
-    bufHTKeysLow->release();
-    bufHTKeysHigh->release();
-    bufHTVals->release();
-    outCount->release();
+    if (totalPairs == 0) {
+        auto emptyBuf = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        return {GpuBuffer(emptyBuf), GpuBuffer(store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared)), 0};
+    }
     
-    return {GpuBuffer(outBuildIndices), GpuBuffer(outProbeIndices), totalPairs};
+    // Scatter build indices and probe indices using shared prefix sums
+    GpuBuffer outBuildIndices(store.device()->newBuffer(static_cast<size_t>(totalPairs) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer outProbeIndices(store.device()->newBuffer(static_cast<size_t>(totalPairs) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    
+    auto p_scatter_indexed = makePSO(store.device(), store.library(), "ops::scatter_by_prefix_u8_indexed");
+    auto p_scatter = makePSO(store.device(), store.library(), "ops::scatter_by_prefix_u8");
+    {
+        auto cmd = store.queue()->commandBuffer();
+        // Scatter build indices (from buildMap)
+        auto enc1 = cmd->computeCommandEncoder();
+        enc1->setComputePipelineState(p_scatter_indexed);
+        enc1->setBuffer(probeMask, 0, 0);
+        enc1->setBuffer(buildMap, 0, 1);
+        enc1->setBuffer(offsets, 0, 2);
+        enc1->setBuffer(outBuildIndices, 0, 3);
+        enc1->setBytes(&probeCount, 4, 4);
+        dispatch1D(enc1, probeCount);
+        enc1->endEncoding();
+        // Scatter probe indices
+        if (probeIndices) {
+            auto enc2 = cmd->computeCommandEncoder();
+            enc2->setComputePipelineState(p_scatter_indexed);
+            enc2->setBuffer(probeMask, 0, 0);
+            enc2->setBuffer(probeIndices, 0, 1);
+            enc2->setBuffer(offsets, 0, 2);
+            enc2->setBuffer(outProbeIndices, 0, 3);
+            enc2->setBytes(&probeCount, 4, 4);
+            dispatch1D(enc2, probeCount);
+            enc2->endEncoding();
+        } else {
+            auto enc2 = cmd->computeCommandEncoder();
+            enc2->setComputePipelineState(p_scatter);
+            enc2->setBuffer(probeMask, 0, 0);
+            enc2->setBuffer(offsets, 0, 1);
+            enc2->setBuffer(outProbeIndices, 0, 2);
+            enc2->setBytes(&probeCount, 4, 3);
+            dispatch1D(enc2, probeCount);
+            enc2->endEncoding();
+        }
+        cmd->commit();
+        cmd->waitUntilCompleted();
+        checkGpuStatus(cmd, "joinHashU64_scatter");
+    }
+    
+    return {std::move(outBuildIndices), std::move(outProbeIndices), totalPairs};
 }
 
-MTL::Buffer* GpuOps::packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count) {
+GpuBuffer GpuOps::packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto p = makePSO(store.device(), store.library(), "ops::pack_u32_to_u64");
-    if (!p) return nullptr;
+    if (!p) return {};
     auto out = store.device()->newBuffer(static_cast<NS::UInteger>(count) * 8, MTL::ResourceStorageModeShared);
-    if (!out) return nullptr;
+    if (!out) return {};
     {
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
@@ -256,7 +278,7 @@ MTL::Buffer* GpuOps::packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t cou
         cmd->waitUntilCompleted();
         checkGpuStatus(cmd, "packU32ToU64");
     }
-    return out;
+    return GpuBuffer(out);
 }
 
 void GpuOps::crossProduct(MTL::Buffer* left, MTL::Buffer* right,
@@ -278,7 +300,9 @@ void GpuOps::crossProduct(MTL::Buffer* left, MTL::Buffer* right,
     enc->setBytes(&leftCount, sizeof(uint32_t), 4);
     enc->setBytes(&rightCount, sizeof(uint32_t), 5);
     
-    uint32_t totalCount = leftCount * rightCount;
+    uint64_t totalCount64 = static_cast<uint64_t>(leftCount) * rightCount;
+    uint32_t totalCount = static_cast<uint32_t>(std::min<uint64_t>(totalCount64, UINT32_MAX));
+    enc->setBytes(&totalCount, sizeof(uint32_t), 6);
     dispatch1D(enc, totalCount);
     enc->endEncoding();
     cmd->commit();
@@ -295,23 +319,19 @@ std::optional<FilterResult> GpuOps::hashJoinSemiU32(MTL::Buffer* leftKey,
 
     auto p_build = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
     auto p_probe = makePSO(store.device(), store.library(), "ops::hash_join_probe_semi");
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_build || !p_probe || !p_compact) return std::nullopt;
+    if (!p_build || !p_probe) return std::nullopt;
 
-    uint32_t cap = nextPow2(std::max<uint32_t>(8u, rightCount * 2u));
-    auto htKeys = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto ht_head = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto next = store.device()->newBuffer(static_cast<size_t>(rightCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    uint32_t cap = nextPow2(std::max<uint32_t>(8u, static_cast<uint32_t>(std::min<uint64_t>(static_cast<uint64_t>(rightCount) * 2u, UINT32_MAX))));
+    GpuBuffer htKeys(store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer ht_head(store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer next(store.device()->newBuffer(static_cast<size_t>(rightCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     
     std::memset(htKeys->contents(), 0, cap * sizeof(uint32_t));
     std::memset(ht_head->contents(), 0, cap * sizeof(uint32_t));
     if (rightCount > 0) std::memset(next->contents(), 0, static_cast<size_t>(rightCount) * sizeof(uint32_t));
 
-    // Fused: BUILD → PROBE → COMPACT in one command buffer (3 encoders)
-    auto mask = store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    auto outIdx = store.device()->newBuffer(leftCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
+    // BUILD → PROBE in one command buffer
+    GpuBuffer mask(store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared));
 
     {
         auto cmd = store.queue()->commandBuffer();
@@ -336,29 +356,14 @@ std::optional<FilterResult> GpuOps::hashJoinSemiU32(MTL::Buffer* leftKey,
         enc2->setBuffer(mask, 0, 4);
         dispatch1D(enc2, leftCount);
         enc2->endEncoding();
-        // Encoder 3: COMPACT
-        auto enc3 = cmd->computeCommandEncoder();
-        enc3->setComputePipelineState(p_compact);
-        enc3->setBuffer(mask, 0, 0);
-        enc3->setBuffer(outIdx, 0, 1);
-        enc3->setBuffer(outCnt, 0, 2);
-        enc3->setBytes(&leftCount, sizeof(leftCount), 3);
-        dispatch1D(enc3, leftCount);
-        enc3->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "hashJoinSemiU32");
     }
-    ht_head->release();
-    next->release();
-    htKeys->release();
-    mask->release();
     
-    uint32_t validCount = *(uint32_t*)outCnt->contents();
-    outCnt->release();
+    // Deterministic compaction
+    auto [outIdx, validCount] = compactU8Deterministic(mask, leftCount);
     
     FilterResult res;
-    res.indices.reset(outIdx);
+    res.indices = std::move(outIdx);
     res.count = validCount;
     return res;
 }
@@ -374,7 +379,7 @@ std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
     if (rightCount == 0) {
         auto idx = iotaU32(leftCount);
         FilterResult res;
-        res.indices.reset(idx);
+        res.indices = std::move(idx);
         res.count = leftCount;
         return res;
     }
@@ -382,23 +387,19 @@ std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
     auto p_build   = makePSO(store.device(), store.library(), "ops::hash_join_build_multi");
     auto p_probe   = makePSO(store.device(), store.library(), "ops::hash_join_probe_semi");
     auto p_flip    = makePSO(store.device(), store.library(), "ops::flip_mask_u8");
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
-    if (!p_build || !p_probe || !p_flip || !p_compact) return std::nullopt;
+    if (!p_build || !p_probe || !p_flip) return std::nullopt;
 
-    uint32_t cap = nextPow2(std::max<uint32_t>(8u, rightCount * 2u));
-    auto htKeys = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto ht_head = store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto next    = store.device()->newBuffer(static_cast<size_t>(rightCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    uint32_t cap = nextPow2(std::max<uint32_t>(8u, static_cast<uint32_t>(std::min<uint64_t>(static_cast<uint64_t>(rightCount) * 2u, UINT32_MAX))));
+    GpuBuffer htKeys(store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer ht_head(store.device()->newBuffer(cap * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer next   (store.device()->newBuffer(static_cast<size_t>(rightCount) * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     
     std::memset(htKeys->contents(), 0, cap * sizeof(uint32_t));
     std::memset(ht_head->contents(), 0, cap * sizeof(uint32_t));
     if (rightCount > 0) std::memset(next->contents(), 0, static_cast<size_t>(rightCount) * sizeof(uint32_t));
 
-    // Fused: BUILD → PROBE → FLIP → COMPACT in one command buffer (4 encoders)
-    auto mask = store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared);
-    auto outIdx = store.device()->newBuffer(leftCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    *(uint32_t*)outCnt->contents() = 0;
+    // BUILD → PROBE → FLIP in one command buffer
+    GpuBuffer mask(store.device()->newBuffer(leftCount * sizeof(uint8_t), MTL::ResourceStorageModeShared));
 
     {
         auto cmd = store.queue()->commandBuffer();
@@ -430,29 +431,14 @@ std::optional<FilterResult> GpuOps::hashJoinAntiU32(MTL::Buffer* leftKey,
         enc3->setBytes(&leftCount, sizeof(leftCount), 1);
         dispatch1D(enc3, leftCount);
         enc3->endEncoding();
-        // Encoder 4: COMPACT
-        auto enc4 = cmd->computeCommandEncoder();
-        enc4->setComputePipelineState(p_compact);
-        enc4->setBuffer(mask, 0, 0);
-        enc4->setBuffer(outIdx, 0, 1);
-        enc4->setBuffer(outCnt, 0, 2);
-        enc4->setBytes(&leftCount, sizeof(leftCount), 3);
-        dispatch1D(enc4, leftCount);
-        enc4->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "hashJoinAntiU32");
     }
-    ht_head->release();
-    next->release();
-    htKeys->release();
-    mask->release();
 
-    uint32_t validCount = *(uint32_t*)outCnt->contents();
-    outCnt->release();
+    // Deterministic compaction
+    auto [outIdx, validCount] = compactU8Deterministic(mask, leftCount);
 
     FilterResult res;
-    res.indices.reset(outIdx);
+    res.indices = std::move(outIdx);
     res.count = validCount;
     return res;
 }
@@ -465,7 +451,7 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
     // Edge case: no matches → every row is unmatched
     if (matchedCount == 0) {
         FilterResult res;
-        res.indices.reset(iotaU32(totalRows));
+        res.indices = GpuOps::iotaU32(totalRows);
         res.count = totalRows;
         return res;
     }
@@ -478,17 +464,13 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
 
     auto p_scatter = makePSO(store.device(), store.library(), "ops::scatter_one_u8");
     auto p_flip    = makePSO(store.device(), store.library(), "ops::flip_mask_u8");
-    auto p_compact = makePSO(store.device(), store.library(), "ops::compact_indices");
 
     // Create u8 mask, zero-initialized
-    auto mask = store.device()->newBuffer(totalRows * sizeof(uint8_t), MTL::ResourceStorageModeShared);
+    GpuBuffer mask(store.device()->newBuffer(totalRows * sizeof(uint8_t), MTL::ResourceStorageModeShared));
     std::memset(mask->contents(), 0, totalRows * sizeof(uint8_t));
 
-    if (p_scatter && p_flip && p_compact) {
-        // Fused: SCATTER → FLIP → COMPACT in one command buffer (3 encoders)
-        auto outIdx = store.device()->newBuffer(totalRows * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-        auto outCnt = store.device()->newBuffer(sizeof(uint32_t), MTL::ResourceStorageModeShared);
-        *(uint32_t*)outCnt->contents() = 0;
+    if (p_scatter && p_flip) {
+        // SCATTER → FLIP in one command buffer
         {
             auto cmd = store.queue()->commandBuffer();
             // Encoder 1: scatter 1 at matched indices
@@ -506,31 +488,19 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
             enc2->setBytes(&totalRows, sizeof(totalRows), 1);
             dispatch1D(enc2, totalRows);
             enc2->endEncoding();
-            // Encoder 3: compact
-            auto enc3 = cmd->computeCommandEncoder();
-            enc3->setComputePipelineState(p_compact);
-            enc3->setBuffer(mask, 0, 0);
-            enc3->setBuffer(outIdx, 0, 1);
-            enc3->setBuffer(outCnt, 0, 2);
-            enc3->setBytes(&totalRows, sizeof(totalRows), 3);
-            dispatch1D(enc3, totalRows);
-            enc3->endEncoding();
             cmd->commit();
-            cmd->waitUntilCompleted();
-            checkGpuStatus(cmd, "findUnmatchedIndices");
         }
-        mask->release();
-        uint32_t cnt = *(uint32_t*)outCnt->contents();
-        outCnt->release();
+        // Deterministic compaction
+        auto [outIdx, cnt] = compactU8Deterministic(mask, totalRows);
         FilterResult res;
-        res.indices.reset(outIdx);
+        res.indices = std::move(outIdx);
         res.count = cnt;
         return res;
     }
 
     // CPU fallback
-    uint8_t* maskPtr = (uint8_t*)mask->contents();
-    uint32_t* matchPtr = (uint32_t*)matchedIndices->contents();
+    uint8_t* maskPtr = static_cast<uint8_t*>(mask->contents());
+    uint32_t* matchPtr = static_cast<uint32_t*>(matchedIndices->contents());
     for (uint32_t i = 0; i < matchedCount; ++i) {
         if (matchPtr[i] < totalRows) maskPtr[matchPtr[i]] = 1;
     }
@@ -538,14 +508,13 @@ FilterResult GpuOps::findUnmatchedIndices(MTL::Buffer* matchedIndices,
     for (uint32_t i = 0; i < totalRows; ++i) {
         if (!maskPtr[i]) result.push_back(i);
     }
-    mask->release();
-    uint32_t cnt = (uint32_t)result.size();
-    auto outIdx = store.device()->newBuffer(
+    uint32_t cnt = static_cast<uint32_t>(result.size());
+    GpuBuffer outIdx(store.device()->newBuffer(
         result.empty() ? sizeof(uint32_t) : result.size() * sizeof(uint32_t),
-        MTL::ResourceStorageModeShared);
+        MTL::ResourceStorageModeShared));
     if (!result.empty()) std::memcpy(outIdx->contents(), result.data(), result.size() * sizeof(uint32_t));
     FilterResult fRes;
-    fRes.indices.reset(outIdx);
+    fRes.indices = std::move(outIdx);
     fRes.count = cnt;
     return fRes;
 }

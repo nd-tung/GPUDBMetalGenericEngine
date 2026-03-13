@@ -4,6 +4,7 @@
 #include "PlannerInternal.hpp"
 #include "DuckDBAdapter.hpp"
 #include "EnvUtil.hpp"
+#include "Logger.hpp"
 #include <iostream>
 #include <regex>
 
@@ -35,7 +36,7 @@ Plan Planner::fromSQL(const std::string& sql) {
             jsonStr.pop_back();
         }
     } else {
-        if (env_truthy("GPUDB_DEBUG_PLANNER")) std::cerr << "DuckDB Raw Output:\n" << raw << "\n";
+        LOG_DEBUG("PLANNER", "DuckDB Raw Output:\n" << raw);
         plan.parseError = "Could not find JSON array in DuckDB output";
         return plan;
     }

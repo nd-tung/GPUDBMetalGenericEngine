@@ -1,42 +1,39 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
-Scalar sum_no_overflow((l_extendedprice * l_discount)): 123141112.00
+Scalar sum_no_overflow((l_extendedprice * l_discount)): 123141008.00
 ---------------------------------------------------
-Planning time: 0.76 ms
-Data Load Time (Disk+Upload): 2825.17 ms
-GPU kernels time: 15.08 ms
-CPU postprocess time: 18.07 ms
-Total Internal Pipeline time: 2858.32 ms
-Total Host Execution time: 2858.34 ms
-Total Wall time (Plan+Exec): 2859.10 ms
+Planning time: 0.78 ms
+Data Load Time (Disk+Upload): 2651.08 ms
+GPU kernels time: 16.62 ms
+CPU postprocess time: 5.37 ms
+Total Internal Pipeline time: 2673.07 ms
+Total Host Execution time: 2673.09 ms
+Total Wall time (Plan+Exec): 2673.87 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :   13.099 ms (86.872%) [5 calls]
-  gather         :    1.979 ms (13.128%) [6 calls]
+  filter         :   15.049 ms (90.553%) [5 calls]
+  gather         :    1.570 ms (9.447%) [6 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 15.078 ms
+  TOTAL GPU TIME: 16.619 ms
   Kernel invocations: 11
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                  10.054        6001215        596.921
-ops::filter_lt_u32_indexed           1.348        4336142       3216.026
-ops::filter_ge_f32_indexed           0.704         909455       1291.915
-ops::filter_le_f32_indexed           0.393         495300       1261.779
-ops::filter_lt_f32_indexed           0.600         248078        413.291
-ops::gather_col_f32                  0.514         114160        222.119
-ops::gather_col_f32                  0.255         114160        447.906
-ops::gather_col_f32                  0.439         114160        260.145
-ops::gather_col_f32                  0.268         114160        426.035
-ops::gather_col_f32                  0.254         114160        450.261
-ops::gather_col_f32                  0.250         114160        456.260
+ops::filter_ge_u32                  11.085        6001215        541.386
+ops::filter_lt_u32_indexed           1.529        4336142       2836.629
+ops::filter_ge_f32_indexed           0.980         909455        927.937
+ops::filter_le_f32_indexed           0.626         495300        791.425
+ops::filter_lt_f32_indexed           0.830         248078        298.904
+ops::gather_col_f32                  0.447         114160        255.439
+ops::gather_col_f32                  0.215         114160        530.153
+ops::gather_col_f32                  0.225         114160        507.001
+ops::gather_col_f32                  0.232         114160        492.866
+ops::gather_col_f32                  0.229         114160        498.515
+ops::gather_col_f32                  0.222         114160        514.427
 ─────────────────────────────────────────────────────────────────
-TOTAL: 15.078 ms
+TOTAL: 16.619 ms

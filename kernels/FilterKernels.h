@@ -506,6 +506,59 @@ kernel void compact_u32_mask(
     }
 }
 
+// ============================================================================
+// Deterministic compaction via prefix-sum (replaces atomic compact kernels)
+// ============================================================================
+
+// Convert u8 mask to u32 0/1 for prefix-sum scan
+kernel void mask_to_offsets_u8(const device uint8_t* mask [[buffer(0)]],
+                               device uint32_t* offsets [[buffer(1)]],
+                               constant uint& count [[buffer(2)]],
+                               uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    offsets[gid] = mask[gid] ? 1u : 0u;
+}
+
+// Convert u32 mask to u32 0/1 for prefix-sum scan
+kernel void mask_to_offsets_u32(const device uint32_t* mask [[buffer(0)]],
+                                device uint32_t* offsets [[buffer(1)]],
+                                constant uint& count [[buffer(2)]],
+                                uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    offsets[gid] = mask[gid] ? 1u : 0u;
+}
+
+// Scatter gid to output at position prefix[gid], when u8 mask is set
+kernel void scatter_by_prefix_u8(const device uint8_t* mask [[buffer(0)]],
+                                 const device uint32_t* prefix [[buffer(1)]],
+                                 device uint32_t* out [[buffer(2)]],
+                                 constant uint& count [[buffer(3)]],
+                                 uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    if (mask[gid]) out[prefix[gid]] = gid;
+}
+
+// Scatter in_indices[gid] to output at position prefix[gid], when u8 mask is set
+kernel void scatter_by_prefix_u8_indexed(const device uint8_t* mask [[buffer(0)]],
+                                         const device uint32_t* in_indices [[buffer(1)]],
+                                         const device uint32_t* prefix [[buffer(2)]],
+                                         device uint32_t* out [[buffer(3)]],
+                                         constant uint& count [[buffer(4)]],
+                                         uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    if (mask[gid]) out[prefix[gid]] = in_indices[gid];
+}
+
+// Scatter gid to output at position prefix[gid], when u32 mask is set
+kernel void scatter_by_prefix_u32(const device uint32_t* mask [[buffer(0)]],
+                                  const device uint32_t* prefix [[buffer(1)]],
+                                  device uint32_t* out [[buffer(2)]],
+                                  constant uint& count [[buffer(3)]],
+                                  uint gid [[thread_position_in_grid]]) {
+    if (gid >= count) return;
+    if (mask[gid]) out[prefix[gid]] = gid;
+}
+
 kernel void indices_to_mask(
     const device uint32_t* indices [[buffer(0)]],
     device uint32_t* mask [[buffer(1)]],

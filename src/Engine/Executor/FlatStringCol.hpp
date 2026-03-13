@@ -16,9 +16,9 @@ struct FlatStringCol {
     uint32_t totalBytes = 0;
 
     // Assign from a FlatStringGatherResult (takes ownership, releases old)
-    void takeFrom(MTL::Buffer* c, MTL::Buffer* off, MTL::Buffer* len,
+    void takeFrom(GpuBuffer c, GpuBuffer off, GpuBuffer len,
                   uint32_t rc, uint32_t tb) {
-        chars.reset(c); offsets.reset(off); lengths.reset(len);
+        chars = std::move(c); offsets = std::move(off); lengths = std::move(len);
         rowCount = rc; totalBytes = tb;
     }
 

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 #include <chrono>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -73,11 +74,9 @@ static void computeGpuHash(EvalContext& ctx, const std::string& colName) {
     auto hashBuf = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
     if (!hashBuf) return;
 
-    ctx.u32ColsGPU[colName].reset(hashBuf);
-    // Download to CPU for compatibility with CPU-side consumers
-    std::vector<uint32_t> hashCPU(flat.rowCount);
-    memcpy(hashCPU.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
-    ctx.u32Cols[colName] = std::move(hashCPU);
+    ctx.u32ColsGPU[colName] = std::move(hashBuf);
+    // Keep empty entry for column name discovery; consumers lazy-fetch from GPU
+    ctx.u32Cols[colName] = {};
 }
 
 // Helper: build dictionary encoding for a string column.
@@ -196,9 +195,9 @@ std::unordered_map<std::string, std::set<std::string>> collectNeededColumns(cons
                 collectColumnsFromExpr(node.asJoin().rightFilter, tmp);
                 
                 if (env_truthy("GPUDB_DEBUG_OPS")) {
-                     std::cerr << "[Exec] DEBUG: Join collected cols:";
+                     LOG_INFO("Exec", "DEBUG: Join collected cols:");
                      for(const auto& c : tmp) std::cerr << " " << c;
-                     std::cerr << "\n";
+                     LOG_INFO("SCAN", "\n");
                 }
 
                 for (const auto& c : tmp) add(c);
@@ -255,9 +254,9 @@ void IRGpuLoader::loadTables(
 
     for (const auto& [tableName, cols] : tableColsMap) {
         if (debug) {
-            std::cerr << "[Exec] DEBUG: Loading table " << tableName << " with cols:";
+            LOG_INFO("Exec", "DEBUG: Loading table " << tableName << " with cols:");
             for(const auto& c : cols) std::cerr << " " << c;
-            std::cerr << "\n";
+            LOG_INFO("SCAN", "\n");
         }
         std::vector<std::string> colVec(cols.begin(), cols.end());
         
@@ -271,25 +270,19 @@ void IRGpuLoader::loadTables(
                     ctx.rowCount = rel.rowCount;
 
                     for (const auto& [name, buf] : rel.u32cols) {
-                        std::vector<uint32_t> data(rel.rowCount);
-                        const uint32_t* ptr = static_cast<const uint32_t*>(buf->contents());
-                        std::copy(ptr, ptr + rel.rowCount, data.begin());
                         if (inst.instanceNum == 1) {
-                            ctx.u32Cols[name] = data;
+                            ctx.u32Cols[name] = {};  // empty sentinel for column name discovery
                             ctx.u32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
                         }
-                        ctx.u32Cols[name + "_" + std::to_string(inst.instanceNum)] = std::move(data);
+                        ctx.u32Cols[name + "_" + std::to_string(inst.instanceNum)] = {};  // empty sentinel
                         ctx.u32ColsGPU[name + "_" + std::to_string(inst.instanceNum)] = buf;  // GpuBuffer copy auto-retains
                     }
                     for (const auto& [name, buf] : rel.f32cols) {
-                        std::vector<float> data(rel.rowCount);
-                        const float* ptr = static_cast<const float*>(buf->contents());
-                        std::copy(ptr, ptr + rel.rowCount, data.begin());
                         if (inst.instanceNum == 1) {
-                            ctx.f32Cols[name] = data;
+                            ctx.f32Cols[name] = {};  // empty sentinel for column name discovery
                             ctx.f32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
                         }
-                        ctx.f32Cols[name + "_" + std::to_string(inst.instanceNum)] = std::move(data);
+                        ctx.f32Cols[name + "_" + std::to_string(inst.instanceNum)] = {};  // empty sentinel
                         ctx.f32ColsGPU[name + "_" + std::to_string(inst.instanceNum)] = buf;  // GpuBuffer copy auto-retains
                     }
                     
@@ -329,8 +322,7 @@ void IRGpuLoader::loadTables(
                     tableContexts[inst.instanceKey] = std::move(ctx);
                     
                     if (debug) {
-                        std::cerr << "[Exec] Loaded instance " << inst.instanceKey 
-                                  << " (" << ctx.rowCount << " rows)\n";
+                        LOG_INFO("Exec", "Loaded instance " << inst.instanceKey  << " (" << ctx.rowCount << " rows)\n");
                     }
                 }
             }
@@ -342,17 +334,11 @@ void IRGpuLoader::loadTables(
             ctx.rowCount = rel.rowCount;
 
             for (const auto& [name, buf] : rel.u32cols) {
-                std::vector<uint32_t> data(rel.rowCount);
-                const uint32_t* ptr = static_cast<const uint32_t*>(buf->contents());
-                std::copy(ptr, ptr + rel.rowCount, data.begin());
-                ctx.u32Cols[name] = std::move(data);
+                ctx.u32Cols[name] = {};  // empty sentinel for column name discovery
                 ctx.u32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
             }
             for (const auto& [name, buf] : rel.f32cols) {
-                std::vector<float> data(rel.rowCount);
-                const float* ptr = static_cast<const float*>(buf->contents());
-                std::copy(ptr, ptr + rel.rowCount, data.begin());
-                ctx.f32Cols[name] = std::move(data);
+                ctx.f32Cols[name] = {};  // empty sentinel for column name discovery
                 ctx.f32ColsGPU[name] = buf;  // GpuBuffer copy auto-retains
             }
             
@@ -372,9 +358,7 @@ void IRGpuLoader::loadTables(
                                 computeGpuHash(ctx, colName);
                                 buildDictCol(ctx, colName);
                                 if (debug) {
-                                    std::cerr << "[Exec] Loaded raw strings for " << tableName << "." << colName 
-                                              << " (" << ctx.stringCols[colName].size() << " rows, flat="
-                                              << ctx.flatStringCols.count(colName) << ")\n";
+                                    LOG_INFO("Exec", "Loaded raw strings for " << tableName << "." << colName  << " (" << ctx.stringCols[colName].size() << " rows, flat=" << ctx.flatStringCols.count(colName) << ")\n");
                                 }
                             }
                         }

@@ -1,8 +1,5 @@
 --- Running (Engine Host) ---
 [Main] Using GpuExecutor generic executor.
-[GPU] Device: Apple M3 Ultra
-[GPU] Pre-compiled metallib not found, compiling shaders at runtime...
-[GPU] Runtime Metal shader compilation succeeded (125 KB source).
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
@@ -10,32 +7,31 @@ n_name|
 GERMANY|
 ---------------------------------------------------
 Planning time: 0.96 ms
-Data Load Time (Disk+Upload): 376.50 ms
-GPU kernels time: 3.90 ms
-CPU postprocess time: 8.81 ms
-Total Internal Pipeline time: 389.21 ms
-Total Host Execution time: 389.24 ms
-Total Wall time (Plan+Exec): 390.19 ms
+Data Load Time (Disk+Upload): 348.72 ms
+GPU kernels time: 3.94 ms
+CPU postprocess time: 5.55 ms
+Total Internal Pipeline time: 358.21 ms
+Total Host Execution time: 358.24 ms
+Total Wall time (Plan+Exec): 359.20 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.006 ms (0.154%) [1 calls]
-  filter         :    0.758 ms (19.420%) [1 calls]
-  groupby        :    1.558 ms (39.917%) [3 calls]
-  hash_join_probe_u32:    1.581 ms (40.509%) [2 calls]
+  cast           :    0.007 ms (0.182%) [1 calls]
+  filter         :    1.028 ms (26.088%) [1 calls]
+  groupby        :    1.279 ms (32.473%) [2 calls]
+  hash_join_probe_u32:    1.625 ms (41.257%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 3.902 ms
-  Kernel invocations: 7
+  TOTAL GPU TIME: 3.939 ms
+  Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.758             25          0.033
-hash_join_probe_write_multi          0.241          10000         41.451
-hash_join_probe_write_multi          1.339         800000        597.257
-ops::cast_u32_to_f32                 0.006          31680       5280.000
-ops::groupby_agg_multi_key_ty        1.119          31680         28.313
-ops::ht_mark_valid                   0.232          65536        282.280
-ops::ht_extract_compact              0.206              1          0.005
+ops::filter_string_eq                1.028             25          0.024
+hash_join_probe_write_multi          0.186          10000         53.872
+hash_join_probe_write_multi          1.440         800000        555.716
+ops::cast_u32_to_f32                 0.007          31680       4420.876
+ops::groupby_agg_multi_key_ty        1.059          31680         29.909
+ops::ht_extract_compact              0.220              1          0.005
 ─────────────────────────────────────────────────────────────────
-TOTAL: 3.902 ms
+TOTAL: 3.939 ms

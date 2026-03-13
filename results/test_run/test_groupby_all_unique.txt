@@ -1,0 +1,61 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+n_nationkey|cnt|n_name|
+0|1.00|ALGERIA|
+1|1.00|ARGENTINA|
+2|1.00|BRAZIL|
+3|1.00|CANADA|
+4|1.00|EGYPT|
+5|1.00|ETHIOPIA|
+6|1.00|FRANCE|
+7|1.00|GERMANY|
+8|1.00|INDIA|
+9|1.00|INDONESIA|
+10|1.00|IRAN|
+11|1.00|IRAQ|
+12|1.00|JAPAN|
+13|1.00|JORDAN|
+14|1.00|KENYA|
+15|1.00|MOROCCO|
+16|1.00|MOZAMBIQUE|
+17|1.00|PERU|
+18|1.00|CHINA|
+19|1.00|ROMANIA|
+20|1.00|SAUDI ARABIA|
+21|1.00|VIETNAM|
+22|1.00|RUSSIA|
+23|1.00|UNITED KINGDOM|
+24|1.00|UNITED STATES|
+---------------------------------------------------
+Planning time: 0.56 ms
+Data Load Time (Disk+Upload): 22.13 ms
+GPU kernels time: 1.03 ms
+CPU postprocess time: 2.52 ms
+Total Internal Pipeline time: 25.67 ms
+Total Host Execution time: 25.69 ms
+Total Wall time (Plan+Exec): 26.25 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  cast           :    0.172 ms (16.778%) [1 calls]
+  gather         :    0.180 ms (17.529%) [1 calls]
+  groupby        :    0.417 ms (40.600%) [2 calls]
+  sort           :    0.258 ms (25.093%) [2 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 1.026 ms
+  Kernel invocations: 6
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+ops::groupby_agg_multi_key_ty        0.243             25          0.103
+ops::ht_extract_compact              0.173             25          0.144
+ops::cast_u32_to_f32                 0.172             25          0.145
+block_sort_kv_u64                    0.000             25          0.000
+orderby_gpu_gather                   0.258             50          0.194
+ops::gather_col_u32                  0.180             25          0.139
+─────────────────────────────────────────────────────────────────
+TOTAL: 1.026 ms

@@ -2,8 +2,10 @@
 #include "GpuExecutorDetail.hpp"
 #include "Operators.hpp"
 #include "TypedExpr.hpp"
+#include "EnvUtil.hpp"
 
 #include <iostream>
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -15,7 +17,7 @@ uint32_t deduplicateContext(EvalContext& ctx,
 bool GpuExecutor::executeDistinct(const IRDistinct& distinct, EvalContext& ctx) {
     if (ctx.rowCount <= 1) return true;
 
-    bool debug = (std::getenv("GPUDB_DEBUG") != nullptr);
+    bool debug = env_truthy("GPUDB_DEBUG_OPS");
 
     // Collect all column names to deduplicate on.
     // If IRDistinct has explicit expressions, use those column references.
@@ -46,22 +48,22 @@ bool GpuExecutor::executeDistinct(const IRDistinct& distinct, EvalContext& ctx) 
 
     if (dedupCols.empty()) {
         if (debug) {
-            std::cerr << "[Exec] Distinct: no columns to deduplicate, skipping\n";
+            LOG_INFO("Exec", "Distinct: no columns to deduplicate, skipping\n");
         }
         return true;
     }
 
     if (debug) {
-        std::cerr << "[Exec] Distinct: dedup on " << dedupCols.size() << " cols:";
+        LOG_INFO("Exec", "Distinct: dedup on " << dedupCols.size() << " cols:");
         for (const auto& c : dedupCols) std::cerr << " " << c;
-        std::cerr << "\n";
+        LOG_INFO("DISTINCT", "\n");
     }
 
     uint32_t newCount = deduplicateContext(ctx, dedupCols, debug);
     if (newCount == 0) {
         // No duplicates found — all rows already unique
         if (debug) {
-            std::cerr << "[Exec] Distinct: all " << ctx.rowCount << " rows already unique\n";
+            LOG_INFO("Exec", "Distinct: all " << ctx.rowCount << " rows already unique\n");
         }
     }
 

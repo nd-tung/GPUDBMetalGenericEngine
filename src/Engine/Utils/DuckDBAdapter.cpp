@@ -3,11 +3,55 @@
 
 // DuckDB C++ API – linked via -lduckdb
 #include <duckdb.hpp>
+#include <duckdb/main/database.hpp>
 
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
+#include "Logger.hpp"
+
+// ── DuckDB version contract ────────────────────────────────────────────
+// Tested with DuckDB 1.x (Homebrew). The EXPLAIN JSON format and plan
+// node names are not part of a stable API, so upgrading DuckDB may break
+// the planner or require updating workarounds. A runtime check below
+// logs a warning when the linked library version differs from the last
+// validated version.
+//
+// Key DuckDB plan-level workarounds maintained by this engine:
+//
+// 1. Truncated IN-list:  DuckDB EXPLAIN JSON truncates long IN-value
+//    lists to "IN (...)".  Evaluator.cpp silently treats this as a
+//    pass-through filter.  (Evaluator.cpp ~L1764)
+//
+// 2. Scalar-subquery CASE wrapper:  DuckDB wraps scalar subquery results
+//    in CASE WHEN count>1 THEN error(...) ELSE first(val) END.  The
+//    engine strips the error() guard and FIRST() aggregate.
+//    (Evaluator.cpp ~L1345, ~L1452; GpuExecutor.cpp ~L1469;
+//     PlannerNodeHandlers.cpp ~L669)
+//
+// 3. DELIM_SCAN / COLUMN_DATA_SCAN:  DuckDB decorrelates subqueries
+//    via these nodes.  The planner recognises them and the executor
+//    deduplicates correlation keys.  (PlannerTraversal.cpp ~L210;
+//    PlannerNodeHandlers.cpp ~L35; GpuExecutor.cpp ~L286)
+//
+// 4. IS NOT DISTINCT FROM:  DuckDB uses NULL-safe equality in
+//    DELIM_SCAN correlation conditions; treated as regular '='.
+//    (PlannerExprParser.cpp ~L539)
+//
+// 5. __internal_compress / decompress:  DuckDB's storage optimizer wraps
+//    columns in internal functions in EXPLAIN output; stripped to get the
+//    real column name.  (PlannerTraversal.cpp ~L97; DetailHelpers.hpp
+//    ~L113; Project.cpp ~L1352)
+//
+// 6. disabled_optimizers='deliminator':  Forces DuckDB to emit
+//    DELIM_SCAN / COLUMN_DATA_SCAN nodes instead of optimizing them away.
+//    (DuckDBAdapter.cpp, this file)
+// ────────────────────────────────────────────────────────────────────────
+
+// Last validated DuckDB library version.  Update after verifying all
+// 47 tests pass on the new version.
+static constexpr const char* kExpectedDuckDBVersion = "v1.4.4";
 
 namespace engine {
 
@@ -130,14 +174,22 @@ void DuckDBAdapter::ensureReady() {
 
             auto res = s_con->Query(sql.str());
             if (res->HasError()) {
-                std::cerr << "[DuckDBAdapter] view creation error for "
-                          << d.name << ": " << res->GetError() << "\n";
+                LOG_ERROR("DuckDBAdapter", "view creation error for " << d.name << ": " << res->GetError());
             }
         }
     }
 
     // Disable deliminator optimizer to match the planner's expectations
     s_con->Query("PRAGMA disabled_optimizers='deliminator'");
+
+    // Runtime version check — warn if DuckDB library differs from the
+    // last validated version so developers know to re-verify workarounds.
+    const char* linkedVer = duckdb::DuckDB::LibraryVersion();
+    if (linkedVer && std::string(linkedVer) != kExpectedDuckDBVersion) {
+        LOG_WARN("DuckDB", "Linked DuckDB " << linkedVer
+                 << " differs from validated " << kExpectedDuckDBVersion
+                 << ". Plan workarounds may need updating.");
+    }
 
     s_ready = true;
 }
@@ -149,18 +201,18 @@ std::string DuckDBAdapter::explainJSON(const std::string& sql) {
     const std::string stmt = "EXPLAIN (FORMAT JSON) " + cleaned;
 
     if (env_truthy("GPUDB_DEBUG_DUCKDB_CMD")) {
-        std::cerr << "[DuckDBAdapter] embedded query: " << stmt << "\n";
+        LOG_INFO("DuckDBAdapter", "embedded query: " << stmt);
     }
 
     auto result = s_con->Query(stmt);
     if (result->HasError()) {
-        std::cerr << "[DuckDBAdapter] EXPLAIN error: " << result->GetError() << "\n";
+        LOG_ERROR("DuckDBAdapter", "EXPLAIN error: " << result->GetError());
         return {};
     }
 
     // The result is a single-column, single-row table containing the JSON string.
     if (result->RowCount() == 0 || result->ColumnCount() == 0) {
-        std::cerr << "[DuckDBAdapter] EXPLAIN returned empty result\n";
+        LOG_INFO("DuckDBAdapter", "EXPLAIN returned empty result\n");
         return {};
     }
 

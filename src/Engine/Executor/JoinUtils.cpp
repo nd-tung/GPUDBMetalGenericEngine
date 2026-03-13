@@ -2,6 +2,7 @@
 // JoinUtils.cpp — Small utility functions shared across join files
 // ============================================================================
 #include "JoinInternal.hpp"
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -14,17 +15,17 @@ MTL::Buffer* ensureColumnOnGPU(EvalContext& ctx, const std::string& col, bool de
         MTL::Buffer* existing = ctx.u32ColsGPU.at(col);
         if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 &&
             existing->length() / sizeof(uint32_t) > expectedSize) {
-            if (debug) std::cerr << "[Exec] ensureGPU: compacting GPU buf " << col << " from " << (existing->length()/sizeof(uint32_t)) << " to " << expectedSize << "\n";
+            LOG_DEBUG("Exec", "ensureGPU: compacting GPU buf " << col << " from " << (existing->length()/sizeof(uint32_t)) << " to " << expectedSize);
             auto compactedBuf = GpuOps::gatherU32(existing, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
             if (compactedBuf) {
                 if (debug) {
-                    uint32_t* p = (uint32_t*)compactedBuf->contents();
-                    std::cerr << "[Exec] ensureGPU: compacted " << col << " first 5:";
+                    uint32_t* p = static_cast<uint32_t*>(compactedBuf->contents());
+                    LOG_INFO("Exec", "ensureGPU: compacted " << col << " first 5:");
                     for (uint32_t i = 0; i < std::min(expectedSize, 5u); i++) std::cerr << " " << p[i];
-                    if (debug) std::cerr << "\n";
+                    LOG_DEBUG("JOIN", "\n");
                 }
-                ctx.u32ColsGPU[col].reset(compactedBuf);
-                return compactedBuf;
+                ctx.u32ColsGPU[col] = std::move(compactedBuf);
+                return ctx.u32ColsGPU[col];
             }
         }
         return existing;
@@ -37,8 +38,8 @@ MTL::Buffer* ensureColumnOnGPU(EvalContext& ctx, const std::string& col, bool de
                  auto compactedBuf = GpuOps::gatherU32(fullBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
                  fullBuf->release();
                  if (compactedBuf) {
-                     ctx.u32ColsGPU[col].reset(compactedBuf);
-                     return compactedBuf;
+                     ctx.u32ColsGPU[col] = std::move(compactedBuf);
+                     return ctx.u32ColsGPU[col];
                  }
              }
          }
@@ -52,23 +53,34 @@ MTL::Buffer* ensureColumnOnGPU(EvalContext& ctx, const std::string& col, bool de
 // -- findColWithSuffix --
 // Find a column in EvalContext (u32 or f32→u32 bitwise conversion),
 // trying the base name and then _1 … _9 suffixes.
+// Helper: bitcast an f32 column to u32 on GPU when possible, else CPU memcpy.
+static void bitcastF32ToU32Col(EvalContext& ctx, const std::string& col) {
+    if (ctx.f32ColsGPU.count(col)) {
+        MTL::Buffer* gpuF32 = ctx.f32ColsGPU.at(col);
+        uint32_t n = (uint32_t)(gpuF32->length() / sizeof(float));
+        if (n > 0) {
+            ctx.u32ColsGPU[col] = GpuOps::bitcastF32ToU32(gpuF32, n);
+            ctx.u32Cols[col].clear(); // GPU authoritative
+            return;
+        }
+    }
+    const auto& fVec = ctx.f32Cols.at(col);
+    std::vector<uint32_t> uVec(fVec.size());
+    if (!fVec.empty()) std::memcpy(uVec.data(), fVec.data(), fVec.size() * sizeof(uint32_t));
+    ctx.u32Cols[col] = std::move(uVec);
+}
+
 std::string findColWithSuffix(EvalContext& ctx, const std::string& col) {
-    if (ctx.u32Cols.find(col) != ctx.u32Cols.end()) return col;
-    if (ctx.f32Cols.find(col) != ctx.f32Cols.end()) {
-        const auto& fVec = ctx.f32Cols.at(col);
-        std::vector<uint32_t> uVec(fVec.size());
-        if (!fVec.empty()) std::memcpy(uVec.data(), fVec.data(), fVec.size() * sizeof(uint32_t));
-        ctx.u32Cols[col] = std::move(uVec);
+    if (ctx.u32Cols.find(col) != ctx.u32Cols.end() || ctx.u32ColsGPU.count(col)) return col;
+    if (ctx.f32Cols.find(col) != ctx.f32Cols.end() || ctx.f32ColsGPU.count(col)) {
+        bitcastF32ToU32Col(ctx, col);
         return col;
     }
     for (int suffix = 1; suffix <= 9; ++suffix) {
         std::string suffixedCol = col + "_" + std::to_string(suffix);
-        if (ctx.u32Cols.find(suffixedCol) != ctx.u32Cols.end()) return suffixedCol;
-        if (ctx.f32Cols.find(suffixedCol) != ctx.f32Cols.end()) {
-            const auto& fVec = ctx.f32Cols.at(suffixedCol);
-            std::vector<uint32_t> uVec(fVec.size());
-            if (!fVec.empty()) std::memcpy(uVec.data(), fVec.data(), fVec.size() * sizeof(uint32_t));
-            ctx.u32Cols[suffixedCol] = std::move(uVec);
+        if (ctx.u32Cols.find(suffixedCol) != ctx.u32Cols.end() || ctx.u32ColsGPU.count(suffixedCol)) return suffixedCol;
+        if (ctx.f32Cols.find(suffixedCol) != ctx.f32Cols.end() || ctx.f32ColsGPU.count(suffixedCol)) {
+            bitcastF32ToU32Col(ctx, suffixedCol);
             return suffixedCol;
         }
     }
@@ -99,12 +111,9 @@ std::string fuzzyResolveColumn(EvalContext& ctx, const std::string& colName,
     for (int i = 0; i < 10; ++i) {
         std::string posRef = "#" + std::to_string(i);
         if (excludeCols.find(posRef) != excludeCols.end()) continue;
-        if (ctx.u32Cols.count(posRef)) return posRef;
-        if (ctx.f32Cols.count(posRef)) {
-            const auto& fVec = ctx.f32Cols.at(posRef);
-            std::vector<uint32_t> uVec(fVec.size());
-            if (!fVec.empty()) std::memcpy(uVec.data(), fVec.data(), fVec.size() * sizeof(uint32_t));
-            ctx.u32Cols[posRef] = std::move(uVec);
+        if (ctx.u32Cols.count(posRef) || ctx.u32ColsGPU.count(posRef)) return posRef;
+        if (ctx.f32Cols.count(posRef) || ctx.f32ColsGPU.count(posRef)) {
+            bitcastF32ToU32Col(ctx, posRef);
             return posRef;
         }
     }

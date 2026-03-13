@@ -29,6 +29,26 @@ struct ScanInstance {
     size_t nodeIndex;          // Index in plan.nodes
 };
 
+// GroupBy key-building output (shared between GroupBy.cpp and GroupByKeys.cpp)
+struct GroupByKeyData {
+    std::vector<std::vector<uint32_t>> keyVecs;
+    std::vector<std::string> keyNames;
+    std::vector<std::vector<std::string>> outputStringMaps;
+    std::vector<std::unordered_map<uint32_t, std::string>> hashToStringMaps;
+    std::vector<bool> keyFromF32;
+    std::vector<MTL::Buffer*> keyBufsGPU;
+};
+
+// Unwrap Cast/Alias wrappers to get the underlying expression.
+inline const TypedExpr* unwrapExpr(const TypedExpr* e) {
+    while (e) {
+        if (e->kind == TypedExpr::Kind::Cast) e = e->asCast().expr.get();
+        else if (e->kind == TypedExpr::Kind::Alias) e = e->asAlias().expr.get();
+        else break;
+    }
+    return e;
+}
+
 // Function declarations for shared helpers (implemented in respective .cpp files)
 std::map<size_t, ScanInstance> buildScanInstanceMap(const Plan& plan);
 std::unordered_map<std::string, std::set<std::string>> collectNeededColumns(const Plan& plan);

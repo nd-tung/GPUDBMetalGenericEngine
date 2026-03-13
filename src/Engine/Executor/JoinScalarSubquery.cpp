@@ -2,6 +2,7 @@
 // JoinScalarSubquery.cpp — Scalar subquery handling for join paths
 // ============================================================================
 #include "JoinInternal.hpp"
+#include "Logger.hpp"
 
 namespace engine {
 
@@ -15,9 +16,9 @@ bool handleScalarSubquerySavedPipelines(
     std::set<std::string>& joinedTables,
     GpuExecutor::ExecutionResult& result, bool debug) {
     if (debug) {
-        std::cerr << "[Exec] Join: detected scalar subquery pattern\n";
-        std::cerr << "[Exec]   Current context rows: " << currentCtx.rowCount << "\n";
-        std::cerr << "[Exec]   Saved pipelines: " << savedPipelines.size() << "\n";
+        LOG_INFO("Exec", "Join: detected scalar subquery pattern\n");
+        LOG_INFO("Exec", "Current context rows: " << currentCtx.rowCount);
+        LOG_INFO("Exec", "Saved pipelines: " << savedPipelines.size());
     }
 
     // Determine if scalar is in currentCtx or savedPipelines
@@ -34,7 +35,7 @@ bool handleScalarSubquerySavedPipelines(
             if (savedPipelines[pi].rowCount == 1 || savedPipelines[pi].isScalarResult) {
                 scalarPipelineIdx = static_cast<int>(pi);
                 if (debug && savedPipelines[pi].isScalarResult) {
-                    std::cerr << "[Exec]   Found scalar pipeline via flag (rowCount=" << savedPipelines[pi].rowCount << ")\n";
+                    LOG_INFO("Exec", "Found scalar pipeline via flag (rowCount=" << savedPipelines[pi].rowCount << ")\n");
                 }
                 break;
             }
@@ -70,7 +71,7 @@ bool handleScalarSubquerySavedPipelines(
              bool match = exact ? (name == pattern) : (name.find(pattern) != std::string::npos);
              if (match) {
                  scalarValue = values[0];
-                 if (debug) std::cerr << "[Exec]   Scalar value from f32 col '" << name << "': " << scalarValue << "\n";
+                 LOG_DEBUG("Exec", "Scalar value from f32 col '" << name << "': " << scalarValue);
                  return true;
              }
          }
@@ -80,7 +81,7 @@ bool handleScalarSubquerySavedPipelines(
              bool match = exact ? (name == pattern) : (name.find(pattern) != std::string::npos);
              if (match) {
                  scalarValue = static_cast<double>(values[0]);
-                 if (debug) std::cerr << "[Exec]   Scalar value from u32 col '" << name << "': " << scalarValue << "\n";
+                 LOG_DEBUG("Exec", "Scalar value from u32 col '" << name << "': " << scalarValue);
                  return true;
              }
          }
@@ -124,7 +125,7 @@ bool handleScalarSubquerySavedPipelines(
         savedPipelineTables.erase(savedPipelineTables.begin() + groupedPipelineIdx);
 
         if (debug) {
-            std::cerr << "[Exec]   Restored saved pipeline with " << currentCtx.rowCount << " rows\n";
+            LOG_INFO("Exec", "Restored saved pipeline with " << currentCtx.rowCount << " rows\n");
         }
     } else {
         // Data is already currentCtx. Just remove the scalar pipeline from saved.
@@ -133,7 +134,7 @@ bool handleScalarSubquerySavedPipelines(
             savedPipelineTables.erase(savedPipelineTables.begin() + scalarPipelineIdx);
         }
         if (debug) {
-            std::cerr << "[Exec]   Using current context as data table with " << currentCtx.rowCount << " rows\n";
+            LOG_INFO("Exec", "Using current context as data table with " << currentCtx.rowCount << " rows\n");
         }
     }
 
@@ -141,13 +142,13 @@ bool handleScalarSubquerySavedPipelines(
     for(auto& [n, v] : scalarF32s) {
         if (currentCtx.f32Cols.find(n) == currentCtx.f32Cols.end() && currentCtx.f32ColsGPU.find(n) == currentCtx.f32ColsGPU.end()) {
              currentCtx.f32Cols[n] = {v}; // Size 1 vector (scalar broadcast)
-             if (debug) std::cerr << "[Exec]   Broadcasted scalar F32col: " << n << "\n";
+             LOG_DEBUG("Exec", "Broadcasted scalar F32col: " << n);
         }
     }
     for(auto& [n, v] : scalarU32s) {
         if (currentCtx.u32Cols.find(n) == currentCtx.u32Cols.end() && currentCtx.u32ColsGPU.find(n) == currentCtx.u32ColsGPU.end()) {
              currentCtx.u32Cols[n] = {v};
-             if (debug) std::cerr << "[Exec]   Broadcasted scalar U32col: " << n << "\n";
+             LOG_DEBUG("Exec", "Broadcasted scalar U32col: " << n);
         }
     }
 
@@ -214,7 +215,7 @@ bool handleScalarSubquerySavedPipelines(
     }
 
     if (debug) {
-        std::cerr << "[Exec]   Filtering: " << aggColName << " " << opStr << " " << scalarValue << "\n";
+        LOG_INFO("Exec", "Filtering: " << aggColName << " " << opStr << " " << scalarValue);
     }
 
     // Apply scalar subquery filter on GPU
@@ -259,7 +260,7 @@ bool handleScalarSubquerySavedPipelines(
     // 4. Materialize: compact all columns using activeRowsGPU
     if (currentCtx.activeRowsGPU && currentCtx.activeRowsCountGPU > 0) {
         uint32_t count = currentCtx.activeRowsCountGPU;
-        uint32_t* indices = (uint32_t*)currentCtx.activeRowsGPU->contents();
+        uint32_t* indices = static_cast<uint32_t*>(currentCtx.activeRowsGPU->contents());
 
         // Compact GPU columns
         for (auto& [name, buf] : currentCtx.u32ColsGPU) {
@@ -278,12 +279,12 @@ bool handleScalarSubquerySavedPipelines(
                 if (compacted) buf.reset(compacted);
             }
         }
-        // Compact CPU columns: sync from GPU if possible, else CPU gather
+        // Compact CPU columns: clear when GPU compacted, else CPU gather
         for (auto& [name, vec] : currentCtx.u32Cols) {
             if (vec.size() > count) {
                 if (currentCtx.u32ColsGPU.count(name) && currentCtx.u32ColsGPU[name]) {
-                    vec.resize(count);
-                    std::memcpy(vec.data(), currentCtx.u32ColsGPU[name]->contents(), count * sizeof(uint32_t));
+                    // GPU buffer already compacted — skip CPU download, lazy-fetch later
+                    vec.clear();
                 } else {
                     std::vector<uint32_t> c;
                     c.reserve(count);
@@ -296,8 +297,8 @@ bool handleScalarSubquerySavedPipelines(
         for (auto& [name, vec] : currentCtx.f32Cols) {
             if (vec.size() > count) {
                 if (currentCtx.f32ColsGPU.count(name) && currentCtx.f32ColsGPU[name]) {
-                    vec.resize(count);
-                    std::memcpy(vec.data(), currentCtx.f32ColsGPU[name]->contents(), count * sizeof(float));
+                    // GPU buffer already compacted — skip CPU download, lazy-fetch later
+                    vec.clear();
                 } else {
                     std::vector<float> c;
                     c.reserve(count);
@@ -324,43 +325,42 @@ bool handleScalarSubquerySavedPipelines(
     result.isScalarAggregate = false;
 
     if (debug) {
-        std::cerr << "[Exec]   After scalar filter: " << currentCtx.rowCount << " rows\n";
+        LOG_INFO("Exec", "After scalar filter: " << currentCtx.rowCount << " rows\n");
     }
 
     // Don't do the normal join - we've handled this specially
     return true;
-    return false;
 }
 
 // ── Extract a scalar float value from a single-row context ──
 // Priority order: AVG → SUM → #0 → any non-COUNT f32 column.
-static std::pair<double, bool> extractScalarValue(const EvalContext& ctx, bool debug) {
+static std::pair<double, bool> extractScalarValue(const EvalContext& ctx, bool /*debug*/) {
     // Priority 1: AVG
     auto avgIt = ctx.f32Cols.find("AVG");
     if (avgIt != ctx.f32Cols.end() && !avgIt->second.empty()) {
-        if (debug) std::cerr << "[Exec]   Scalar value from 'AVG': " << avgIt->second[0] << "\n";
+        LOG_DEBUG("Exec", "Scalar value from 'AVG': " << avgIt->second[0]);
         return {avgIt->second[0], true};
     }
     // Priority 2: SUM
     auto sumIt = ctx.f32Cols.find("SUM");
     if (sumIt != ctx.f32Cols.end() && !sumIt->second.empty()) {
-        if (debug) std::cerr << "[Exec]   Scalar value from 'SUM': " << sumIt->second[0] << "\n";
+        LOG_DEBUG("Exec", "Scalar value from 'SUM': " << sumIt->second[0]);
         return {sumIt->second[0], true};
     }
     // Priority 3: #0
     auto numIt = ctx.f32Cols.find("#0");
     if (numIt != ctx.f32Cols.end() && !numIt->second.empty()) {
-        if (debug) std::cerr << "[Exec]   Scalar value from '#0': " << numIt->second[0] << "\n";
+        LOG_DEBUG("Exec", "Scalar value from '#0': " << numIt->second[0]);
         return {numIt->second[0], true};
     }
     // Fallback: any f32 column except COUNT
     for (const auto& [name, values] : ctx.f32Cols) {
         if (!values.empty() && name.find("COUNT") == std::string::npos) {
-            if (debug) std::cerr << "[Exec]   Scalar value fallback from '" << name << "': " << values[0] << "\n";
+            LOG_DEBUG("Exec", "Scalar value fallback from '" << name << "': " << values[0]);
             return {values[0], true};
         }
     }
-    if (debug) std::cerr << "[Exec]   Could not find scalar value\n";
+    LOG_DEBUG("Exec", "Could not find scalar value\n");
     return {0.0, false};
 }
 
@@ -392,15 +392,15 @@ bool handleScalarSubqueryTableContexts(
 
     if (isTheta && currentCtx.rowCount <= 1) {
         if (debug) {
-            std::cerr << "[Exec] Join: scalar SUBQUERY theta-join (tableContexts path)\n";
-            std::cerr << "[Exec]   Current context rows: " << currentCtx.rowCount << "\n";
+            LOG_INFO("Exec", "Join: scalar SUBQUERY theta-join (tableContexts path)\n");
+            LOG_INFO("Exec", "Current context rows: " << currentCtx.rowCount);
         }
 
         // Extract scalar value from currentCtx
         auto [scalarValue, foundScalar] = extractScalarValue(currentCtx, debug);
 
         if (!foundScalar) {
-            if (debug) std::cerr << "[Exec]   Could not find scalar value\n";
+            LOG_DEBUG("Exec", "Could not find scalar value\n");
             result.error = "Scalar SUBQUERY join: could not extract scalar value";
             return false;
         }
@@ -427,7 +427,7 @@ bool handleScalarSubqueryTableContexts(
         }
 
         if (debug) {
-            std::cerr << "[Exec]   Filter column: " << filterCol << "\n";
+            LOG_INFO("Exec", "Filter column: " << filterCol);
         }
 
         // Find the table with this column in tableContexts
@@ -455,14 +455,13 @@ bool handleScalarSubqueryTableContexts(
         }
 
         if (dataTable.empty()) {
-            if (debug) std::cerr << "[Exec]   Could not find data table\n";
+            LOG_DEBUG("Exec", "Could not find data table\n");
             result.error = "Scalar SUBQUERY join: could not find data table";
             return false;
         }
 
         if (debug) {
-            std::cerr << "[Exec]   Data table: " << dataTable << " with " 
-                      << tableContexts[dataTable].rowCount << " rows\n";
+            LOG_INFO("Exec", "Data table: " << dataTable << " with "  << tableContexts[dataTable].rowCount << " rows\n");
         }
 
         // Apply the filter: col <op> scalarValue
@@ -517,16 +516,16 @@ bool handleScalarSubqueryTableContexts(
             uint32_t newCount = filterRes->count;
 
             // Download indices for CPU String sync
-            std::vector<uint32_t> passingIndices(newCount);
+            std::vector<uint32_t> cpuPassingIndices(newCount);
             if (newCount > 0) {
-                std::memcpy(passingIndices.data(), indices->contents(), newCount * sizeof(uint32_t));
+                std::memcpy(cpuPassingIndices.data(), indices->contents(), newCount * sizeof(uint32_t));
             }
 
             // Safe Gather for U32 (preserving aliases and avoiding double-free)
             std::unordered_map<MTL::Buffer*, MTL::Buffer*> u32Replacements;
             for (auto& [name, buf] : dataCtx.u32ColsGPU) {
                 if (buf && u32Replacements.find(buf) == u32Replacements.end()) {
-                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount);
+                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount).detach();
                 }
             }
             // Update map with new buffers
@@ -546,7 +545,7 @@ bool handleScalarSubqueryTableContexts(
             std::unordered_map<MTL::Buffer*, MTL::Buffer*> f32Replacements;
             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
                 if (buf && f32Replacements.find(buf.get()) == f32Replacements.end()) {
-                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount);
+                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount).detach();
                 }
             }
             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
@@ -565,8 +564,8 @@ bool handleScalarSubqueryTableContexts(
                 if (dataCtx.dictCols.count(name)) continue; // dict path below
                 if (dataCtx.flatStringCols.count(name)) continue; // flat path below
                 std::vector<std::string> compacted;
-                compacted.reserve(passingIndices.size());
-                for (uint32_t idx : passingIndices) {
+                compacted.reserve(cpuPassingIndices.size());
+                for (uint32_t idx : cpuPassingIndices) {
                     if (idx < vals.size()) compacted.push_back(vals[idx]);
                     else compacted.push_back("");
                 }
@@ -638,7 +637,7 @@ bool applyScalarSubqueryCrossJoinFilter(
                              name.find("first") != std::string::npos)) {
             scalarVal = vec[0];
             foundScalar = true;
-            if (debug) std::cerr << "[Exec] Join: SUBQUERY scalar from '" << name << "' = " << scalarVal << "\n";
+            LOG_DEBUG("Exec", "Join: SUBQUERY scalar from '" << name << "' = " << scalarVal);
             break;
         }
     }
@@ -647,7 +646,7 @@ bool applyScalarSubqueryCrossJoinFilter(
             if (!vec.empty() && name.find("count") == std::string::npos) {
                 scalarVal = vec[0];
                 foundScalar = true;
-                if (debug) std::cerr << "[Exec] Join: SUBQUERY scalar from '" << name << "' = " << scalarVal << "\n";
+                LOG_DEBUG("Exec", "Join: SUBQUERY scalar from '" << name << "' = " << scalarVal);
                 break;
             }
         }
@@ -676,8 +675,7 @@ bool applyScalarSubqueryCrossJoinFilter(
     if (filterCol.empty() || filterOp.empty()) return false;
 
     if (debug)
-        std::cerr << "[Exec] Join: SUBQUERY scalar cross-join: "
-                  << filterCol << " " << filterOp << " " << scalarVal << "\n";
+        LOG_INFO("Exec", "Join: SUBQUERY scalar cross-join: " << filterCol << " " << filterOp << " " << scalarVal);
 
     // Resolve filter column — prefer highest-suffixed version (latest scan instance)
     {
@@ -700,7 +698,7 @@ bool applyScalarSubqueryCrossJoinFilter(
         }
         if (bestMatch.empty()) return false;
         filterCol = bestMatch;
-        if (debug) std::cerr << "[Exec] Join: SUBQUERY resolved filterCol to '" << filterCol << "'\n";
+        LOG_DEBUG("Exec", "Join: SUBQUERY resolved filterCol to '" << filterCol << "'\n");
     }
 
     // Map operator string → GpuFilterOp
@@ -716,8 +714,8 @@ bool applyScalarSubqueryCrossJoinFilter(
         filterColGPU = currentCtx.f32ColsGPU[filterCol];
     } else if (!currentCtx.f32Cols[filterCol].empty()) {
         auto& vec = currentCtx.f32Cols[filterCol];
-        filterColGPU = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
-        currentCtx.f32ColsGPU[filterCol].reset(filterColGPU);
+        currentCtx.f32ColsGPU[filterCol] = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
+        filterColGPU = currentCtx.f32ColsGPU[filterCol];
     }
     if (!filterColGPU) return false;
 
@@ -727,12 +725,11 @@ bool applyScalarSubqueryCrossJoinFilter(
         gpuFilterRes = GpuOps::filterF32Indexed(filterCol, filterColGPU,
                          currentCtx.activeRowsGPU, currentCtx.activeRowsCountGPU, compOp, scalarVal);
     } else if (!currentCtx.activeRows.empty()) {
-        MTL::Buffer* arGPU = GpuOps::createBuffer(currentCtx.activeRows.data(),
+        GpuBuffer arGPU = GpuOps::createBuffer(currentCtx.activeRows.data(),
                                  currentCtx.activeRows.size() * sizeof(uint32_t));
         uint32_t arCount = (uint32_t)currentCtx.activeRows.size();
         gpuFilterRes = GpuOps::filterF32Indexed(filterCol, filterColGPU,
                          arGPU, arCount, compOp, scalarVal);
-        if (arGPU) arGPU->release();
     } else {
         uint32_t fullRowCount = (uint32_t)currentCtx.f32Cols[filterCol].size();
         if (fullRowCount == 0) fullRowCount = currentCtx.rowCount;
@@ -744,14 +741,14 @@ bool applyScalarSubqueryCrossJoinFilter(
     MTL::Buffer* keepIndicesGPU = gpuFilterRes->indices;
     uint32_t keepCount = gpuFilterRes->count;
 
-    if (debug) std::cerr << "[Exec] Join: SUBQUERY GPU scalar filter: " << keepCount << " rows after\n";
+    LOG_DEBUG("Exec", "Join: SUBQUERY GPU scalar filter: " << keepCount << " rows after\n");
 
     // GPU gather for u32/f32 columns
     for (auto& [name, buf] : currentCtx.u32ColsGPU) {
-        if (buf) { MTL::Buffer* g = GpuOps::gatherU32(buf, keepIndicesGPU, keepCount, false); buf.reset(g); }
+        if (buf) { buf = GpuOps::gatherU32(buf, keepIndicesGPU, keepCount, false); }
     }
     for (auto& [name, buf] : currentCtx.f32ColsGPU) {
-        if (buf) { MTL::Buffer* g = GpuOps::gatherF32(buf, keepIndicesGPU, keepCount, false); buf.reset(g); }
+        if (buf) { buf = GpuOps::gatherF32(buf, keepIndicesGPU, keepCount, false); }
     }
     GpuOps::sync();
 
@@ -771,11 +768,10 @@ bool applyScalarSubqueryCrossJoinFilter(
     currentCtx.compactFlatStringCols(keepIndicesGPU, keepCount);
     currentCtx.invalidateStringColsForDictFlat();
 
-    // Materialize GPU → CPU
+    // Skip CPU download when GPU buffer exists — lazy-fetch later
     for (auto& [name, vec] : currentCtx.u32Cols) {
         if (currentCtx.u32ColsGPU.count(name) && currentCtx.u32ColsGPU[name]) {
-            vec.resize(keepCount);
-            memcpy(vec.data(), currentCtx.u32ColsGPU[name]->contents(), keepCount * sizeof(uint32_t));
+            vec.clear();
         } else if (!vec.empty()) {
             std::vector<uint32_t> compact(keepCount);
             for (uint32_t i = 0; i < keepCount; ++i) compact[i] = vec[keepIdx[i]];
@@ -784,8 +780,7 @@ bool applyScalarSubqueryCrossJoinFilter(
     }
     for (auto& [name, vec] : currentCtx.f32Cols) {
         if (currentCtx.f32ColsGPU.count(name) && currentCtx.f32ColsGPU[name]) {
-            vec.resize(keepCount);
-            memcpy(vec.data(), currentCtx.f32ColsGPU[name]->contents(), keepCount * sizeof(float));
+            vec.clear();
         } else if (!vec.empty()) {
             std::vector<float> compact(keepCount);
             for (uint32_t i = 0; i < keepCount; ++i) compact[i] = vec[keepIdx[i]];
