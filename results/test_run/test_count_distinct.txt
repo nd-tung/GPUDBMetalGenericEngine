@@ -5,25 +5,25 @@
 ---------------------------------------------------
 Scalar count_star(): 25.00
 ---------------------------------------------------
-Planning time: 0.43 ms
-Data Load Time (Disk+Upload): 93.92 ms
-GPU kernels time: 1.63 ms
-CPU postprocess time: 8.18 ms
-Total Internal Pipeline time: 103.73 ms
-Total Host Execution time: 103.89 ms
-Total Wall time (Plan+Exec): 104.33 ms
+Planning time: 0.44 ms
+Data Load Time (Disk+Upload): 93.64 ms
+GPU kernels time: 1.62 ms
+CPU postprocess time: 7.46 ms
+Total Internal Pipeline time: 102.73 ms
+Total Host Execution time: 102.89 ms
+Total Wall time (Plan+Exec): 103.34 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  groupby        :    1.629 ms (100.000%) [2 calls]
+  groupby        :    1.623 ms (100.000%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1.629 ms
+  TOTAL GPU TIME: 1.623 ms
   Kernel invocations: 2
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty        1.324         200000        151.100
-ops::ht_extract_compact              0.305             25          0.082
+ops::groupby_agg_multi_key_ty        1.320         200000        151.486
+ops::ht_extract_compact              0.302             25          0.083
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1.629 ms
+TOTAL: 1.623 ms

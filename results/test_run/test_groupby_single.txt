@@ -4,34 +4,34 @@
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|cnt|total_qty|
-N|3043852.00|77626160.00|
-A|1478493.00|37733768.00|
-R|1478870.00|37719584.00|
+N|3043852.00|77625440.00|
+A|1478493.00|37733456.00|
+R|1478870.00|37719668.00|
 ---------------------------------------------------
-Planning time: 0.51 ms
-Data Load Time (Disk+Upload): 2130.28 ms
-GPU kernels time: 181.60 ms
-CPU postprocess time: 122.86 ms
-Total Internal Pipeline time: 2434.74 ms
-Total Host Execution time: 2434.76 ms
-Total Wall time (Plan+Exec): 2435.27 ms
+Planning time: 0.52 ms
+Data Load Time (Disk+Upload): 2132.44 ms
+GPU kernels time: 137.53 ms
+CPU postprocess time: 127.36 ms
+Total Internal Pipeline time: 2397.34 ms
+Total Host Execution time: 2397.36 ms
+Total Wall time (Plan+Exec): 2397.88 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.173 ms (0.095%) [1 calls]
-  groupby        :  159.391 ms (87.768%) [2 calls]
-  sort           :   22.040 ms (12.136%) [2 calls]
+  cast           :    0.203 ms (0.148%) [1 calls]
+  groupby        :  133.264 ms (96.898%) [2 calls]
+  sort           :    4.063 ms (2.954%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 181.604 ms
+  TOTAL GPU TIME: 137.530 ms
   Kernel invocations: 5
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty      158.104        6001215         37.957
-ops::ht_extract_compact              1.287              3          0.002
-ops::cast_u32_to_f32                 0.173              3          0.017
+ops::groupby_agg_multi_key_ty      131.872        6001215         45.508
+ops::ht_extract_compact              1.392              3          0.002
+ops::cast_u32_to_f32                 0.203              3          0.015
 block_sort_kv_u64                    0.000              3          0.000
-orderby_gpu_gather                  22.040              9          0.000
+orderby_gpu_gather                   4.063              9          0.002
 ─────────────────────────────────────────────────────────────────
-TOTAL: 181.604 ms
+TOTAL: 137.530 ms

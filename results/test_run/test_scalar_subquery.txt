@@ -7,31 +7,31 @@ n_name|
 GERMANY|
 ---------------------------------------------------
 Planning time: 0.96 ms
-Data Load Time (Disk+Upload): 348.72 ms
-GPU kernels time: 3.94 ms
-CPU postprocess time: 5.55 ms
-Total Internal Pipeline time: 358.21 ms
-Total Host Execution time: 358.24 ms
-Total Wall time (Plan+Exec): 359.20 ms
+Data Load Time (Disk+Upload): 347.28 ms
+GPU kernels time: 4.15 ms
+CPU postprocess time: 5.46 ms
+Total Internal Pipeline time: 356.88 ms
+Total Host Execution time: 356.91 ms
+Total Wall time (Plan+Exec): 357.87 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.007 ms (0.182%) [1 calls]
-  filter         :    1.028 ms (26.088%) [1 calls]
-  groupby        :    1.279 ms (32.473%) [2 calls]
-  hash_join_probe_u32:    1.625 ms (41.257%) [2 calls]
+  cast           :    0.006 ms (0.142%) [1 calls]
+  filter         :    1.154 ms (27.827%) [1 calls]
+  groupby        :    1.344 ms (32.421%) [2 calls]
+  hash_join_probe_u32:    1.642 ms (39.611%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 3.939 ms
+  TOTAL GPU TIME: 4.145 ms
   Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                1.028             25          0.024
-hash_join_probe_write_multi          0.186          10000         53.872
-hash_join_probe_write_multi          1.440         800000        555.716
-ops::cast_u32_to_f32                 0.007          31680       4420.876
-ops::groupby_agg_multi_key_ty        1.059          31680         29.909
-ops::ht_extract_compact              0.220              1          0.005
+ops::filter_string_eq                1.154             25          0.022
+hash_join_probe_write_multi          0.219          10000         45.697
+hash_join_probe_write_multi          1.423         800000        562.110
+ops::cast_u32_to_f32                 0.006          31680       5392.340
+ops::groupby_agg_multi_key_ty        1.126          31680         28.131
+ops::ht_extract_compact              0.218              1          0.005
 ─────────────────────────────────────────────────────────────────
-TOTAL: 3.939 ms
+TOTAL: 4.145 ms

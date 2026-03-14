@@ -567,7 +567,8 @@ static void processGroupByHTResults(
                 if (aggGPU) {
                     GpuBuffer f32Buf = GpuOps::castU32ToF32(aggGPU, rc);
                     if (f32Buf) {
-                        std::memcpy(out.f32Cols[a].data(), f32Buf->contents(), rc * sizeof(float));
+                        // Skip CPU memcpy — GPU buffer is authoritative; lazy-fetch at output.
+                        out.f32Cols[a].clear();
                         out.f32ColsGPU[a] = std::move(f32Buf);
                         extractResult->aggColsGPU[a] = nullptr;
                     }
@@ -584,7 +585,8 @@ static void processGroupByHTResults(
                     if (countF32) {
                         GpuBuffer avgBuf = GpuOps::arithDivF32ColCol(aggGPU, countF32, rc);
                         if (avgBuf) {
-                            std::memcpy(out.f32Cols[a].data(), avgBuf->contents(), rc * sizeof(float));
+                            // Skip CPU memcpy — GPU buffer is authoritative; lazy-fetch at output.
+                            out.f32Cols[a].clear();
                             out.f32ColsGPU[a] = std::move(avgBuf);
                         }
                     }
@@ -601,7 +603,8 @@ static void processGroupByHTResults(
                 avgCount++;
             } else if (aggFuncs[a] == AggFunc::Count) {
                 if (aggGPU) {
-                    std::memcpy(out.f32Cols[a].data(), aggGPU->contents(), rc * sizeof(float));
+                    // Skip CPU memcpy — GPU buffer is authoritative; lazy-fetch at output.
+                    out.f32Cols[a].clear();
                     out.f32ColsGPU[a] = std::move(extractResult->aggColsGPU[a]);
                 } else {
                     const auto& rawWords = extractResult->aggWords[a];
@@ -613,7 +616,8 @@ static void processGroupByHTResults(
             } else {
                 // SUM/MIN/MAX: raw bits are f32
                 if (aggGPU) {
-                    std::memcpy(out.f32Cols[a].data(), aggGPU->contents(), rc * sizeof(float));
+                    // Skip CPU memcpy — GPU buffer is authoritative; lazy-fetch at output.
+                    out.f32Cols[a].clear();
                     out.f32ColsGPU[a] = std::move(extractResult->aggColsGPU[a]);
                 } else {
                     const auto& rawWords = extractResult->aggWords[a];

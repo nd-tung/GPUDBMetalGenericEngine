@@ -5,13 +5,13 @@
 ---------------------------------------------------
 Scalar max(p_size): 36893488147419103232.00
 ---------------------------------------------------
-Planning time: 0.56 ms
-Data Load Time (Disk+Upload): 88.05 ms
+Planning time: 0.51 ms
+Data Load Time (Disk+Upload): 85.66 ms
 GPU kernels time: 0.01 ms
-CPU postprocess time: 22.13 ms
-Total Internal Pipeline time: 110.19 ms
-Total Host Execution time: 110.21 ms
-Total Wall time (Plan+Exec): 110.77 ms
+CPU postprocess time: 19.98 ms
+Total Internal Pipeline time: 105.65 ms
+Total Host Execution time: 105.67 ms
+Total Wall time (Plan+Exec): 106.18 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
@@ -23,6 +23,6 @@ Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::cast_u32_to_f32                 0.008         200000      24872.528
+ops::cast_u32_to_f32                 0.008         200000      24869.435
 ─────────────────────────────────────────────────────────────────
 TOTAL: 0.008 ms

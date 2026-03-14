@@ -25,39 +25,39 @@ ps_supplycost|p_name|s_name|
 1.87|lawn powder cornflower linen peru|Supplier#000001496|
 1.95|cream moccasin navajo purple indian|Supplier#000002954|
 ---------------------------------------------------
-Planning time: 0.78 ms
-Data Load Time (Disk+Upload): 480.66 ms
-GPU kernels time: 7.20 ms
-CPU postprocess time: 66.39 ms
-Total Internal Pipeline time: 554.25 ms
-Total Host Execution time: 570.47 ms
-Total Wall time (Plan+Exec): 571.25 ms
+Planning time: 0.77 ms
+Data Load Time (Disk+Upload): 479.53 ms
+GPU kernels time: 6.96 ms
+CPU postprocess time: 66.65 ms
+Total Internal Pipeline time: 553.13 ms
+Total Host Execution time: 569.46 ms
+Total Wall time (Plan+Exec): 570.24 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    3.530 ms (49.040%) [2 calls]
-  gather         :    2.766 ms (38.420%) [7 calls]
-  hash_join_probe_u32:    0.417 ms (5.796%) [2 calls]
-  sort           :    0.485 ms (6.744%) [2 calls]
+  filter         :    4.052 ms (58.206%) [2 calls]
+  gather         :    2.183 ms (31.365%) [7 calls]
+  hash_join_probe_u32:    0.428 ms (6.149%) [2 calls]
+  sort           :    0.298 ms (4.281%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 7.199 ms
+  TOTAL GPU TIME: 6.961 ms
   Kernel invocations: 13
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_eq_u32                   1.280         200000        156.260
-ops::filter_lt_f32                   2.250         800000        355.509
-hash_join_probe_write_multi          0.189           7132         37.769
-hash_join_probe_write_multi          0.228          10000         43.780
+ops::filter_eq_u32                   2.014         200000         99.311
+ops::filter_lt_f32                   2.038         800000        392.606
+hash_join_probe_write_multi          0.194           7132         36.803
+hash_join_probe_write_multi          0.234          10000         42.697
 block_sort_kv_u64                    0.000            155          0.000
-orderby_gpu_gather                   0.485            775          1.596
-ops::gather_col_u32                  0.831            155          0.186
-ops::gather_col_u32                  0.808            155          0.192
-ops::gather_col_u32                  0.257             20          0.078
+orderby_gpu_gather                   0.298            775          2.601
+ops::gather_col_u32                  0.222            155          0.700
+ops::gather_col_u32                  0.896            155          0.173
+ops::gather_col_u32                  0.223             20          0.090
+ops::gather_col_u32                  0.208             20          0.096
 ops::gather_col_u32                  0.218             20          0.092
-ops::gather_col_u32                  0.218             20          0.092
-ops::gather_col_u32                  0.218             20          0.092
-ops::gather_col_f32                  0.216             20          0.093
+ops::gather_col_u32                  0.209             20          0.096
+ops::gather_col_f32                  0.207             20          0.096
 ─────────────────────────────────────────────────────────────────
-TOTAL: 7.199 ms
+TOTAL: 6.961 ms

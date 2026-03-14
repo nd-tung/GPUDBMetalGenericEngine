@@ -35,6 +35,10 @@ struct TableResult {
     // Column names that store single-char strings (should be decoded as char on output)
     std::unordered_set<std::string> singleCharCols;
 
+    // Column names whose u32 values are dictionary IDs (not FNV1a hashes).
+    // Used by recoverStringColumns() to choose O(1) dict lookup vs hash reverse-map.
+    std::unordered_set<std::string> dictIdCols;
+
     std::size_t rowCount = 0;
 
     // GPU buffer mirrors (RAII — auto-retains on copy, auto-releases on destroy).

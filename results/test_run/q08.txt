@@ -7,45 +7,45 @@ o_year|mkt_share|
 1995|0.03|
 1996|0.04|
 ---------------------------------------------------
-Planning time: 2.48 ms
-Data Load Time (Disk+Upload): 3139.13 ms
-GPU kernels time: 10.82 ms
-CPU postprocess time: 21.51 ms
-Total Internal Pipeline time: 3171.46 ms
-Total Host Execution time: 3173.19 ms
-Total Wall time (Plan+Exec): 3175.67 ms
+Planning time: 2.47 ms
+Data Load Time (Disk+Upload): 3168.93 ms
+GPU kernels time: 11.36 ms
+CPU postprocess time: 23.03 ms
+Total Internal Pipeline time: 3203.32 ms
+Total Host Execution time: 3205.06 ms
+Total Wall time (Plan+Exec): 3207.53 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    4.509 ms (41.663%) [6 calls]
-  gather         :    0.168 ms (1.549%) [1 calls]
-  groupby        :    0.406 ms (3.748%) [2 calls]
-  hash_join_probe_u32:    5.551 ms (51.287%) [7 calls]
-  sort           :    0.190 ms (1.753%) [2 calls]
+  filter         :    4.697 ms (41.335%) [6 calls]
+  gather         :    0.196 ms (1.725%) [1 calls]
+  groupby        :    0.550 ms (4.840%) [2 calls]
+  hash_join_probe_u32:    5.723 ms (50.370%) [7 calls]
+  sort           :    0.197 ms (1.730%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 10.823 ms
+  TOTAL GPU TIME: 11.362 ms
   Kernel invocations: 18
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                0.903              5          0.006
-hash_join_probe_write_multi          0.216             25          0.115
-ops::filter_string_eq                0.626         200000        319.531
-hash_join_probe_write_multi          4.225        6001215       1420.364
-ops::filter_ge_u32                   1.141        1500000       1314.108
-ops::filter_le_u32_indexed           0.815         818669       1003.988
-hash_join_probe_write_multi          0.319         457263       1431.367
-ops::filter_le_u32                   0.572         150000        262.104
-hash_join_probe_write_multi          0.254         149999        590.743
-hash_join_probe_write_multi          0.179          13389         74.921
-hash_join_probe_write_multi          0.173          10000         57.790
-hash_join_probe_write_multi          0.184           2603         14.156
-ops::filter_string_eq                0.451           2603          5.773
-ops::gather_col_f32                  0.168            107          0.638
-ops::groupby_agg_multi_key_ty        0.235           2603         11.061
-ops::ht_extract_compact              0.170              2          0.012
+ops::filter_string_eq                0.983              5          0.005
+hash_join_probe_write_multi          0.246             25          0.102
+ops::filter_string_eq                0.647         200000        309.199
+hash_join_probe_write_multi          4.221        6001215       1421.920
+ops::filter_ge_u32                   1.126        1500000       1332.001
+ops::filter_le_u32_indexed           0.833         818669        982.746
+hash_join_probe_write_multi          0.388         457263       1179.148
+ops::filter_le_u32                   0.608         150000        246.795
+hash_join_probe_write_multi          0.248         149999        605.345
+hash_join_probe_write_multi          0.223          13389         60.164
+hash_join_probe_write_multi          0.187          10000         53.559
+hash_join_probe_write_multi          0.212           2603         12.266
+ops::filter_string_eq                0.499           2603          5.213
+ops::gather_col_f32                  0.196            107          0.546
+ops::groupby_agg_multi_key_ty        0.340           2603          7.667
+ops::ht_extract_compact              0.210              2          0.010
 block_sort_kv_u64                    0.000              2          0.000
-orderby_gpu_gather                   0.190              4          0.021
+orderby_gpu_gather                   0.197              4          0.020
 ─────────────────────────────────────────────────────────────────
-TOTAL: 10.823 ms
+TOTAL: 11.362 ms

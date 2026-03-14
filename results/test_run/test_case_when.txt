@@ -5,32 +5,32 @@
 ---------------------------------------------------
 Scalar promo_pct: 16.68
 ---------------------------------------------------
-Planning time: 1.26 ms
-Data Load Time (Disk+Upload): 2657.07 ms
-GPU kernels time: 5.50 ms
-CPU postprocess time: 43.09 ms
-Total Internal Pipeline time: 2705.66 ms
-Total Host Execution time: 2707.97 ms
-Total Wall time (Plan+Exec): 2709.23 ms
+Planning time: 1.23 ms
+Data Load Time (Disk+Upload): 2654.16 ms
+GPU kernels time: 5.95 ms
+CPU postprocess time: 51.17 ms
+Total Internal Pipeline time: 2711.28 ms
+Total Host Execution time: 2713.61 ms
+Total Wall time (Plan+Exec): 2714.84 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    4.391 ms (79.810%) [2 calls]
-  gather         :    0.853 ms (15.506%) [4 calls]
-  hash_join_probe_u32:    0.258 ms (4.683%) [1 calls]
+  filter         :    4.644 ms (78.076%) [2 calls]
+  gather         :    1.021 ms (17.169%) [4 calls]
+  hash_join_probe_u32:    0.283 ms (4.755%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 5.502 ms
+  TOTAL GPU TIME: 5.948 ms
   Kernel invocations: 7
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                   3.293        6001215       1822.508
-ops::filter_lt_u32_indexed           1.098        2511724       2286.851
-hash_join_probe_write_multi          0.258         225954        876.926
-ops::gather_col_f32                  0.230          37760        163.966
-ops::gather_col_f32                  0.197          37760        192.163
-ops::gather_col_f32                  0.222          37760        170.090
-ops::gather_col_f32                  0.204          37760        184.758
+ops::filter_ge_u32                   3.293        6001215       1822.554
+ops::filter_lt_u32_indexed           1.351        2511724       1858.815
+hash_join_probe_write_multi          0.283         225954        798.893
+ops::gather_col_f32                  0.259          37760        145.627
+ops::gather_col_f32                  0.239          37760        157.881
+ops::gather_col_f32                  0.242          37760        156.329
+ops::gather_col_f32                  0.281          37760        134.258
 ─────────────────────────────────────────────────────────────────
-TOTAL: 5.502 ms
+TOTAL: 5.948 ms

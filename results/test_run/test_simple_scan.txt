@@ -30,30 +30,30 @@ UNITED KINGDOM|
 UNITED STATES|
 VIETNAM|
 ---------------------------------------------------
-Planning time: 0.61 ms
-Data Load Time (Disk+Upload): 23.18 ms
-GPU kernels time: 3.30 ms
-CPU postprocess time: 5.41 ms
-Total Internal Pipeline time: 31.88 ms
-Total Host Execution time: 31.91 ms
-Total Wall time (Plan+Exec): 32.51 ms
+Planning time: 0.59 ms
+Data Load Time (Disk+Upload): 22.68 ms
+GPU kernels time: 2.67 ms
+CPU postprocess time: 5.51 ms
+Total Internal Pipeline time: 30.86 ms
+Total Host Execution time: 30.88 ms
+Total Wall time (Plan+Exec): 31.47 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  gather         :    1.610 ms (48.866%) [2 calls]
-  hash_join_probe_u32:    0.793 ms (24.058%) [1 calls]
-  sort           :    0.892 ms (27.076%) [2 calls]
+  gather         :    1.140 ms (42.725%) [2 calls]
+  hash_join_probe_u32:    0.744 ms (27.912%) [1 calls]
+  sort           :    0.783 ms (29.363%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 3.295 ms
+  TOTAL GPU TIME: 2.667 ms
   Kernel invocations: 5
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi          0.793             25          0.032
+hash_join_probe_write_multi          0.744             25          0.034
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.892             50          0.056
-ops::gather_col_u32                  0.762             25          0.033
-ops::gather_col_u32                  0.848             25          0.029
+orderby_gpu_gather                   0.783             50          0.064
+ops::gather_col_u32                  0.906             25          0.028
+ops::gather_col_u32                  0.234             25          0.107
 ─────────────────────────────────────────────────────────────────
-TOTAL: 3.295 ms
+TOTAL: 2.667 ms

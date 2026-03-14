@@ -239,9 +239,8 @@ std::optional<GroupByExtractResult> GpuOps::extractGroupByHT(
             keyPtr + k * totalCount, totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     }
     for (uint32_t a = 0; a < numAggsTotal; ++a) {
-        result.aggWords[a].resize(totalCount);
-        std::memcpy(result.aggWords[a].data(), aggPtr + a * totalCount, totalCount * sizeof(uint32_t));
-        // Create per-column GPU buffer from SoA slice
+        // Skip CPU memcpy — GPU buffer is authoritative; lazy-fetch at output if needed.
+        // CPU vector stays empty; processGroupByHTResults uses aggColsGPU exclusively.
         result.aggColsGPU[a].reset(store.device()->newBuffer(
             aggPtr + a * totalCount, totalCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
     }

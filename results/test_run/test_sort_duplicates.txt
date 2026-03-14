@@ -31,26 +31,26 @@ n_regionkey|n_name|
 4|EGYPT|
 ---------------------------------------------------
 Planning time: 0.40 ms
-Data Load Time (Disk+Upload): 22.21 ms
-GPU kernels time: 0.45 ms
-CPU postprocess time: 2.05 ms
-Total Internal Pipeline time: 24.71 ms
-Total Host Execution time: 24.73 ms
-Total Wall time (Plan+Exec): 25.12 ms
+Data Load Time (Disk+Upload): 21.59 ms
+GPU kernels time: 1.10 ms
+CPU postprocess time: 2.89 ms
+Total Internal Pipeline time: 25.58 ms
+Total Host Execution time: 25.60 ms
+Total Wall time (Plan+Exec): 26.00 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  gather         :    0.205 ms (45.360%) [1 calls]
-  sort           :    0.247 ms (54.640%) [2 calls]
+  gather         :    0.208 ms (18.899%) [1 calls]
+  sort           :    0.891 ms (81.101%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 0.451 ms
+  TOTAL GPU TIME: 1.098 ms
   Kernel invocations: 3
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.247             25          0.101
-ops::gather_col_u32                  0.205             25          0.122
+orderby_gpu_gather                   0.891             25          0.028
+ops::gather_col_u32                  0.208             25          0.120
 ─────────────────────────────────────────────────────────────────
-TOTAL: 0.451 ms
+TOTAL: 1.098 ms

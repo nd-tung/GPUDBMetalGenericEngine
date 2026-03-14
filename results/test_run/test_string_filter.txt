@@ -25,40 +25,40 @@ p_partkey|l_extendedprice|p_name|p_type|
 191923|100746.00|chocolate lace burnished violet beige|PROMO BURNISHED NICKEL|
 184968|100595.04|light midnight chiffon spring blue|PROMO PLATED COPPER|
 ---------------------------------------------------
-Planning time: 0.80 ms
-Data Load Time (Disk+Upload): 2536.51 ms
-GPU kernels time: 9.45 ms
-CPU postprocess time: 70.96 ms
-Total Internal Pipeline time: 2616.92 ms
-Total Host Execution time: 2631.76 ms
-Total Wall time (Plan+Exec): 2632.56 ms
+Planning time: 0.79 ms
+Data Load Time (Disk+Upload): 2547.34 ms
+GPU kernels time: 10.20 ms
+CPU postprocess time: 70.18 ms
+Total Internal Pipeline time: 2627.72 ms
+Total Host Execution time: 2642.77 ms
+Total Wall time (Plan+Exec): 2643.56 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    6.292 ms (66.603%) [4 calls]
-  gather         :    1.820 ms (19.267%) [6 calls]
-  hash_join_probe_u32:    1.048 ms (11.099%) [2 calls]
-  sort           :    0.286 ms (3.031%) [2 calls]
+  filter         :    6.766 ms (66.329%) [4 calls]
+  gather         :    1.883 ms (18.455%) [6 calls]
+  hash_join_probe_u32:    1.271 ms (12.463%) [2 calls]
+  sort           :    0.281 ms (2.754%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 9.447 ms
+  TOTAL GPU TIME: 10.201 ms
   Kernel invocations: 14
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_ge                1.183         200000        169.133
-ops::filter_string_lt                0.604         200000        331.194
-hash_join_probe_write_multi          0.777         132994        171.145
-ops::gather_col_u32                  0.783          33174         42.390
-ops::filter_ge_u32                   3.179        6001215       1887.496
-ops::filter_lt_u32_indexed           1.326        3426687       2584.390
-hash_join_probe_write_multi          0.271         225253        830.043
+ops::filter_string_ge                1.188         200000        168.397
+ops::filter_string_lt                0.662         200000        301.925
+hash_join_probe_write_multi          0.771         132994        172.589
+ops::gather_col_u32                  0.744          33174         44.604
+ops::filter_ge_u32                   3.284        6001215       1827.503
+ops::filter_lt_u32_indexed           1.632        3426687       2099.095
+hash_join_probe_write_multi          0.501         225253        449.831
 radix_sort_u64                       0.000          37110          0.000
-orderby_gpu_gather                   0.286         111330        388.870
-ops::gather_col_u32                  0.195          37110        190.593
-ops::gather_col_u32                  0.216          37110        171.442
-ops::gather_col_u32                  0.218             20          0.092
-ops::gather_col_u32                  0.183             20          0.109
-ops::gather_col_f32                  0.225             20          0.089
+orderby_gpu_gather                   0.281         111330        396.309
+ops::gather_col_u32                  0.229          37110        161.816
+ops::gather_col_u32                  0.250          37110        148.193
+ops::gather_col_u32                  0.242             20          0.083
+ops::gather_col_u32                  0.208             20          0.096
+ops::gather_col_f32                  0.209             20          0.095
 ─────────────────────────────────────────────────────────────────
-TOTAL: 9.447 ms
+TOTAL: 10.201 ms

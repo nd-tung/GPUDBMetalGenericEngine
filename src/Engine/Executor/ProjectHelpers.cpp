@@ -125,16 +125,10 @@ bool projectSubstring(const FunctionCall& func,
                     ctx.u32ColsGPU[posName] = ctx.u32ColsGPU[outName]; // GpuBuffer copy retains
                 }
 
-                // Reconstruct CPU strings from flat buffers for downstream use
-                const uint8_t* charsPtr = static_cast<const uint8_t*>(flat.chars->contents());
-                const uint32_t* offPtr = static_cast<const uint32_t*>(subOffsets->contents());
-                const uint32_t* lenPtr = static_cast<const uint32_t*>(subLengths->contents());
-                std::vector<std::string> substrResults(rc);
-                for (uint32_t i = 0; i < rc; ++i) {
-                    substrResults[i] = std::string(reinterpret_cast<const char*>(charsPtr + offPtr[i]), lenPtr[i]);
-                }
-
                 // Store FlatStringCol for the output under the new name
+                // Skip CPU string reconstruction — FlatStringCol is authoritative;
+                // downstream operators (filter, groupby) use GPU buffers;
+                // output stage lazy-materializes from flatStringCols if needed.
                 FlatStringCol outFlat;
                 outFlat.chars     = flat.chars;   // GpuBuffer copy auto-retains
                 outFlat.offsets.reset(subOffsets); // takes ownership
@@ -144,8 +138,8 @@ bool projectSubstring(const FunctionCall& func,
                 ctx.flatStringCols[outName] = outFlat;
                 ctx.flatStringCols[posName] = outFlat;
 
-                ctx.stringCols[outName] = std::move(substrResults);
-                ctx.stringCols[posName] = ctx.stringCols[outName];
+                ctx.stringCols[outName] = {};  // empty sentinel for column discovery
+                ctx.stringCols[posName] = {};
                 ctx.u32Cols[outName] = encoded;
                 ctx.u32Cols[posName] = encoded;
                 out.u32Cols.push_back(encoded);
