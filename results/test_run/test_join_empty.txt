@@ -5,11 +5,12 @@
 ---------------------------------------------------
 
 ---------------------------------------------------
-Planning time: 0.50 ms
-Data Load Time (Disk+Upload): 12.42 ms
+Planning time: 0.53 ms
+Data Load Time (Disk+Upload): 15.57 ms
 GPU kernels time: 0.00 ms
-CPU postprocess time: 0.01 ms
-Total Internal Pipeline time: 12.44 ms
-Total Host Execution time: 12.45 ms
-Total Wall time (Plan+Exec): 12.95 ms
+CPU postprocess time: 0.02 ms
+Node timing: Save=0.0(g0.0)ms Join=0.0(g0.0)ms
+Total Internal Pipeline time: 15.59 ms
+Total Host Execution time: 15.60 ms
+Total Wall time (Plan+Exec): 16.14 ms
 ---------------------------------------------------

@@ -54,6 +54,17 @@ static bool filterCompareInList(const CompareExpr& cmp, EvalContext& ctx,
             if (arg0->kind == TypedExpr::Kind::Column) {
                 std::string baseCol = arg0->asColumn().column;
                 const std::vector<std::string>* vec = nullptr;
+                // Try GPU flat path first — avoids CPU string materialization
+                ctx.ensureFlatStringCol(baseCol);
+                if (!ctx.flatStringCols.count(baseCol) || ctx.flatStringCols[baseCol].rowCount == 0) {
+                    std::string resolved = ctx.resolveColName(baseCol);
+                    if (!resolved.empty()) {
+                        ctx.ensureFlatStringCol(resolved);
+                        if (ctx.flatStringCols.count(resolved) && ctx.flatStringCols[resolved].rowCount > 0)
+                            baseCol = resolved;
+                    }
+                }
+                // Materialize CPU strings only if flat buffers unavailable
                 ctx.ensureStringCol(baseCol);
                 if (ctx.stringCols.count(baseCol)) vec = &ctx.stringCols.at(baseCol);
                 else {
@@ -277,15 +288,56 @@ static bool filterCompareStringCol(const CompareExpr& cmp, EvalContext& ctx, boo
     std::string colName = left->asColumn().column;
     std::string pat = std::get<std::string>(right->asLiteral().value);
 
+    // Resolve column name and locate GPU flat string buffers.
+    // Avoid ensureStringCol() (expensive materialization) when flatStringCols
+    // is available — filterString only needs data.size() from the string vector.
+    MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
+    uint32_t strRowCount = 0;
+    {
+        auto tryFlat = [&](const std::string& cn) -> bool {
+            auto fit = ctx.flatStringCols.find(cn);
+            if (fit != ctx.flatStringCols.end() && fit->second.rowCount > 0) {
+                fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
+                strRowCount = fit->second.rowCount;
+                colName = cn;
+                return true;
+            }
+            return false;
+        };
+        if (!tryFlat(colName)) {
+            std::string resolved = ctx.resolveColName(colName);
+            if (!resolved.empty()) tryFlat(resolved);
+        }
+        // If no flat found, try building from dict (avoids CPU materialization)
+        if (!fChars) {
+            ctx.ensureFlatStringCol(colName);
+            if (!tryFlat(colName)) {
+                std::string resolved = ctx.resolveColName(colName);
+                if (!resolved.empty()) {
+                    ctx.ensureFlatStringCol(resolved);
+                    tryFlat(resolved);
+                }
+            }
+        }
+    }
+
+    // Fall back to CPU string path if GPU flat buffers not available
     const std::vector<std::string>* vec = nullptr;
-    ctx.ensureStringCol(colName);
-    if (ctx.stringCols.count(colName)) {
-        vec = &ctx.stringCols.at(colName);
+    std::vector<std::string> dummyVec;
+    if (fChars) {
+        // GPU path: we only need a vector for its size
+        dummyVec.resize(strRowCount);
+        vec = &dummyVec;
     } else {
-        std::string resolved = ctx.resolveColName(colName);
-        if (!resolved.empty()) {
-            ctx.ensureStringCol(resolved);
-            if (ctx.stringCols.count(resolved)) { vec = &ctx.stringCols.at(resolved); colName = resolved; }
+        ctx.ensureStringCol(colName);
+        if (ctx.stringCols.count(colName)) {
+            vec = &ctx.stringCols.at(colName);
+        } else {
+            std::string resolved = ctx.resolveColName(colName);
+            if (!resolved.empty()) {
+                ctx.ensureStringCol(resolved);
+                if (ctx.stringCols.count(resolved)) { vec = &ctx.stringCols.at(resolved); colName = resolved; }
+            }
         }
     }
 
@@ -293,12 +345,6 @@ static bool filterCompareStringCol(const CompareExpr& cmp, EvalContext& ctx, boo
 
     if (debug)
         LOG_INFO("Exec", "Found string col " << colName << " size " << vec->size() << " pattern '" << pat << "'");
-
-    MTL::Buffer *fChars = nullptr, *fOff = nullptr, *fLen = nullptr;
-    auto fit = ctx.flatStringCols.find(colName);
-    if (fit != ctx.flatStringCols.end() && fit->second.rowCount == vec->size()) {
-        fChars = fit->second.chars; fOff = fit->second.offsets; fLen = fit->second.lengths;
-    }
 
     engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Like) ? engine::GpuFilterOp::LIKE_PATTERN : engine::GpuFilterOp::EQ;
     auto res = GpuOps::filterString(colName, *vec, op, pat, fChars, fOff, fLen);
@@ -356,6 +402,7 @@ static bool filterCompareStringHash(const CompareExpr& cmp, EvalContext& ctx, bo
     }
     engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Eq) ? engine::GpuFilterOp::EQ : engine::GpuFilterOp::NE;
 
+    if (!ctx.u32ColsGPU.count(actualCol)) return false;
     MTL::Buffer* colBuf = ctx.u32ColsGPU.at(actualCol);
     uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
 
@@ -778,12 +825,12 @@ if (expr->kind == TypedExpr::Kind::Compare) {
     const TypedExpr* colExpr = nullptr;
     const TypedExpr* litExpr = nullptr;
 
-    // Handle String Filter (Like OR Eq) via extracted helper
+    // Hash-first: for EQ/NE, fast u32 hash compare beats per-char string compare
+    if (filterCompareStringHash(cmp, ctx, debug)) return true;
+
+    // String Filter (Like OR Eq fallback when hash unavailable)
     if (filterCompareStringCol(cmp, ctx, debug)) return true;
     if (cmp.op == engine::CompareOp::Like) return false;
-
-    // Optimized Hash Filter Fallback: Col(StringHash) = "Literal"
-    if (filterCompareStringHash(cmp, ctx, debug)) return true;
 
     // Handle IN Operator via extracted helper
     if (cmp.op == engine::CompareOp::In) {

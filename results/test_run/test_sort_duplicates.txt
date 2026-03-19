@@ -30,27 +30,34 @@ n_regionkey|n_name|
 4|SAUDI ARABIA|
 4|EGYPT|
 ---------------------------------------------------
-Planning time: 0.40 ms
-Data Load Time (Disk+Upload): 21.59 ms
-GPU kernels time: 1.10 ms
-CPU postprocess time: 2.89 ms
-Total Internal Pipeline time: 25.58 ms
-Total Host Execution time: 25.60 ms
-Total Wall time (Plan+Exec): 26.00 ms
+Planning time: 0.41 ms
+Data Load Time (Disk+Upload): 30.28 ms
+GPU kernels time: 64.58 ms
+CPU postprocess time: 7.43 ms
+Node timing: Scan=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=40.0(g24.7)ms Project=32.0(g39.9)ms
+Total Internal Pipeline time: 102.29 ms
+Total Host Execution time: 102.31 ms
+Total Wall time (Plan+Exec): 102.72 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  gather         :    0.208 ms (18.899%) [1 calls]
-  sort           :    0.891 ms (81.101%) [2 calls]
+  batch_flush    :    8.750 ms (13.548%) [1 calls]
+  gather         :   46.947 ms (72.691%) [3 calls]
+  gather_dispatch:    0.010 ms (0.015%) [1 calls]
+  sort           :    8.877 ms (13.745%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1.098 ms
-  Kernel invocations: 3
+  TOTAL GPU TIME: 64.584 ms
+  Kernel invocations: 7
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.891             25          0.028
-ops::gather_col_u32                  0.208             25          0.120
+ops::gather_col_u32                  0.010             25          2.575
+sync                                 8.750              0          0.000
+orderby_gpu_gather                   8.877             25          0.003
+ops::gather_col_u32                  7.027             25          0.004
+ops::gather_col_u32                  7.954             25          0.003
+ops::gather_flat_string             31.967             25          0.001
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1.098 ms
+TOTAL: 64.584 ms

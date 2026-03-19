@@ -45,257 +45,155 @@ struct JoinResult {
 };
 
 // Reusable GPU operator helpers.
+//
+// Implementations are split across:
+//   Operators.cpp  — scan, gather/scatter, arithmetic, reduction, string, date, utility
+//   FilterOps.cpp  — all filter* methods
+//   JoinOps.cpp    — join, semi/anti join, cross product
+//   GroupByOps.cpp — groupBy, extractHT, dedup
+//   SortOps.cpp    — radix sort, sort-key conversion
 class GpuOps {
 public:
-    // GPU Arithmetic Batch Mode: when active, arithmetic ops skip
-    // waitUntilCompleted() — the serial command queue guarantees ordering.
-    // Call endBatch() to flush all pending GPU work (commits + waits).
+
+    // ── Batch Control ──────────────────────────────────────────────────
+    // When active, arithmetic ops skip waitUntilCompleted() — the serial
+    // command queue guarantees ordering. Call endBatch() to flush.
     static void beginBatch();
     static void endBatch();
     static bool isBatchActive();
 
-    static JoinResult joinHash(
-        MTL::Buffer* buildKeys, 
-        uint32_t buildCount,
-        MTL::Buffer* probeKeys,
-        uint32_t probeCount
-    );
-
-    // Join on u64 keys (multi-column)
-    static JoinResult joinHashU64(
-        MTL::Buffer* buildKeys, 
-        MTL::Buffer* buildIndices, 
-        uint32_t buildCount,
-        MTL::Buffer* probeKeys,
-        MTL::Buffer* probeIndices,
-        uint32_t probeCount
-    );
-
-    static GpuBuffer packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count);
-
-    static uint32_t fnv1a32(std::string_view s);
-
-    // Load raw strings from a table column (for pattern matching: LIKE, CONTAINS)
-    static std::vector<std::string> loadStringColumnRaw(const std::string& datasetPath,
-                                                        const std::string& table,
-                                                        const std::string& column);
-
-    // Load a table into a GpuRelation with only the requested columns.
+    // ── Scan / Data Loading ────────────────────────────────────────────
     static GpuRelation scanTable(const std::string& datasetPath,
                                  const std::string& table,
                                  const std::vector<std::string>& neededCols);
+    static std::vector<std::string> loadStringColumnRaw(const std::string& datasetPath,
+                                                        const std::string& table,
+                                                        const std::string& column);
+    static uint32_t fnv1a32(std::string_view s);
 
-    // Filter a u32 column with (op, literal) and return compacted indices.
+    // ── Filter (FilterOps.cpp) ─────────────────────────────────────────
     static std::optional<FilterResult> filterU32(const std::string& colName,
-                                                    MTL::Buffer* col,
-                                                    uint32_t rowCount,
-                                                    engine::GpuFilterOp op,
-                                                    uint32_t literal);
-
-    // Filter a raw string column. 
-    // Uses GPU kernel for pattern matching.
-    // When preChars/preOffsets/preLengths are non-null, skip CPU→GPU flatten.
-    static std::optional<FilterResult> filterString(const std::string& colName,
-                                                       const std::vector<std::string>& data,
-                                                       engine::GpuFilterOp op,
-                                                       const std::string& pattern,
-                                                       MTL::Buffer* preChars = nullptr,
-                                                       MTL::Buffer* preOffsets = nullptr,
-                                                       MTL::Buffer* preLengths = nullptr);
-
-    static std::optional<FilterResult> filterStringPrefix(const std::string& colName,
-                                                      const std::vector<std::string>& data,
-                                                      const std::string& pattern,
-                                                      bool invert = false,
-                                                      MTL::Buffer* preChars = nullptr,
-                                                      MTL::Buffer* preOffsets = nullptr,
-                                                      MTL::Buffer* preLengths = nullptr);
+                                                 MTL::Buffer* col, uint32_t rowCount,
+                                                 engine::GpuFilterOp op, uint32_t literal);
     static std::optional<FilterResult> filterU32Indexed(const std::string& colName,
-                                                           MTL::Buffer* col,
-                                                           MTL::Buffer* indices,
-                                                           uint32_t count,
-                                                           engine::GpuFilterOp op,
-                                                           uint32_t literal);
-
-    // Filter a f32 column with (op, literal) and return compacted indices.
+                                                        MTL::Buffer* col, MTL::Buffer* indices,
+                                                        uint32_t count, engine::GpuFilterOp op,
+                                                        uint32_t literal);
     static std::optional<FilterResult> filterF32(const std::string& colName,
-                                                    MTL::Buffer* col,
-                                                    uint32_t rowCount,
-                                                    engine::GpuFilterOp op,
-                                                    float literal);
-
-    // Scatter constant value to output buffer at specified indices
-    static void scatterConstantF32(MTL::Buffer* output, MTL::Buffer* indices, uint32_t indexCount, float val);
-    
-    // Scatter values from input vector to output buffer at specified indices
-    static void scatterF32(MTL::Buffer* input, MTL::Buffer* output, MTL::Buffer* indices, uint32_t count);
-
-
-    // Filter a f32 column through an indices vector (no predicate-column gather).
-    // Returns indices into the provided `indices` array.
+                                                 MTL::Buffer* col, uint32_t rowCount,
+                                                 engine::GpuFilterOp op, float literal);
     static std::optional<FilterResult> filterF32Indexed(const std::string& colName,
-                                                           MTL::Buffer* col,
-                                                           MTL::Buffer* indices,
-                                                           uint32_t count,
-                                                           engine::GpuFilterOp op,
-                                                           float literal);
+                                                        MTL::Buffer* col, MTL::Buffer* indices,
+                                                        uint32_t count, engine::GpuFilterOp op,
+                                                        float literal);
+    // String filter: when preChars/preOffsets/preLengths are non-null, skip CPU→GPU flatten.
+    static std::optional<FilterResult> filterString(const std::string& colName,
+                                                    const std::vector<std::string>& data,
+                                                    engine::GpuFilterOp op, const std::string& pattern,
+                                                    MTL::Buffer* preChars = nullptr,
+                                                    MTL::Buffer* preOffsets = nullptr,
+                                                    MTL::Buffer* preLengths = nullptr);
+    static std::optional<FilterResult> filterStringPrefix(const std::string& colName,
+                                                          const std::vector<std::string>& data,
+                                                          const std::string& pattern, bool invert = false,
+                                                          MTL::Buffer* preChars = nullptr,
+                                                          MTL::Buffer* preOffsets = nullptr,
+                                                          MTL::Buffer* preLengths = nullptr);
+    // Column-vs-column filter (op: 0=LT, 1=LE, 2=GT, 3=GE, 4=EQ, 5=NE)
+    static std::optional<FilterResult> filterColColU32(MTL::Buffer* colA, MTL::Buffer* colB,
+                                                       uint32_t count, int op);
+    static std::optional<FilterResult> filterColColF32(MTL::Buffer* colA, MTL::Buffer* colB,
+                                                       uint32_t count, int op);
 
-    static std::optional<FilterResult> hashJoinSemiU32(MTL::Buffer* leftKey,
-                                                          uint32_t leftCount,
-                                                          MTL::Buffer* rightKey,
-                                                          uint32_t rightCount);
-
-    // ANTI join: returns indices of left rows that do NOT match any right key.
-    static std::optional<FilterResult> hashJoinAntiU32(MTL::Buffer* leftKey,
-                                                          uint32_t leftCount,
-                                                          MTL::Buffer* rightKey,
-                                                          uint32_t rightCount);
-
-    // Find unmatched rows: given a set of matched indices (from a join),
-    // returns the indices in [0, totalRows) that are NOT in matchedIndices.
-    // Uses GPU: scatter → flip → compact.
+    // ── Join (JoinOps.cpp) ─────────────────────────────────────────────
+    static JoinResult joinHash(MTL::Buffer* buildKeys, uint32_t buildCount,
+                               MTL::Buffer* probeKeys, uint32_t probeCount);
+    static JoinResult joinHashU64(MTL::Buffer* buildKeys, MTL::Buffer* buildIndices,
+                                  uint32_t buildCount, MTL::Buffer* probeKeys,
+                                  MTL::Buffer* probeIndices, uint32_t probeCount);
+    static GpuBuffer packU32ToU64(MTL::Buffer* c1, MTL::Buffer* c2, uint32_t count);
+    static std::optional<FilterResult> hashJoinSemiU32(MTL::Buffer* leftKey, uint32_t leftCount,
+                                                       MTL::Buffer* rightKey, uint32_t rightCount);
+    static std::optional<FilterResult> hashJoinAntiU32(MTL::Buffer* leftKey, uint32_t leftCount,
+                                                       MTL::Buffer* rightKey, uint32_t rightCount);
+    // Returns indices in [0, totalRows) NOT in matchedIndices (GPU scatter→flip→compact).
     static FilterResult findUnmatchedIndices(MTL::Buffer* matchedIndices,
-                                             uint32_t matchedCount,
-                                             uint32_t totalRows);
+                                             uint32_t matchedCount, uint32_t totalRows);
+    static void crossProduct(MTL::Buffer* left, MTL::Buffer* right,
+                             MTL::Buffer* outLeft, MTL::Buffer* outRight,
+                             uint32_t leftCount, uint32_t rightCount);
 
-    // Bitcast f32 buffer to u32 buffer on GPU (IEEE 754 reinterpretation).
-    static GpuBuffer bitcastF32ToU32(MTL::Buffer* in, uint32_t count);
+    // ── GroupBy & Dedup (GroupByOps.cpp) ────────────────────────────────
+    // aggTypes[a]: 0 = SUM(f32), 1 = COUNT(*). Results in htAggs[slot*8+a].
+    static std::optional<GroupByHashTable> groupByAggMultiKeyTyped(
+        const std::vector<MTL::Buffer*>& keyColsU32,
+        const std::vector<MTL::Buffer*>& aggInputsF32,
+        const std::vector<uint32_t>& aggTypes, uint32_t rowCount);
+    // GPU stream compaction: Mark → PrefixSum → Compact on hash table.
+    static std::optional<GroupByExtractResult> extractGroupByHT(
+        const GroupByHashTable& ht, uint32_t numKeys, uint32_t numAggsTotal);
+    static void release(GroupByHashTable& g);
+    // GPU dedup — returns gather indices for unique rows (1-2 keys; CPU fallback for 3+).
+    static GpuBuffer dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count,
+                                 uint32_t& uniqueCount);
 
-    // Convert f32 to sort-key u32 on GPU (IEEE 754 → order-preserving u32).
-    // desc=true flips for descending order.
+    // ── Sort (SortOps.cpp) ─────────────────────────────────────────────
+    // Stable 8-bit LSD radix sort. ≤1024: shared-memory bitonic; >1024: multi-pass.
+    static void radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
+    static void radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
+    // IEEE 754 f32 → order-preserving u32 sort key (desc flips for descending).
     static GpuBuffer floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc);
-
-    // Bitwise NOT (invert) u32 buffer on GPU for DESC ordering.
+    // Bitwise NOT for DESC ordering.
     static GpuBuffer invertU32(MTL::Buffer* in, uint32_t count);
 
-    // GroupBy multi-key with typed aggregates (up to 8).
-    // aggTypes[a]: 0 = SUM(f32) using aggInputsF32[a], 1 = COUNT(*) (u32).
-    // Results are written into htAggs[slot*8 + a].
-    static std::optional<GroupByHashTable> groupByAggMultiKeyTyped(const std::vector<MTL::Buffer*>& keyColsU32,
-                                                                      const std::vector<MTL::Buffer*>& aggInputsF32,
-                                                                      const std::vector<uint32_t>& aggTypes,
-                                                                      uint32_t rowCount);
-
-    // Utility: gather column buffers
+    // ── Gather & Scatter ───────────────────────────────────────────────
     static GpuBuffer gatherU32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync = true);
     static GpuBuffer gatherF32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync = true);
+    static void scatterConstantF32(MTL::Buffer* output, MTL::Buffer* indices, uint32_t indexCount, float val);
+    static void scatterF32(MTL::Buffer* input, MTL::Buffer* output, MTL::Buffer* indices, uint32_t count);
 
-    // Helper to synchronize command queue
-    static void sync();
-
-    // Utility: cast a u32 buffer into a f32 buffer (StorageModeShared).
-    // Used to treat integer columns as float aggregate inputs in v0 group-by.
-    static GpuBuffer castU32ToF32(MTL::Buffer* in, uint32_t count);
-
-    // Filter Col vs Col (U32)
-    static std::optional<FilterResult> filterColColU32(
-        MTL::Buffer* colA,
-        MTL::Buffer* colB,
-        uint32_t count,
-        int op);
-
-    // Filter Col vs Col (F32)
-    static std::optional<FilterResult> filterColColF32(
-        MTL::Buffer* colA,
-        MTL::Buffer* colB,
-        uint32_t count,
-        int op);
-
-    // Generic Mask Operations
+    // ── Mask & Index Operations ────────────────────────────────────────
     static GpuBuffer logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
     static GpuBuffer logicAndNotU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    
-    // Index array to mask conversion
     static GpuBuffer indicesToMask(MTL::Buffer* indices, uint32_t indexCount, uint32_t totalRows);
-    
-    // Compact u32 mask to indices
     static std::pair<GpuBuffer, uint32_t> compactU32Mask(MTL::Buffer* mask, uint32_t totalRows);
-    
-    // Fill operations
+
+    // ── Fill & Initialize ──────────────────────────────────────────────
     static void fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count);
     static void fillF32(MTL::Buffer* buf, float val, uint32_t count);
     static GpuBuffer createFilledU32(uint32_t val, uint32_t count);
     static GpuBuffer createFilledF32(float val, uint32_t count);
-    
-    // Generate sequence 0, 1, 2, ... (iota)
     static GpuBuffer iotaU32(uint32_t count);
-    
-    // Cross product
-    static void crossProduct(MTL::Buffer* left, MTL::Buffer* right, 
-                             MTL::Buffer* outLeft, MTL::Buffer* outRight,
-                             uint32_t leftCount, uint32_t rightCount);
 
-    static void release(GroupByHashTable& g);
-
-    // GPU stream compaction: extract valid entries from GroupBy hash table.
-    // Mark → Prefix Sum → Compact pipeline on GPU.
-    // Returns deinterleaved key columns (bias removed) and raw agg words.
-    static std::optional<GroupByExtractResult> extractGroupByHT(
-        const GroupByHashTable& ht,
-        uint32_t numKeys,
-        uint32_t numAggsTotal);
-
-    // Arithmetic Ops
+    // ── Arithmetic ─────────────────────────────────────────────────────
     static GpuBuffer arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t count);
-    static GpuBuffer nonNullIndicatorF32(MTL::Buffer* in, uint32_t count);
-
-    static GpuBuffer arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static GpuBuffer arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
-
-    static GpuBuffer arithDivF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static GpuBuffer arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
-    static GpuBuffer arithDivF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
-
-    static GpuBuffer arithSubF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
-    static GpuBuffer arithSubF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
-    static GpuBuffer arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
-
     static GpuBuffer arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
     static GpuBuffer arithAddF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
-
-    // Math Ops
+    static GpuBuffer arithSubF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithSubF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithSubF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithMulF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithMulF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithDivF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer arithDivF32ColScalar(MTL::Buffer* colA, float valB, uint32_t count);
+    static GpuBuffer arithDivF32ScalarCol(float valA, MTL::Buffer* colB, uint32_t count);
+    static GpuBuffer nonNullIndicatorF32(MTL::Buffer* in, uint32_t count);
     static GpuBuffer mathFloorF32(MTL::Buffer* col, uint32_t count);
 
-    // Helpers
-    static GpuBuffer createBuffer(const void* data, size_t size);
+    // ── Conversion & Bitwise ───────────────────────────────────────────
+    static GpuBuffer bitcastF32ToU32(MTL::Buffer* in, uint32_t count);
+    static GpuBuffer castU32ToF32(MTL::Buffer* in, uint32_t count);
 
-    // Reduction Ops (returns scalar on CPU)
+    // ── Reduction ──────────────────────────────────────────────────────
     static float reduceSumF32(MTL::Buffer* in, uint32_t count);
     static float reduceMinF32(MTL::Buffer* in, uint32_t count);
     static float reduceMaxF32(MTL::Buffer* in, uint32_t count);
 
-    // Date Extract
-    // M11: Extract YEAR from u32 date → u32 year (handles YYYYMMDD and day-count)
+    // ── Date ───────────────────────────────────────────────────────────
+    // Extract YEAR from u32 date → u32 year (handles YYYYMMDD and day-count formats).
     static GpuBuffer extractYearU32(MTL::Buffer* dateCol, uint32_t count);
 
-    // H4: GPU dedup — returns gather indices for unique rows, sets uniqueCount
-    // keys: vector of u32 GPU buffers (1 or 2 keys; falls back to CPU for 3+)
-    static GpuBuffer dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t count,
-                                    uint32_t& uniqueCount);
-
-    // GPU Radix Sort (stable, 8-bit radix)
-    // For ≤1024 elements: single-dispatch block sort (shared-memory bitonic).
-    // For >1024 elements: 4-pass (u32) or 8-pass (u64) LSD radix sort.
-    static void radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
-    static void radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count);
-
-    // Flat-string SUBSTRING: adjusts offsets/lengths (zero-copy into same chars buffer).
-    // startPos is 1-based (SQL convention). Returns (outOffsets, outLengths).
-    static std::pair<GpuBuffer, GpuBuffer> substringFlat(
-        MTL::Buffer* inOffsets, MTL::Buffer* inLengths,
-        uint32_t startPos, uint32_t substrLen, uint32_t rowCount);
-
-    // Hash-encode flat string columns to u32 (first 8 chars packed big-endian).
-    static GpuBuffer stringHashEncodeU32(
-        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
-
-    // FNV1a-32 hash of flat string columns (full string, better distribution).
-    static GpuBuffer stringFnv1aU32(
-        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
-
-    // GPU gather for FlatStringCol: gather chars/offsets/lengths by an index buffer.
-    // Produces a new compacted FlatStringCol. Uses gatherU32 for lengths,
-    // prefix-sum for new offsets, and a char-copy kernel for the char buffer.
+    // ── String Operations ──────────────────────────────────────────────
     struct FlatStringGatherResult {
         GpuBuffer chars;
         GpuBuffer offsets;
@@ -303,24 +201,33 @@ public:
         uint32_t rowCount    = 0;
         uint32_t totalBytes  = 0;
     };
+    // SUBSTRING: adjusts offsets/lengths (zero-copy). startPos is 1-based (SQL).
+    static std::pair<GpuBuffer, GpuBuffer> substringFlat(
+        MTL::Buffer* inOffsets, MTL::Buffer* inLengths,
+        uint32_t startPos, uint32_t substrLen, uint32_t rowCount);
+    // Gather chars/offsets/lengths by index buffer into a compacted FlatStringCol.
     static FlatStringGatherResult gatherFlatString(
         MTL::Buffer* srcChars, MTL::Buffer* srcOffsets, MTL::Buffer* srcLengths,
         MTL::Buffer* indices, uint32_t count, bool sync = true);
-
-    // E1a: FNV1a-64 hash of flat string columns, XOR-folded to u32.
-    // Produces collision-resistant u32 keys suitable for group-by.
+    static FlatStringGatherResult concatFlatStrings(
+        const FlatStringGatherResult& a, const FlatStringGatherResult& b);
+    // Hash-encode flat strings to u32 (first 8 chars, big-endian packed).
+    static GpuBuffer stringHashEncodeU32(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
+    // FNV1a-32 hash (full string, better distribution).
+    static GpuBuffer stringFnv1aU32(
+        MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
+    // FNV1a-64 hash XOR-folded to u32 (collision-resistant, for group-by keys).
     static GpuBuffer stringFnv1aU64Fold32(
         MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount);
-
-    // E2a: GPU string rank by prefix-u64 sort.
-    // Returns u32 rank buffer, or empty GpuBuffer if ties detected (caller falls back to CPU).
+    // GPU string rank by prefix-u64 sort. Empty GpuBuffer if ties detected (CPU fallback).
     static GpuBuffer stringRankByPrefix(
         MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths,
         uint32_t rowCount, bool ascending);
 
-    // E3a: Concatenate two flat-string results (e.g., matched + unmatched rows).
-    static FlatStringGatherResult concatFlatStrings(
-        const FlatStringGatherResult& a, const FlatStringGatherResult& b);
+    // ── Utility ────────────────────────────────────────────────────────
+    static void sync();
+    static GpuBuffer createBuffer(const void* data, size_t size);
 };
 
 } // namespace engine

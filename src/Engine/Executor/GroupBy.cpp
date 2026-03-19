@@ -22,6 +22,7 @@ void postProcessStringKeys(
     const std::vector<std::vector<uint32_t>>& keyVecs,
     const std::vector<std::vector<std::string>>& outputStringMaps,
     const std::vector<std::unordered_map<uint32_t, std::string>>& hashToStringMaps,
+    const std::vector<std::shared_ptr<std::vector<std::string>>>& dictRefMaps,
     TableResult& out, bool debug);
 void restoreF32Keys(
     const std::vector<bool>& keyFromF32,
@@ -31,6 +32,7 @@ void buildGroupByOutputOrder(
     const std::vector<bool>& keyFromF32,
     const std::vector<std::vector<std::string>>& outputStringMaps,
     const std::vector<std::unordered_map<uint32_t, std::string>>& hashToStringMaps,
+    const std::vector<std::shared_ptr<std::vector<std::string>>>& dictRefMaps,
     TableResult& out);
 GroupByKeyData buildGroupByKeys(
     const IRGroupBy& groupBy, EvalContext& ctx,
@@ -103,6 +105,8 @@ static bool handleCountDistinct(const IRGroupBy& groupBy, EvalContext& ctx, Tabl
     for(size_t i=0; i<stage1Res.stringNames.size(); ++i) {
         stage2Ctx.stringCols[stage1Res.stringNames[i]] = stage1Res.stringCols[i];
         strColNames.insert(stage1Res.stringNames[i]);
+        // Build dictionary encoding so Stage 2 uses fast dict-ID path
+        buildDictCol(stage2Ctx, stage1Res.stringNames[i]);
     }
 
     for(size_t i=0; i<stage1Res.u32Names.size(); ++i) {
@@ -666,18 +670,21 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
     for (size_t k = 0; k < keyVecs.size() && gb.ok; ++k) {
         MTL::Buffer* srcBuf = nullptr;
         bool usedGpuBuf = false;
+        bool alreadyBiased = false;
         if (k < keyBufsGPU.size() && keyBufsGPU[k] &&
             keyBufsGPU[k]->length() == gpuRowCount * sizeof(uint32_t)) {
             srcBuf = keyBufsGPU[k];
             keyBufsGPU[k] = nullptr;
             usedGpuBuf = true;
         } else {
+            // CPU upload: apply +1 bias inline, avoiding separate GPU dispatch
             srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
             if (!srcBuf) { gb.ok = false; break; }
             uint32_t* ptr = static_cast<uint32_t*>(srcBuf->contents());
             size_t copyLen = std::min(keyVecs[k].size(), gpuRowCount);
-            if (copyLen > 0) memcpy(ptr, keyVecs[k].data(), copyLen * sizeof(uint32_t));
+            for (size_t i = 0; i < copyLen; ++i) ptr[i] = keyVecs[k][i] + 1;
             if (copyLen < gpuRowCount) memset(ptr + copyLen, 0, (gpuRowCount - copyLen) * sizeof(uint32_t));
+            alreadyBiased = true;
         }
 
         if (debug && k == 0) {
@@ -693,20 +700,26 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
             LOG_WARN("Exec", "GroupBy: srcBuf vs keyVecs[0]: " << srcMismatches << " mismatches" << " (usedGpuBuf=" << usedGpuBuf << " srcLen=" << srcBuf->length()/4  << " keyVecLen=" << keyVecs[k].size() << " gpuRowCount=" << gpuRowCount << ")\n");
         }
 
-        auto biased = GpuOps::arithAddConstU32(srcBuf, 1, static_cast<uint32_t>(gpuRowCount)).detach();
-        srcBuf->release();
-        if (!biased) { gb.ok = false; break; }
+        if (alreadyBiased) {
+            // Bias applied during CPU copy — no GPU dispatch needed
+            gb.keyBufs.push_back(srcBuf);
+            gb.toRelease.push_back(srcBuf);
+        } else {
+            auto biased = GpuOps::arithAddConstU32(srcBuf, 1, static_cast<uint32_t>(gpuRowCount)).detach();
+            srcBuf->release();
+            if (!biased) { gb.ok = false; break; }
 
-        if (debug) {
-            uint32_t* bp = static_cast<uint32_t*>(biased->contents());
-            std::map<uint32_t, size_t> dist;
-            for (size_t i = 0; i < gpuRowCount; ++i) dist[bp[i]]++;
-            LOG_INFO("Exec", "GroupBy: GPU key buf[" << k << "] distribution (biased):");
-            for (auto& [v,c] : dist) std::cerr << " " << v << ":" << c;
-            LOG_INFO("GROUPBY", "\n");
+            if (debug) {
+                uint32_t* bp = static_cast<uint32_t*>(biased->contents());
+                std::map<uint32_t, size_t> dist;
+                for (size_t i = 0; i < gpuRowCount; ++i) dist[bp[i]]++;
+                LOG_INFO("Exec", "GroupBy: GPU key buf[" << k << "] distribution (biased):");
+                for (auto& [v,c] : dist) std::cerr << " " << v << ":" << c;
+                LOG_INFO("GROUPBY", "\n");
+            }
+            gb.keyBufs.push_back(biased);
+            gb.toRelease.push_back(biased);
         }
-        gb.keyBufs.push_back(biased);
-        gb.toRelease.push_back(biased);
     }
 
     // ── Upload aggregate input buffers ──
@@ -828,6 +841,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
     auto& keyNames = kd.keyNames;
     auto& outputStringMaps = kd.outputStringMaps;
     auto& hashToStringMaps = kd.hashToStringMaps;
+    auto& dictRefMaps = kd.dictRefMaps;
     auto& keyFromF32 = kd.keyFromF32;
     auto& keyBufsGPU = kd.keyBufsGPU;
     
@@ -1012,11 +1026,11 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     
                     processGroupByHTResults(*htOpt, keyVecs, aggFuncs, keyNames, aggNames, out);
                     
-                    postProcessStringKeys(keyVecs, outputStringMaps, hashToStringMaps, out, debug);
+                    postProcessStringKeys(keyVecs, outputStringMaps, hashToStringMaps, dictRefMaps, out, debug);
 
                     restoreF32Keys(keyFromF32, out, debug);
 
-                    buildGroupByOutputOrder(keyVecs, keyFromF32, outputStringMaps, hashToStringMaps, out);
+                    buildGroupByOutputOrder(keyVecs, keyFromF32, outputStringMaps, hashToStringMaps, dictRefMaps, out);
 
                     // Release GPU resources
                     GpuOps::release(*htOpt);

@@ -324,6 +324,68 @@ static void reorderStringColumns(
 
     for (size_t ci = 0; ci < table.stringCols.size(); ++ci) {
         const std::string& colName = table.stringNames[ci];
+        bool isDeferred = table.stringCols[ci].empty();
+
+        // --- Deferred string path: keep GPU-resident after reorder ---
+        if (isDeferred) {
+            // Try dict (from ctx or tableResult)
+            auto dictIt = dictCols.find(colName);
+            if (dictIt == dictCols.end() || !dictIt->second.idsGPU)
+                dictIt = table.dictStringResults.find(colName) != table.dictStringResults.end()
+                    ? (void(0), dictCols.find("__NEVER__"))  // won't match, fall through
+                    : dictCols.end();
+            // Check tableResult.dictStringResults
+            auto tDictIt = table.dictStringResults.find(colName);
+            if (tDictIt != table.dictStringResults.end() && tDictIt->second.idsGPU && tDictIt->second.rowCount == n) {
+                GpuBuffer gatheredIds = GpuOps::gatherU32(tDictIt->second.idsGPU, idxBuf, n);
+                DictEncoded reordered;
+                reordered.dictionary = tDictIt->second.dictionary;
+                reordered.idsGPU = std::move(gatheredIds);
+                reordered.rowCount = n;
+                table.dictStringResults[colName] = std::move(reordered);
+                table.flatStringResults.erase(colName);
+                if (debug) LOG_INFO("Exec", "OrderBy: DEFERRED dict reorder '" << colName << "'\n");
+                continue;
+            }
+            if (dictIt != dictCols.end() && dictIt->second.idsGPU && dictIt->second.rowCount == n) {
+                GpuBuffer gatheredIds = GpuOps::gatherU32(dictIt->second.idsGPU, idxBuf, n);
+                DictEncoded reordered;
+                reordered.dictionary = dictIt->second.dictionary;
+                reordered.idsGPU = std::move(gatheredIds);
+                reordered.rowCount = n;
+                table.dictStringResults[colName] = std::move(reordered);
+                table.flatStringResults.erase(colName);
+                if (debug) LOG_INFO("Exec", "OrderBy: DEFERRED dict reorder (ctx) '" << colName << "'\n");
+                continue;
+            }
+            // Try flat (from tableResult or ctx)
+            FlatStringCol const* flatSrc = nullptr;
+            auto tFlatIt = table.flatStringResults.find(colName);
+            if (tFlatIt != table.flatStringResults.end() && tFlatIt->second.chars && tFlatIt->second.rowCount == n)
+                flatSrc = &tFlatIt->second;
+            if (!flatSrc) {
+                auto fit = flatStringCols.find(colName);
+                if (fit != flatStringCols.end() && fit->second.chars && fit->second.rowCount == n)
+                    flatSrc = &fit->second;
+            }
+            if (flatSrc) {
+                auto r = GpuOps::gatherFlatString(
+                    flatSrc->chars, flatSrc->offsets, flatSrc->lengths,
+                    idxBuf, n, true);
+                if (r.chars) {
+                    FlatStringCol reordered;
+                    reordered.takeFrom(std::move(r.chars), std::move(r.offsets),
+                                       std::move(r.lengths), r.rowCount, r.totalBytes);
+                    table.flatStringResults[colName] = std::move(reordered);
+                    if (debug) LOG_INFO("Exec", "OrderBy: DEFERRED flat reorder '" << colName << "'\n");
+                    continue;
+                }
+            }
+            // No deferred source found — skip (shouldn't happen)
+            continue;
+        }
+
+        // --- Materialized string path (existing behavior) ---
         auto dictIt = dictCols.find(colName);
         if (dictIt != dictCols.end() && dictIt->second.idsGPU && dictIt->second.rowCount == n) {
             auto gatheredIds = gatherToVector<uint32_t>(dictIt->second.idsGPU, idxBuf, n);

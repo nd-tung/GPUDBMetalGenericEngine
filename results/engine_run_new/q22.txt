@@ -1,0 +1,36 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+totacctbal|numcust|cntrycode|
+6737714.00|888.00|13|
+6460574.50|861.00|17|
+7236686.00|964.00|18|
+6701459.00|892.00|23|
+7158871.00|948.00|29|
+6808436.50|909.00|30|
+6806670.50|922.00|31|
+---------------------------------------------------
+Planning time: 2.15 ms
+Data Load Time (Disk+Upload): 655.25 ms
+GPU kernels time: 1615.07 ms
+CPU postprocess time: 1732.35 ms
+Node timing: Scan=1500.1(g737.1)ms Project=7.5(g7.1)ms Aggregate=16.1(g8.7)ms Project=0.3(g0.0)ms Aggregate=0.0(g0.0)ms Aggregate=0.0(g0.0)ms Project=0.3(g0.0)ms Save=0.8(g0.0)ms Scan=1038.2(g503.4)ms Join=159.9(g175.5)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=90.8(g42.6)ms Project=0.3(g0.0)ms Join=276.7(g14.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=72.0(g14.8)ms Project=64.0(g53.3)ms Project=0.0(g0.0)ms GroupBy=80.0(g32.7)ms OrderBy=40.1(g25.1)ms
+Total Internal Pipeline time: 4002.67 ms
+Total Host Execution time: 4003.67 ms
+Total Wall time (Plan+Exec): 4005.81 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  batch_flush    :   59.148 ms (3.662%) [8 calls]
+  cast           :    7.728 ms (0.478%) [1 calls]
+  filter         : 1129.894 ms (69.959%) [16 calls]
+  gather         :  242.609 ms (15.022%) [16 calls]
+  gather_dispatch:    0.137 ms (0.008%) [20 calls]
+  groupby        :   24.999 ms (1.548%) [2 calls]
+  hash_join_probe_u32:  141.572 ms (8.766%) [8 calls]
+  sort           :    8.985 ms (0.556%) [3 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 1615.071 ms
+  Kernel invocations: 74

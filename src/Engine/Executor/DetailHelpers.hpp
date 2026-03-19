@@ -32,6 +32,44 @@ inline std::vector<T> gatherToVector(MTL::Buffer* buf, MTL::Buffer* indices, uin
     return result;
 }
 
+// ========== GPU buffer access helpers ==========
+// Typed getters that return a non-owning pointer (or null) to reduce
+// repeated if-count-then-at boilerplate across executor files.
+
+// Return the raw GPU buffer for a u32 column, or nullptr if absent.
+inline MTL::Buffer* getU32GPU(const EvalContext& ctx, const std::string& col) {
+    auto it = ctx.u32ColsGPU.find(col);
+    return (it != ctx.u32ColsGPU.end() && it->second) ? it->second.get() : nullptr;
+}
+
+// Return the raw GPU buffer for a f32 column, or nullptr if absent.
+inline MTL::Buffer* getF32GPU(const EvalContext& ctx, const std::string& col) {
+    auto it = ctx.f32ColsGPU.find(col);
+    return (it != ctx.f32ColsGPU.end() && it->second) ? it->second.get() : nullptr;
+}
+
+// Check if a flat string column exists and has data.
+inline bool hasFlatString(const EvalContext& ctx, const std::string& col) {
+    auto it = ctx.flatStringCols.find(col);
+    return it != ctx.flatStringCols.end() && it->second.chars && it->second.rowCount > 0;
+}
+
+// Return pointer to a FlatStringCol, or nullptr if absent/empty.
+inline const FlatStringCol* getFlatString(const EvalContext& ctx, const std::string& col) {
+    auto it = ctx.flatStringCols.find(col);
+    if (it != ctx.flatStringCols.end() && it->second.chars && it->second.rowCount > 0)
+        return &it->second;
+    return nullptr;
+}
+
+// Return pointer to a DictEncoded column, or nullptr if absent/invalid.
+inline const DictEncoded* getDictCol(const EvalContext& ctx, const std::string& col) {
+    auto it = ctx.dictCols.find(col);
+    if (it != ctx.dictCols.end() && it->second.valid())
+        return &it->second;
+    return nullptr;
+}
+
 // ========== String utility helpers ==========
 
 // Split a condition string by " AND " into parts.

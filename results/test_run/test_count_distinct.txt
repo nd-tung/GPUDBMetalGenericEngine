@@ -6,24 +6,30 @@
 Scalar count_star(): 25.00
 ---------------------------------------------------
 Planning time: 0.44 ms
-Data Load Time (Disk+Upload): 93.64 ms
-GPU kernels time: 1.62 ms
-CPU postprocess time: 7.46 ms
-Total Internal Pipeline time: 102.73 ms
-Total Host Execution time: 102.89 ms
-Total Wall time (Plan+Exec): 103.34 ms
+Data Load Time (Disk+Upload): 105.87 ms
+GPU kernels time: 73.07 ms
+CPU postprocess time: 42.64 ms
+Node timing: Scan=0.0(g0.0)ms Project=0.4(g0.0)ms Project=0.2(g0.0)ms GroupBy=84.2(g35.5)ms Project=30.9(g37.6)ms Aggregate=0.0(g0.0)ms
+Total Internal Pipeline time: 221.58 ms
+Total Host Execution time: 221.72 ms
+Total Wall time (Plan+Exec): 222.17 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  groupby        :    1.623 ms (100.000%) [2 calls]
+  batch_flush    :    0.046 ms (0.063%) [1 calls]
+  gather         :   37.593 ms (51.451%) [2 calls]
+  groupby        :   35.426 ms (48.486%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1.623 ms
-  Kernel invocations: 2
+  TOTAL GPU TIME: 73.065 ms
+  Kernel invocations: 5
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty        1.320         200000        151.486
-ops::ht_extract_compact              0.302             25          0.083
+sync                                 0.046              0          0.000
+ops::groupby_agg_multi_key_ty       11.460         200000         17.452
+ops::ht_extract_compact             23.966             25          0.001
+ops::gather_col_u32                  6.767             25          0.004
+ops::gather_flat_string             30.826             25          0.001
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1.623 ms
+TOTAL: 73.065 ms

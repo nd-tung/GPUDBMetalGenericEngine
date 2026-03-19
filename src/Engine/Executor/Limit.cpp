@@ -72,8 +72,39 @@ bool GpuExecutor::executeLimit(const IRLimit& limit, TableResult& table) {
                                                table.f32Cols[i].begin() + end);
     }
 
-    // String columns: CPU slice (no GPU representation in TableResult)
-    for (auto& col : table.stringCols) {
+    // String columns: CPU slice or GPU gather for deferred columns
+    for (size_t ci = 0; ci < table.stringCols.size(); ++ci) {
+        auto& col = table.stringCols[ci];
+        if (col.empty() && ci < table.stringNames.size()) {
+            // Deferred string — gather flat or dict with limit indices
+            const auto& name = table.stringNames[ci];
+            auto fit = table.flatStringResults.find(name);
+            if (fit != table.flatStringResults.end() && fit->second.chars) {
+                auto& flat = fit->second;
+                if (hasGPU) {
+                    auto r = GpuOps::gatherFlatString(
+                        flat.chars, flat.offsets, flat.lengths,
+                        indices, newCount, true);
+                    if (r.chars) {
+                        flat.takeFrom(std::move(r.chars), std::move(r.offsets),
+                                     std::move(r.lengths), r.rowCount, r.totalBytes);
+                    }
+                }
+                continue;
+            }
+            auto dit = table.dictStringResults.find(name);
+            if (dit != table.dictStringResults.end() && dit->second.valid()) {
+                auto& dict = dit->second;
+                if (hasGPU && dict.idsGPU) {
+                    GpuBuffer gatheredIds = GpuOps::gatherU32(dict.idsGPU, indices, newCount);
+                    dict.idsGPU = std::move(gatheredIds);
+                    dict.rowCount = newCount;
+                    dict.ids.clear();
+                }
+                continue;
+            }
+            continue;  // empty and no deferred source
+        }
         col = std::vector<std::string>(col.begin() + offset, col.begin() + end);
     }
     

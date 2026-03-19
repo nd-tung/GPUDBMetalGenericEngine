@@ -6,32 +6,60 @@
 n_name|
 GERMANY|
 ---------------------------------------------------
-Planning time: 0.96 ms
-Data Load Time (Disk+Upload): 347.28 ms
-GPU kernels time: 4.15 ms
-CPU postprocess time: 5.46 ms
-Total Internal Pipeline time: 356.88 ms
-Total Host Execution time: 356.91 ms
-Total Wall time (Plan+Exec): 357.87 ms
+Planning time: 1.00 ms
+Data Load Time (Disk+Upload): 376.70 ms
+GPU kernels time: 255.54 ms
+CPU postprocess time: 106.58 ms
+Node timing: Scan=0.0(g0.0)ms Join=113.1(g81.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=81.0(g40.6)ms Project=48.1(g54.5)ms Project=15.0(g14.8)ms GroupBy=72.0(g21.9)ms Project=32.9(g41.8)ms
+Total Internal Pipeline time: 738.82 ms
+Total Host Execution time: 738.86 ms
+Total Wall time (Plan+Exec): 739.86 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.006 ms (0.142%) [1 calls]
-  filter         :    1.154 ms (27.827%) [1 calls]
-  groupby        :    1.344 ms (32.421%) [2 calls]
-  hash_join_probe_u32:    1.642 ms (39.611%) [2 calls]
+  batch_flush    :   49.953 ms (19.548%) [4 calls]
+  cast           :    0.007 ms (0.003%) [1 calls]
+  filter         :   40.996 ms (16.043%) [1 calls]
+  gather         :   96.358 ms (37.708%) [4 calls]
+  gather_dispatch:    0.442 ms (0.173%) [16 calls]
+  groupby        :   21.853 ms (8.552%) [2 calls]
+  hash_join_probe_u32:   45.931 ms (17.974%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 4.145 ms
-  Kernel invocations: 6
+  TOTAL GPU TIME: 255.539 ms
+  Kernel invocations: 30
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_eq                1.154             25          0.022
-hash_join_probe_write_multi          0.219          10000         45.697
-hash_join_probe_write_multi          1.423         800000        562.110
-ops::cast_u32_to_f32                 0.006          31680       5392.340
-ops::groupby_agg_multi_key_ty        1.126          31680         28.131
-ops::ht_extract_compact              0.218              1          0.005
+ops::filter_eq_u32                  40.996             25          0.001
+ops::gather_col_u32                  0.010              1          0.098
+ops::gather_col_u32                  0.007              1          0.151
+ops::gather_col_u32                  0.010              1          0.101
+sync                                 9.039              0          0.000
+hash_join_probe_write_multi         16.884          10000          0.592
+ops::gather_col_u32                  0.011            396         34.435
+ops::gather_col_u32                  0.008            396         51.934
+ops::gather_col_u32                  0.006            396         68.370
+ops::gather_col_u32                  0.082            396          4.807
+ops::gather_col_u32                  0.078            396          5.058
+sync                                14.722              0          0.000
+hash_join_probe_write_multi         29.046         800000         27.542
+ops::gather_col_u32                  0.031          31680       1021.935
+ops::gather_col_u32                  0.009          31680       3586.550
+ops::gather_col_f32                  0.008          31680       3960.000
+ops::gather_col_u32                  0.006          31680       5002.369
+ops::gather_col_u32                  0.006          31680       5392.340
+ops::gather_col_u32                  0.049          31680        650.968
+ops::gather_col_u32                  0.067          31680        472.251
+ops::gather_col_u32                  0.054          31680        591.685
+sync                                11.354              0          0.000
+ops::gather_col_u32                  6.763          31680          4.684
+ops::gather_flat_string             47.770          31680          0.663
+ops::cast_u32_to_f32                 0.007          31680       4664.998
+sync                                14.838              0          0.000
+ops::groupby_agg_multi_key_ty        6.904          31680          4.588
+ops::ht_extract_compact             14.949              1          0.000
+ops::gather_col_u32                  8.908              1          0.000
+ops::gather_flat_string             32.918              1          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 4.145 ms
+TOTAL: 255.539 ms

@@ -6,6 +6,8 @@
 #include "FlatStringCol.hpp"
 #include "DictEncoded.hpp"
 #include "GpuBuffer.hpp"
+#include "ColumnResolver.hpp"
+#include "StringMaterializer.hpp"
 #include "Operators.hpp"   // GpuOps
 
 #include <unordered_map>
@@ -92,52 +94,35 @@ struct EvalContext {
     // Tries: 1) exact, 2) suffix _1.._9, 3) _rhs_ prefix, 4) columnAliases.
     // Returns the resolved key, or empty string if not found.
     std::string resolveColName(const std::string& name) const {
-        // Check if col name exists in any map
-        auto inAnyMap = [this](const std::string& n) -> bool {
+        auto existsFn = [this](const std::string& n) -> bool {
             return u32ColsGPU.count(n) || f32ColsGPU.count(n)
                 || u32Cols.count(n)    || f32Cols.count(n)
                 || dictCols.count(n)   || stringCols.count(n)
                 || flatStringCols.count(n);
         };
-        // 1. Exact match
-        if (inAnyMap(name)) return name;
-        // 2. Suffixed _1 through _9
-        for (int i = 1; i <= engine::config::kMaxColumnSuffixSearch; ++i) {
-            std::string s = name + "_" + std::to_string(i);
-            if (inAnyMap(s)) return s;
-        }
-        // 3. _rhs_ prefix match (e.g., name_rhs_7)
-        std::string rhsPfx = name + "_rhs_";
-        for (const auto& [k, _] : u32ColsGPU) if (k.rfind(rhsPfx, 0) == 0) return k;
-        for (const auto& [k, _] : f32ColsGPU) if (k.rfind(rhsPfx, 0) == 0) return k;
-        for (const auto& [k, _] : u32Cols)    if (k.rfind(rhsPfx, 0) == 0) return k;
-        for (const auto& [k, _] : f32Cols)    if (k.rfind(rhsPfx, 0) == 0) return k;
-        for (const auto& [k, _] : dictCols)   if (k.rfind(rhsPfx, 0) == 0) return k;
-        for (const auto& [k, _] : stringCols) if (k.rfind(rhsPfx, 0) == 0) return k;
-        // 4. Column alias
-        auto aliasIt = columnAliases.find(name);
-        if (aliasIt != columnAliases.end() && inAnyMap(aliasIt->second))
-            return aliasIt->second;
-        return "";
+        auto prefixScanFn = [this](const std::string& prefix) -> std::string {
+            for (const auto& [k, _] : u32ColsGPU) if (k.rfind(prefix, 0) == 0) return k;
+            for (const auto& [k, _] : f32ColsGPU) if (k.rfind(prefix, 0) == 0) return k;
+            for (const auto& [k, _] : u32Cols)    if (k.rfind(prefix, 0) == 0) return k;
+            for (const auto& [k, _] : f32Cols)    if (k.rfind(prefix, 0) == 0) return k;
+            for (const auto& [k, _] : dictCols)   if (k.rfind(prefix, 0) == 0) return k;
+            for (const auto& [k, _] : stringCols) if (k.rfind(prefix, 0) == 0) return k;
+            return "";
+        };
+        return ColumnResolver::resolve(name, existsFn, prefixScanFn, columnAliases);
     }
 
     // Check if a column exists (exact, suffixed, or aliased) in GPU u32 or f32 maps only.
     std::string resolveGpuColName(const std::string& name) const {
-        auto inGpu = [this](const std::string& n) -> bool {
+        auto existsFn = [this](const std::string& n) -> bool {
             return u32ColsGPU.count(n) || f32ColsGPU.count(n);
         };
-        if (inGpu(name)) return name;
-        for (int i = 1; i <= engine::config::kMaxColumnSuffixSearch; ++i) {
-            std::string s = name + "_" + std::to_string(i);
-            if (inGpu(s)) return s;
-        }
-        std::string rhsPfx = name + "_rhs_";
-        for (const auto& [k, _] : u32ColsGPU) if (k.rfind(rhsPfx, 0) == 0) return k;
-        for (const auto& [k, _] : f32ColsGPU) if (k.rfind(rhsPfx, 0) == 0) return k;
-        auto aliasIt = columnAliases.find(name);
-        if (aliasIt != columnAliases.end() && inGpu(aliasIt->second))
-            return aliasIt->second;
-        return "";
+        auto prefixScanFn = [this](const std::string& prefix) -> std::string {
+            for (const auto& [k, _] : u32ColsGPU) if (k.rfind(prefix, 0) == 0) return k;
+            for (const auto& [k, _] : f32ColsGPU) if (k.rfind(prefix, 0) == 0) return k;
+            return "";
+        };
+        return ColumnResolver::resolve(name, existsFn, prefixScanFn, columnAliases);
     }
 
     // ======================== Lazy Materialization ========================
@@ -148,24 +133,14 @@ struct EvalContext {
     // Call before any code path that needs raw string data (LIKE, CONTAINS).
     void ensureStringCol(const std::string& colName) {
         if (stringCols.count(colName) && !stringCols[colName].empty()) return;
+        const DictEncoded* dict = nullptr;
+        const FlatStringCol* flat = nullptr;
         auto dit = dictCols.find(colName);
-        if (dit != dictCols.end() && dit->second.valid()) {
-            stringCols[colName] = dit->second.materialize();
-            return;
-        }
-        // Lazy-materialize from flatStringCols if available
+        if (dit != dictCols.end() && dit->second.valid()) dict = &dit->second;
         auto fit = flatStringCols.find(colName);
-        if (fit != flatStringCols.end() && fit->second.chars && fit->second.rowCount > 0) {
-            const auto& flat = fit->second;
-            const uint32_t* offs = static_cast<const uint32_t*>(flat.offsets->contents());
-            const uint32_t* lens = static_cast<const uint32_t*>(flat.lengths->contents());
-            const char* ch = static_cast<const char*>(flat.chars->contents());
-            std::vector<std::string> strs(flat.rowCount);
-            for (uint32_t i = 0; i < flat.rowCount; ++i) {
-                strs[i].assign(ch + offs[i], lens[i]);
-            }
-            stringCols[colName] = std::move(strs);
-        }
+        if (fit != flatStringCols.end()) flat = &fit->second;
+        auto result = StringMaterializer::materialize(flat, dict);
+        if (!result.empty()) stringCols[colName] = std::move(result);
     }
 
     // Ensure flatStringCols[colName] is built from stringCols (lazy).

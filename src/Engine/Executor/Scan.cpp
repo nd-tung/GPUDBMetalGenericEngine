@@ -28,6 +28,9 @@ void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     size_t totalChars = 0;
     for (const auto& s : data) totalChars += s.size();
 
+    // Guard: refuse to flatten if total chars would overflow uint32_t offsets
+    if (totalChars > (size_t)UINT32_MAX) return;
+
     std::vector<char> chars;
     chars.reserve(totalChars);
 
@@ -54,9 +57,72 @@ void flattenStringCol(EvalContext& ctx, const std::string& colName) {
     ctx.flatStringCols[colName] = flat;
 }
 
+// Build FlatStringCol directly from DictEncoded on GPU — no CPU string materialization.
+// Flattens the dictionary (K unique strings) into GPU buffers, then gathers by IDs.
+static bool buildFlatFromDict(EvalContext& ctx, const std::string& colName) {
+    auto dit = ctx.dictCols.find(colName);
+    if (dit == ctx.dictCols.end() || !dit->second.valid() || !dit->second.idsGPU)
+        return false;
+
+    auto& store = GpuColumnStore::instance();
+    if (!store.device()) return false;
+
+    const auto& dict = dit->second;
+    const auto& strings = dict.dictionary;
+    uint32_t K = static_cast<uint32_t>(strings.size());
+    if (K == 0) return false;
+
+    // Flatten dictionary strings (K unique) into GPU buffers — small CPU work
+    std::vector<uint32_t> dOffsets(K);
+    std::vector<uint32_t> dLengths(K);
+    size_t totalChars = 0;
+    for (size_t i = 0; i < K; ++i) totalChars += strings[i].size();
+
+    // Estimate output size and refuse if it would be too large (>2GB)
+    // Average string length * N rows → estimated total chars in expanded output
+    double avgLen = (K > 0) ? (double)totalChars / K : 0;
+    size_t estimatedOutputBytes = (size_t)(avgLen * dict.rowCount);
+    if (estimatedOutputBytes > (size_t)2u * 1024 * 1024 * 1024) return false;
+
+    std::vector<char> dChars;
+    dChars.reserve(totalChars);
+    size_t cur = 0;
+    for (size_t i = 0; i < K; ++i) {
+        dOffsets[i] = static_cast<uint32_t>(cur);
+        dLengths[i] = static_cast<uint32_t>(strings[i].size());
+        dChars.insert(dChars.end(), strings[i].begin(), strings[i].end());
+        cur += strings[i].size();
+    }
+
+    // Upload dictionary flat buffers to GPU
+    auto* dev = store.device();
+    GpuBuffer dictCharsBuf(dev->newBuffer(
+        dChars.empty() ? (const void*)"\0" : dChars.data(),
+        std::max(dChars.size(), (size_t)1), MTL::ResourceStorageModeShared));
+    GpuBuffer dictOffBuf(dev->newBuffer(
+        dOffsets.data(), K * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer dictLenBuf(dev->newBuffer(
+        dLengths.data(), K * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+
+    // GPU gather: expand dictionary flat by per-row IDs → per-row FlatStringCol
+    auto result = GpuOps::gatherFlatString(
+        dictCharsBuf.get(), dictOffBuf.get(), dictLenBuf.get(),
+        dict.idsGPU.get(), dict.rowCount, true);
+    if (!result.chars) return false;
+
+    FlatStringCol flat;
+    flat.takeFrom(result.chars, result.offsets, result.lengths,
+                  result.rowCount, result.totalBytes);
+    ctx.flatStringCols[colName] = std::move(flat);
+    return true;
+}
+
 // EvalContext::ensureFlatStringCol — implemented here because it needs flattenStringCol.
 void EvalContext::ensureFlatStringCol(const std::string& colName) {
     if (flatStringCols.count(colName) && flatStringCols[colName].chars) return;
+    // Fast path: build directly from DictEncoded on GPU (no CPU string materialization)
+    if (buildFlatFromDict(*this, colName)) return;
+    // Fallback: materialize strings to CPU, then flatten to GPU
     ensureStringCol(colName);
     if (stringCols.count(colName) && !stringCols[colName].empty()) {
         flattenStringCol(*this, colName);
@@ -91,14 +157,15 @@ void buildDictCol(EvalContext& ctx, const std::string& colName) {
     const auto& data = it->second;
     uint32_t rowCount = static_cast<uint32_t>(data.size());
 
-    // Build sorted unique dictionary
-    std::vector<std::string> uniq(data.begin(), data.end());
-    std::sort(uniq.begin(), uniq.end());
-    uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
-
-    // Build forward map: string -> dict ID (0-based)
+    // Build sorted unique dictionary — O(N) dedup + O(K log K) sort (K << N)
     std::unordered_map<std::string, uint32_t> fwd;
-    fwd.reserve(uniq.size());
+    fwd.reserve(std::min<size_t>(data.size(), 1u << 20));
+    std::vector<std::string> uniq;
+    for (const auto& s : data) {
+        auto [jt, inserted] = fwd.try_emplace(s, 0u);
+        if (inserted) uniq.push_back(s);
+    }
+    std::sort(uniq.begin(), uniq.end());
     for (uint32_t i = 0; i < static_cast<uint32_t>(uniq.size()); ++i) {
         fwd[uniq[i]] = i;
     }

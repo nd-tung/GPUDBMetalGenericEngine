@@ -8,11 +8,37 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdint>
+#include <memory>
 
 namespace engine {
 
+// Shared-ownership string vector: O(1) copy via shared_ptr, same API as vector.
+struct SharedStringVec {
+    std::shared_ptr<std::vector<std::string>> p =
+        std::make_shared<std::vector<std::string>>();
+
+    SharedStringVec() = default;
+    SharedStringVec(const SharedStringVec&) = default;
+    SharedStringVec& operator=(const SharedStringVec&) = default;
+    SharedStringVec(SharedStringVec&&) = default;
+    SharedStringVec& operator=(SharedStringVec&&) = default;
+
+    // Assign from raw vector (takes ownership)
+    SharedStringVec& operator=(std::vector<std::string> v) {
+        p = std::make_shared<std::vector<std::string>>(std::move(v));
+        return *this;
+    }
+
+    size_t size() const { return p->size(); }
+    bool empty() const { return p->empty(); }
+    const std::string& operator[](size_t i) const { return (*p)[i]; }
+    auto begin() const { return p->cbegin(); }
+    auto end() const { return p->cend(); }
+    void clear() { p = std::make_shared<std::vector<std::string>>(); }
+};
+
 struct DictEncoded {
-    std::vector<std::string> dictionary;  // sorted unique strings
+    SharedStringVec dictionary;  // sorted unique strings (O(1) copy)
     std::vector<uint32_t> ids;            // per-row dictionary ID (CPU mirror, may be lazy)
     GpuBuffer idsGPU;                     // per-row dictionary ID (GPU) — primary representation
     uint32_t rowCount = 0;

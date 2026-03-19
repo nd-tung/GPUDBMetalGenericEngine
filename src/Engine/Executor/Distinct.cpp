@@ -9,11 +9,6 @@
 
 namespace engine {
 
-// Forward declaration — defined in GpuExecutor.cpp
-uint32_t deduplicateContext(EvalContext& ctx,
-                            const std::vector<std::string>& dedupCols,
-                            bool debug);
-
 bool GpuExecutor::executeDistinct(const IRDistinct& distinct, EvalContext& ctx) {
     if (ctx.rowCount <= 1) return true;
 

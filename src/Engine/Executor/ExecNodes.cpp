@@ -1,5 +1,6 @@
 #include "GpuExecutor.hpp"
 #include "GpuExecutorDetail.hpp"
+#include "QueryExecutionContext.hpp"
 #include "Operators.hpp"
 #include "GpuColumnStore.hpp"
 
@@ -128,18 +129,17 @@ static void filterContextColumns(
     }
 }
 
-void handleExecScanNode(
-    const IRScan& scan, size_t nodeIdx, const Plan& plan,
-    bool debug, EvalContext& currentCtx,
-    const std::map<size_t, ScanInstance>& scanInstanceMap,
-    const std::unordered_map<std::string, std::vector<std::string>>& delimCorrelationCols,
-    GpuExecutor::JoinPipelineState& state
-) {
-    auto& tableContexts = state.tableContexts;
-    auto& savedPipelines = state.savedPipelines;
-    auto& savedPipelineTables = state.savedPipelineTables;
-    auto& joinedTables = state.joinedTables;
-    auto& hasPipeline = state.hasPipeline;
+void handleExecScanNode(const IRScan& scan, size_t nodeIdx, QueryExecutionContext& qctx) {
+    auto& currentCtx = qctx.currentCtx;
+    const auto& plan = qctx.plan;
+    bool debug = qctx.debug;
+    const auto& scanInstanceMap = qctx.scanInstanceMap;
+    const auto& delimCorrelationCols = qctx.delimCorrelationCols;
+    auto& tableContexts = qctx.joinState.tableContexts;
+    auto& savedPipelines = qctx.joinState.savedPipelines;
+    auto& savedPipelineTables = qctx.joinState.savedPipelineTables;
+    auto& joinedTables = qctx.joinState.joinedTables;
+    auto& hasPipeline = qctx.joinState.hasPipeline;
 
     // Skip empty scans (DELIM_SCAN markers)
     if (scan.table.empty()) {
@@ -275,8 +275,28 @@ void handleExecScanNode(
                 }
             }
 
-            // Start/continue current context with this table
-            currentCtx = it->second;
+            // Start/continue current context with this table.
+            // Move string data (raw strings + dict encodings) instead of
+            // deep-copying. Source retains flatStringCols (GPU buffers, O(1)
+            // shared_ptr copy) and can rebuild on demand via ensureStringCol().
+            {
+                auto& src = it->second;
+                currentCtx.u32Cols = src.u32Cols;
+                currentCtx.f32Cols = src.f32Cols;
+                currentCtx.u32ColsGPU = src.u32ColsGPU;
+                currentCtx.f32ColsGPU = src.f32ColsGPU;
+                currentCtx.stringCols = std::move(src.stringCols);
+                currentCtx.flatStringCols = src.flatStringCols;
+                currentCtx.dictCols = src.dictCols;
+                currentCtx.columnAliases = src.columnAliases;
+                currentCtx.activeRows = src.activeRows;
+                currentCtx.activeRowsGPU = src.activeRowsGPU;
+                currentCtx.activeRowsCountGPU = src.activeRowsCountGPU;
+                currentCtx.rowCount = src.rowCount;
+                currentCtx.isScalarResult = src.isScalarResult;
+                currentCtx.isDelimCorrelation = src.isDelimCorrelation;
+                currentCtx.aggregateCounter = src.aggregateCounter;
+            }
             currentCtx.currentTable = tableKey;
             joinedTables.clear();
             joinedTables.insert(tableKey);
@@ -409,6 +429,7 @@ static void compactTableResultAfterFilter(EvalContext& ctx, TableResult& tableRe
             }
         }
         for (auto& col : tableResult.stringCols) {
+            if (col.empty()) continue;  // deferred — compacted via ctx
             bool gpuDone = false;
             size_t colIdx = &col - &tableResult.stringCols[0];
             if (colIdx < tableResult.stringNames.size()) {
@@ -451,6 +472,7 @@ static void compactTableResultAfterFilter(EvalContext& ctx, TableResult& tableRe
         tableResult.stringCols.clear();
         tableResult.stringNames.clear();
         tableResult.order.clear();
+        tableResult.clearDeferredStrings();
         tableResult.rowCount = 0;
     }
 }
@@ -549,11 +571,12 @@ static void compactContextAfterFilter(EvalContext& ctx) {
     ctx.activeRowsCountGPU = 0;
 }
 
-bool handleExecFilterNode(
-    const IRFilter& filter, bool debug, EvalContext& currentCtx,
-    std::unordered_map<std::string, EvalContext>& tableContexts,
-    TableResult& tableResult, GpuExecutor::ExecutionResult& result
-) {
+bool handleExecFilterNode(const IRFilter& filter, QueryExecutionContext& qctx) {
+    auto& currentCtx = qctx.currentCtx;
+    auto& tableContexts = qctx.tableContexts;
+    auto& tableResult = qctx.tableResult;
+    auto& result = qctx.result;
+    bool debug = qctx.debug;
     if (debug) {
         LOG_INFO("Exec", "Filter: BEFORE filter, currentCtx.stringCols:\n");
         for (const auto& [n, v] : currentCtx.stringCols) {
@@ -584,11 +607,13 @@ bool handleExecFilterNode(
     return true;
 }
 
-bool handleExecGroupByNode(
-    const IRGroupBy& groupBy, bool debug, EvalContext& currentCtx,
-    TableResult& tableResult, std::set<std::string>& joinedTables,
-    bool& hasPipeline, GpuExecutor::ExecutionResult& result
-) {
+bool handleExecGroupByNode(const IRGroupBy& groupBy, QueryExecutionContext& qctx) {
+    auto& currentCtx = qctx.currentCtx;
+    auto& tableResult = qctx.tableResult;
+    auto& joinedTables = qctx.joinState.joinedTables;
+    auto& hasPipeline = qctx.joinState.hasPipeline;
+    auto& result = qctx.result;
+    bool debug = qctx.debug;
     if (!GpuExecutor::executeGroupBy(groupBy, currentCtx, tableResult)) {
         result.error = "GroupBy execution failed";
         return false;
@@ -629,6 +654,8 @@ bool handleExecGroupByNode(
     currentCtx.u32Cols.clear();
     currentCtx.f32Cols.clear();
     currentCtx.stringCols.clear();
+    currentCtx.dictCols.clear();
+    currentCtx.flatStringCols.clear();
     currentCtx.currentTable.clear();
 
     // Reset joinedTables for SEMI join decorrelation pattern
@@ -776,15 +803,16 @@ bool handleExecGroupByNode(
     tableResult.stringCols.clear();
     tableResult.stringNames.clear();
     tableResult.order.clear();
+    tableResult.clearDeferredStrings();
     tableResult.rowCount = 0;
 
     return true;
 }
 
-bool handleExecAggregateNode(
-    const IRAggregate& agg, bool debug, EvalContext& currentCtx,
-    GpuExecutor::ExecutionResult& result
-) {
+bool handleExecAggregateNode(const IRAggregate& agg, QueryExecutionContext& qctx) {
+    auto& currentCtx = qctx.currentCtx;
+    auto& result = qctx.result;
+    bool debug = qctx.debug;
     double value;
     std::string name;
     if (!GpuExecutor::executeAggregate(agg, currentCtx, value, name)) {
@@ -833,10 +861,11 @@ bool handleExecAggregateNode(
     return true;
 }
 
-bool handleExecOrderByNode(
-    const IROrderBy& orderBy, bool debug, EvalContext& currentCtx,
-    TableResult& tableResult, GpuExecutor::ExecutionResult& result
-) {
+bool handleExecOrderByNode(const IROrderBy& orderBy, QueryExecutionContext& qctx) {
+    auto& currentCtx = qctx.currentCtx;
+    auto& tableResult = qctx.tableResult;
+    auto& result = qctx.result;
+    bool debug = qctx.debug;
     // If tableResult is out of sync with currentCtx (e.g. a Join happened
     // after the last Project), materialize currentCtx into tableResult first.
     if (tableResult.rowCount != currentCtx.rowCount && currentCtx.rowCount > 0) {
@@ -852,6 +881,7 @@ bool handleExecOrderByNode(
         tableResult.stringCols.clear();
         tableResult.stringNames.clear();
         tableResult.order.clear();
+        tableResult.clearDeferredStrings();
 
         // Download GPU columns to CPU if needed, and populate GPU buffer vectors
         for (auto& [name, buf] : currentCtx.u32ColsGPU) {
@@ -910,12 +940,24 @@ bool handleExecOrderByNode(
                 tableResult.stringCols.push_back(vec);
             }
         }
-        // Also materialize any dict-only string columns not yet in stringCols
+        // Pass through dict/flat string columns without materializing (deferred)
         for (const auto& [name, dict] : currentCtx.dictCols) {
             if (dict.valid() && !currentCtx.stringCols.count(name)) {
                 tableResult.stringNames.push_back(name);
-                tableResult.stringCols.push_back(dict.materialize());
+                tableResult.stringCols.push_back({});  // empty placeholder (deferred)
+                tableResult.dictStringResults[name] = dict;
             }
+        }
+        for (const auto& [name, flat] : currentCtx.flatStringCols) {
+            if (!flat.chars) continue;
+            if (currentCtx.dictCols.count(name)) continue;  // handled by dict loop
+            if (currentCtx.stringCols.count(name)) continue; // handled by stringCols loop
+            bool found = false;
+            for (const auto& sn : tableResult.stringNames) if (sn == name) { found = true; break; }
+            if (found) continue;
+            tableResult.stringNames.push_back(name);
+            tableResult.stringCols.push_back({});  // empty placeholder (deferred)
+            tableResult.flatStringResults[name] = flat;
         }
         tableResult.rowCount = currentCtx.rowCount;
     }
@@ -968,9 +1010,29 @@ bool handleExecOrderByNode(
     for (size_t i = 0; i < tableResult.stringCols.size(); ++i) {
         if (i < tableResult.stringNames.size()) {
             const std::string& sname = tableResult.stringNames[i];
-            currentCtx.stringCols[sname] = tableResult.stringCols[i];
-            // Rebuild dictionary encoding for sorted string columns
-            buildDictCol(currentCtx, sname);
+            if (!tableResult.stringCols[i].empty()) {
+                // Materialized — use as before
+                currentCtx.stringCols[sname] = tableResult.stringCols[i];
+                buildDictCol(currentCtx, sname);
+                currentCtx.flatStringCols.erase(sname);
+            } else {
+                // Deferred — copy flat/dict from tableResult to ctx (keep in tableResult for Limit)
+                auto fit = tableResult.flatStringResults.find(sname);
+                if (fit != tableResult.flatStringResults.end() && fit->second.chars) {
+                    currentCtx.flatStringCols[sname] = fit->second;  // copy, not move
+                }
+                auto dit = tableResult.dictStringResults.find(sname);
+                if (dit != tableResult.dictStringResults.end() && dit->second.valid()) {
+                    currentCtx.dictCols[sname] = dit->second;  // copy, not move
+                    // If dict was reordered but flat was erased (by OrderBy reorder),
+                    // erase the stale flat from ctx so downstream reads the reordered dict.
+                    if (fit == tableResult.flatStringResults.end() || !fit->second.chars) {
+                        currentCtx.flatStringCols.erase(sname);
+                    }
+                }
+                // Clear any stale materialized strings
+                currentCtx.stringCols.erase(sname);
+            }
         }
     }
     if (debug) {
@@ -979,12 +1041,12 @@ bool handleExecOrderByNode(
     return true;
 }
 
-bool handleExecProjectNode(
-    const IRProject& project, bool debug, EvalContext& currentCtx,
-    TableResult& tableResult,
-    std::unordered_map<std::string, EvalContext>& tableContexts,
-    GpuExecutor::ExecutionResult& result
-) {
+bool handleExecProjectNode(const IRProject& project, QueryExecutionContext& qctx) {
+    auto& currentCtx = qctx.currentCtx;
+    auto& tableResult = qctx.tableResult;
+    auto& tableContexts = qctx.tableContexts;
+    auto& result = qctx.result;
+    bool debug = qctx.debug;
     if (!GpuExecutor::executeProject(project, currentCtx, tableResult, &tableContexts)) {
         result.error = "Project execution failed";
         return false;

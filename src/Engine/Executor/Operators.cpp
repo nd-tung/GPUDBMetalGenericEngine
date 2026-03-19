@@ -18,10 +18,7 @@
 
 namespace engine {
 
-
-// Performs in-place exclusive scan on 'data' (u32). 
-// Returns the total sum (reduction).
-
+// ── Scan / Data Loading ────────────────────────────────────────────────
 
 uint32_t GpuOps::fnv1a32(std::string_view s) {
     uint32_t hash = 2166136261u;
@@ -34,9 +31,6 @@ uint32_t GpuOps::fnv1a32(std::string_view s) {
     return hash;
 }
 
-// --- File loaders ---
-
-// ============================================================================
 // Single-pass multi-column loader: reads a .tbl file ONCE and extracts all
 // requested columns in a single sweep. Replaces per-column loaders that each
 // re-read the entire file.
@@ -201,11 +195,7 @@ static std::vector<std::string> loadStringColumnRawImpl(const std::string& fileP
     return data;
 }
 
-// ============================================================================
-// GPU Arithmetic Batch Mode
-// When active, arithmetic ops skip waitUntilCompleted() — the serial command
-// queue guarantees ordering. A sync is performed at the end of the batch.
-// ============================================================================
+// ── Batch Control ──────────────────────────────────────────────────────
 static thread_local int s_gpuBatchDepth = 0;
 
 bool GpuOps::isBatchActive() { return s_gpuBatchDepth > 0; }
@@ -219,10 +209,6 @@ void GpuOps::endBatch() {
         sync();
     }
 }
-
-// --- Schema ---
-// Column metadata for GPU scan is now provided by SchemaRegistry (Schema.hpp).
-// See SchemaRegistry::getGpuColInfo().
 
 GpuRelation GpuOps::scanTable(const std::string& datasetPath,
                                    const std::string& table,
@@ -356,6 +342,8 @@ GpuRelation GpuOps::scanTable(const std::string& datasetPath,
 
 
 
+// ── Gather & Scatter ───────────────────────────────────────────────────
+
 GpuBuffer GpuOps::gatherU32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t count, bool sync) {
     auto& store = GpuColumnStore::instance();
     auto p_g = makePSO(store.device(), store.library(), "ops::gather_col_u32");
@@ -392,10 +380,8 @@ GpuBuffer GpuOps::gatherU32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t coun
         }
     }
     auto end = std::chrono::high_resolution_clock::now();
-    if (sync) {
-        KernelTimer::instance().record("ops::gather_col_u32", "gather",
-            std::chrono::duration<double, std::milli>(end - start).count(), count);
-    }
+    KernelTimer::instance().record("ops::gather_col_u32", sync ? "gather" : "gather_dispatch",
+        std::chrono::duration<double, std::milli>(end - start).count(), count);
     return GpuBuffer(out);
 }
 
@@ -423,19 +409,25 @@ GpuBuffer GpuOps::gatherF32(MTL::Buffer* in, MTL::Buffer* indices, uint32_t coun
         }
     }
     auto end = std::chrono::high_resolution_clock::now();
-    if (sync) {
-        KernelTimer::instance().record("ops::gather_col_f32", "gather",
-            std::chrono::duration<double, std::milli>(end - start).count(), count);
-    }
+    KernelTimer::instance().record("ops::gather_col_f32", sync ? "gather" : "gather_dispatch",
+        std::chrono::duration<double, std::milli>(end - start).count(), count);
     return GpuBuffer(out);
 }
+
+// ── Utility ────────────────────────────────────────────────────────────
 
 void GpuOps::sync() {
     auto& store = GpuColumnStore::instance();
     auto cmd = store.queue()->commandBuffer();
+    auto start = std::chrono::high_resolution_clock::now();
     cmd->commit();
     cmd->waitUntilCompleted();
+    auto end = std::chrono::high_resolution_clock::now();
+    KernelTimer::instance().record("sync", "batch_flush",
+        std::chrono::duration<double, std::milli>(end - start).count(), 0);
 }
+
+// ── Conversion & Bitwise ───────────────────────────────────────────────
 
 GpuBuffer GpuOps::castU32ToF32(MTL::Buffer* in, uint32_t count) {
     auto& store = GpuColumnStore::instance();
@@ -467,10 +459,6 @@ GpuBuffer GpuOps::castU32ToF32(MTL::Buffer* in, uint32_t count) {
 
 
 
-// ── GPU Stream Compaction: extract valid entries from GroupBy hash table ──
-// Mark → Prefix Sum → Compact pipeline.
-
-
 std::vector<std::string> GpuOps::loadStringColumnRaw(const std::string& datasetPath,
                                                            const std::string& table,
                                                            const std::string& column) {
@@ -487,6 +475,8 @@ std::vector<std::string> GpuOps::loadStringColumnRaw(const std::string& datasetP
 
 
 
+
+// ── Mask & Index Operations ────────────────────────────────────────────
 
 GpuBuffer GpuOps::logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
     auto* dev = GpuColumnStore::instance().device();
@@ -582,6 +572,8 @@ std::pair<GpuBuffer, uint32_t> GpuOps::compactU32Mask(MTL::Buffer* mask, uint32_
     return compactU32Deterministic(mask, totalRows);
 }
 
+// ── Fill & Initialize ──────────────────────────────────────────────────
+
 void GpuOps::fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count) {
     auto* dev = GpuColumnStore::instance().device();
     auto* lib = GpuColumnStore::instance().library();
@@ -665,6 +657,8 @@ GpuBuffer GpuOps::iotaU32(uint32_t count) {
 
 
 
+// (see also: bitcastF32ToU32 below in Conversion & Bitwise)
+
 GpuBuffer GpuOps::bitcastF32ToU32(MTL::Buffer* in, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto out = store.device()->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
@@ -693,7 +687,8 @@ GpuBuffer GpuOps::bitcastF32ToU32(MTL::Buffer* in, uint32_t count) {
 
 
 
-// ── GPU arithAddConstU32: out[i] = in[i] + val ──
+// ── Arithmetic ─────────────────────────────────────────────────────────
+
 GpuBuffer GpuOps::arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto p = makePSO(store.device(), store.library(), "ops::arith_add_const_u32");
@@ -719,7 +714,6 @@ GpuBuffer GpuOps::arithAddConstU32(MTL::Buffer* in, uint32_t val, uint32_t count
     return GpuBuffer(out);
 }
 
-// ── GPU nonNullIndicatorF32: out[i] = (in[i] != 0) ? 1.0 : 0.0 ──
 GpuBuffer GpuOps::nonNullIndicatorF32(MTL::Buffer* in, uint32_t count) {
     auto& store = GpuColumnStore::instance();
     auto p = makePSO(store.device(), store.library(), "ops::nonnull_indicator_f32");
@@ -744,9 +738,7 @@ GpuBuffer GpuOps::nonNullIndicatorF32(MTL::Buffer* in, uint32_t count) {
     return GpuBuffer(out);
 }
 
-// ── Shared helper for binary f32 arithmetic GPU kernels ──
-// Handles ColCol (2 buffers), ColScalar (buf + scalar), ScalarCol (scalar + buf).
-// Avoids ~180 lines of near-identical boilerplate.
+// Shared helper for binary f32 arithmetic kernels (ColCol / ColScalar / ScalarCol).
 enum class ArithBindKind { ColCol, ColScalar, ScalarCol };
 
 static GpuBuffer arithF32Dispatch(
@@ -825,7 +817,8 @@ GpuBuffer GpuOps::createBuffer(const void* data, size_t size) {
     }
 }
 
-// Cached 4-byte output buffer for reduce operations (avoids repeated alloc/release)
+// ── Reduction ──────────────────────────────────────────────────────────
+
 static MTL::Buffer* getReduceOutBuf() {
     static std::mutex mu;
     std::lock_guard<std::mutex> lk(mu);
@@ -917,7 +910,8 @@ float GpuOps::reduceMaxF32(MTL::Buffer* in, uint32_t count) {
     return res;
 }
 
-// ── M11: Extract YEAR from u32 date → u32 year ─────────────────────────
+// ── Date ───────────────────────────────────────────────────────────────
+
 GpuBuffer GpuOps::extractYearU32(MTL::Buffer* dateCol, uint32_t count) {
     if (count == 0) return {};
     auto& store = GpuColumnStore::instance();
@@ -948,7 +942,8 @@ GpuBuffer GpuOps::extractYearU32(MTL::Buffer* dateCol, uint32_t count) {
     return GpuBuffer(outBuf);
 }
 
-// ── T7: Flat-string SUBSTRING (zero-copy offset/length adjustment) ──
+// ── String Operations ──────────────────────────────────────────────────
+
 std::pair<GpuBuffer, GpuBuffer> GpuOps::substringFlat(
     MTL::Buffer* inOffsets, MTL::Buffer* inLengths,
     uint32_t startPos, uint32_t substrLen, uint32_t rowCount) {
@@ -988,7 +983,6 @@ std::pair<GpuBuffer, GpuBuffer> GpuOps::substringFlat(
     return {GpuBuffer(outOffsets), GpuBuffer(outLengths)};
 }
 
-// ── T7: Hash-encode flat string to u32 (first 8 chars packed big-endian) ──
 GpuBuffer GpuOps::stringHashEncodeU32(
     MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount) {
     if (rowCount == 0) return {};
@@ -1020,7 +1014,6 @@ GpuBuffer GpuOps::stringHashEncodeU32(
     return GpuBuffer(outBuf);
 }
 
-// ── T8: FNV1a-32 hash of flat string columns ──
 GpuBuffer GpuOps::stringFnv1aU32(
     MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount) {
     if (rowCount == 0) return {};
@@ -1052,10 +1045,6 @@ GpuBuffer GpuOps::stringFnv1aU32(
     return GpuBuffer(outBuf);
 }
 
-// ── GPU FlatStringCol gather ─────────────────────────────────────────────
-// Gathers chars/offsets/lengths by an index buffer to produce a compacted FlatStringCol.
-// Steps: 1) gather lengths via gatherU32, 2) prefix-sum → new offsets,
-//        3) gather_flat_string_chars kernel copies chars.
 GpuOps::FlatStringGatherResult GpuOps::gatherFlatString(
     MTL::Buffer* srcChars, MTL::Buffer* srcOffsets, MTL::Buffer* srcLengths,
     MTL::Buffer* indices, uint32_t count, bool doSync) {
@@ -1080,6 +1069,8 @@ GpuOps::FlatStringGatherResult GpuOps::gatherFlatString(
     uint64_t totalBytes = scanInPlace(outOffsets, count);
 
     // Step 3: Allocate output chars and dispatch char-copy kernel
+    // Guard against >4GB overflow (uint32_t max)
+    if (totalBytes > (uint64_t)UINT32_MAX) return r;
     uint32_t totalBytesU32 = static_cast<uint32_t>(totalBytes);
     size_t allocBytes = (totalBytesU32 > 0) ? totalBytesU32 : 1;
     GpuBuffer outChars(dev->newBuffer(allocBytes, MTL::ResourceStorageModeShared));
@@ -1120,7 +1111,6 @@ GpuOps::FlatStringGatherResult GpuOps::gatherFlatString(
     return r;
 }
 
-// ── E1a: FNV1a-64 hash, XOR-folded to u32 ──────────────────────────────
 GpuBuffer GpuOps::stringFnv1aU64Fold32(
     MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths, uint32_t rowCount) {
     if (rowCount == 0) return {};
@@ -1173,7 +1163,6 @@ GpuBuffer GpuOps::stringFnv1aU64Fold32(
     return GpuBuffer(outBuf);
 }
 
-// ── E2a: GPU string rank by prefix-u64 sort ─────────────────────────────
 GpuBuffer GpuOps::stringRankByPrefix(
     MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths,
     uint32_t rowCount, bool ascending) {
@@ -1274,7 +1263,6 @@ GpuBuffer GpuOps::stringRankByPrefix(
     return GpuBuffer(rankBuf);
 }
 
-// ── E3a: Concatenate two flat-string results ────────────────────────────
 GpuOps::FlatStringGatherResult GpuOps::concatFlatStrings(
     const FlatStringGatherResult& a, const FlatStringGatherResult& b) {
     FlatStringGatherResult r;
@@ -1368,7 +1356,7 @@ GpuOps::FlatStringGatherResult GpuOps::concatFlatStrings(
     return r;
 }
 
-// ── H4: GPU dedup by sorted keys ────────────────────────────────────────
+// (continued: Arithmetic — arithAdd, scatter, math)
 
 GpuBuffer GpuOps::arithAddF32ColCol(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t count) {
     return arithF32Dispatch("ops::arith_add_f32_col_col", ArithBindKind::ColCol, colA, colB, 0, count);

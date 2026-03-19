@@ -44,6 +44,16 @@ bool projectSubstring(const FunctionCall& func,
         }
 
         // --- GPU path: use FlatStringCol or flatten on-the-fly from stringCols ---
+        // Handle 0-row context: return empty result immediately
+        if (ctx.rowCount == 0) {
+            ctx.stringCols[outName] = {};
+            ctx.stringCols[posName] = {};
+            ctx.u32Cols[outName] = {};
+            ctx.u32Cols[posName] = {};
+            out.u32Cols.push_back({});
+            out.u32Names.push_back(outName);
+            return true;
+        }
         std::string flatKey = colName;
         if (!ctx.flatStringCols.count(flatKey)) {
             std::string resolved = ctx.resolveColName(colName);
@@ -664,6 +674,15 @@ bool projectComputedExpression(
 
     // Computed expression — evaluate on GPU and add to context
     ctx.aggregateCounter = 0;
+
+    // Handle 0-row context: return empty result immediately
+    if (ctx.rowCount == 0) {
+        ctx.f32Cols[posName] = {};
+        if (!outName.empty()) ctx.f32Cols[outName] = {};
+        out.f32Cols.push_back({});
+        out.f32Names.push_back(outName.empty() ? posName : outName);
+        return true;
+    }
 
     MTL::Buffer* gpuBuf = GpuExecutor::evaluateExpression(expr, ctx);
     std::vector<float> values;

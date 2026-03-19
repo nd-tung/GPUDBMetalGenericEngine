@@ -3,13 +3,14 @@
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
-cnt|total|n_name|
+n_name|cnt|total|n_name|cnt|total|n_name|cnt|total|
 ---------------------------------------------------
-Planning time: 0.63 ms
-Data Load Time (Disk+Upload): 21.79 ms
+Planning time: 0.64 ms
+Data Load Time (Disk+Upload): 30.03 ms
 GPU kernels time: 0.00 ms
 CPU postprocess time: 0.04 ms
-Total Internal Pipeline time: 21.83 ms
-Total Host Execution time: 21.86 ms
-Total Wall time (Plan+Exec): 22.49 ms
+Node timing: Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=0.0(g0.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=0.0(g0.0)ms Project=0.0(g0.0)ms
+Total Internal Pipeline time: 30.07 ms
+Total Host Execution time: 30.09 ms
+Total Wall time (Plan+Exec): 30.74 ms
 ---------------------------------------------------

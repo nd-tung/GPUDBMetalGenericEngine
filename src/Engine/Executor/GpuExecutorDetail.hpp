@@ -14,6 +14,7 @@
 #include "DictEncoded.hpp"
 #include "EvalContext.hpp"
 #include "DetailHelpers.hpp"
+#include "QueryExecutionContext.hpp"
 #include "GpuExecutor.hpp"
 #include "EnvUtil.hpp"
 
@@ -35,6 +36,7 @@ struct GroupByKeyData {
     std::vector<std::string> keyNames;
     std::vector<std::vector<std::string>> outputStringMaps;
     std::vector<std::unordered_map<uint32_t, std::string>> hashToStringMaps;
+    std::vector<std::shared_ptr<std::vector<std::string>>> dictRefMaps; // shared dict refs for O(1) lookup
     std::vector<bool> keyFromF32;
     std::vector<MTL::Buffer*> keyBufsGPU;
 };

@@ -78,7 +78,9 @@ static int executeQuery(const std::string& sql, const std::string& datasetPath) 
         std::cout << "Scalar " << result.scalarName << ": " 
                   << std::fixed << std::setprecision(2) << result.scalarValue << std::endl;
     } else {
-        const auto& t = result.table;
+        auto& t = result.table;
+        // Materialize any deferred (GPU-resident) string columns for display
+        t.materializeDeferredStrings();
 
         // --- Value rendering helpers ---
         auto printU32 = [&](const std::string& name, uint32_t v) {
@@ -140,6 +142,12 @@ static int executeQuery(const std::string& sql, const std::string& datasetPath) 
     printf("Data Load Time (Disk+Upload): %.2f ms\n", result.table.uploadMs);
     printf("GPU kernels time: %.2f ms\n", result.table.gpuMs);
     printf("CPU postprocess time: %.2f ms\n", result.table.cpuPostMs);
+    if (!result.table.nodeTimings.empty()) {
+        printf("Node timing:");
+        for (auto& nt : result.table.nodeTimings)
+            printf(" %s=%.1f(g%.1f)ms", nt.name.c_str(), nt.wallMs, nt.gpuMs);
+        printf("\n");
+    }
     printf("Total Internal Pipeline time: %.2f ms\n", result.table.uploadMs + result.table.gpuMs + result.table.cpuPostMs);
     printf("Total Host Execution time: %.2f ms\n", exec_ms);
     printf("Total Wall time (Plan+Exec): %.2f ms\n", plan_ms + exec_ms);
@@ -180,6 +188,7 @@ int main(int argc, const char* argv[]) {
         std::string arg = argv[i];
         if (arg == "sf1") datasetPath = "data/SF-1/";
         else if (arg == "sf10") datasetPath = "data/SF-10/";
+        else if (arg == "sf100") datasetPath = "/Users/nguyen/Documents/GPUDBMetalBenchmark/data/SF-100/";
         // "v1" flag removed — GPUDB_V1 was never read anywhere
         else if (arg == "--sql" && i+1 < argc) { sql = argv[++i]; }
         else if (arg == "help" || arg == "--help" || arg == "-h") {

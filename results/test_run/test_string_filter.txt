@@ -25,40 +25,72 @@ p_partkey|l_extendedprice|p_name|p_type|
 191923|100746.00|chocolate lace burnished violet beige|PROMO BURNISHED NICKEL|
 184968|100595.04|light midnight chiffon spring blue|PROMO PLATED COPPER|
 ---------------------------------------------------
-Planning time: 0.79 ms
-Data Load Time (Disk+Upload): 2547.34 ms
-GPU kernels time: 10.20 ms
-CPU postprocess time: 70.18 ms
-Total Internal Pipeline time: 2627.72 ms
-Total Host Execution time: 2642.77 ms
-Total Wall time (Plan+Exec): 2643.56 ms
+Planning time: 0.86 ms
+Data Load Time (Disk+Upload): 2699.30 ms
+GPU kernels time: 672.43 ms
+CPU postprocess time: 251.42 ms
+Node timing: Scan=217.1(g169.3)ms Save=4.9(g0.0)ms Scan=260.8(g255.3)ms Join=112.0(g65.9)ms Project=104.1(g110.2)ms OrderBy=177.0(g30.8)ms Limit=47.9(g40.9)ms
+Total Internal Pipeline time: 3623.15 ms
+Total Host Execution time: 3629.73 ms
+Total Wall time (Plan+Exec): 3630.59 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  filter         :    6.766 ms (66.329%) [4 calls]
-  gather         :    1.883 ms (18.455%) [6 calls]
-  hash_join_probe_u32:    1.271 ms (12.463%) [2 calls]
-  sort           :    0.281 ms (2.754%) [2 calls]
+  batch_flush    :   48.533 ms (7.218%) [4 calls]
+  filter         :  393.777 ms (58.561%) [4 calls]
+  gather         :  174.960 ms (26.019%) [12 calls]
+  gather_dispatch:    0.317 ms (0.047%) [19 calls]
+  hash_join_probe_u32:   47.886 ms (7.121%) [2 calls]
+  sort           :    6.953 ms (1.034%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 10.201 ms
-  Kernel invocations: 14
+  TOTAL GPU TIME: 672.425 ms
+  Kernel invocations: 43
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_string_ge                1.188         200000        168.397
-ops::filter_string_lt                0.662         200000        301.925
-hash_join_probe_write_multi          0.771         132994        172.589
-ops::gather_col_u32                  0.744          33174         44.604
-ops::filter_ge_u32                   3.284        6001215       1827.503
-ops::filter_lt_u32_indexed           1.632        3426687       2099.095
-hash_join_probe_write_multi          0.501         225253        449.831
+ops::filter_string_ge               66.547         200000          3.005
+ops::filter_string_lt               71.917         200000          2.781
+hash_join_probe_write_multi         23.913         132994          5.562
+ops::gather_col_u32                  6.943          33174          4.778
+ops::filter_ge_u32                 144.585        6001215         41.506
+ops::filter_lt_u32_indexed         110.728        3426687         30.947
+ops::gather_col_u32                  0.011         225253      21452.667
+ops::gather_col_u32                  0.006         225253      38617.007
+ops::gather_col_f32                  0.005         225253      46205.744
+sync                                 6.169              0          0.000
+ops::gather_col_u32                  0.015          33174       2223.906
+ops::gather_col_u32                  0.004          33174       8124.908
+ops::gather_col_u32                  0.004          33174       8654.840
+ops::gather_col_u32                  0.003          33174      10341.022
+ops::gather_col_u32                  0.006          33174       5606.557
+sync                                11.887              0          0.000
+hash_join_probe_write_multi         23.973         225253          9.396
+ops::gather_col_u32                  0.008          37110       4567.385
+ops::gather_col_u32                  0.004          37110       9786.392
+ops::gather_col_f32                  0.004          37110       9181.098
+ops::gather_col_u32                  0.004          37110       8482.286
+ops::gather_col_u32                  0.007          37110       5566.222
+ops::gather_col_u32                  0.108          37110        342.555
+ops::gather_col_u32                  0.057          37110        651.533
+ops::gather_col_u32                  0.055          37110        670.667
+sync                                23.566              0          0.000
+ops::gather_col_u32                  7.175          37110          5.172
+ops::gather_flat_string             46.218          37110          0.803
+ops::gather_col_u32                  8.893          37110          4.173
+ops::gather_flat_string             47.912          37110          0.775
 radix_sort_u64                       0.000          37110          0.000
-orderby_gpu_gather                   0.281         111330        396.309
-ops::gather_col_u32                  0.229          37110        161.816
-ops::gather_col_u32                  0.250          37110        148.193
-ops::gather_col_u32                  0.242             20          0.083
-ops::gather_col_u32                  0.208             20          0.096
-ops::gather_col_f32                  0.209             20          0.095
+ops::gather_col_u32                  0.006          37110       5937.600
+ops::gather_col_u32                  0.005          37110       6958.560
+ops::gather_col_f32                  0.005          37110       7240.976
+sync                                 6.911              0          0.000
+orderby_gpu_gather                   6.953         111330         16.012
+ops::gather_col_u32                  7.928          37110          4.681
+ops::gather_col_u32                  8.963          37110          4.141
+ops::gather_col_u32                  7.989             20          0.003
+ops::gather_col_u32                  8.981             20          0.002
+ops::gather_col_f32                  6.986             20          0.003
+ops::gather_col_u32                  7.972             20          0.003
+ops::gather_col_u32                  8.999             20          0.002
 ─────────────────────────────────────────────────────────────────
-TOTAL: 10.201 ms
+TOTAL: 672.425 ms

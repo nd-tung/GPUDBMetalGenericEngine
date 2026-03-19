@@ -27,10 +27,21 @@ std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vecto
     if (numAggs == 0 || numAggs > engine::config::kMaxGroupByAggs) return std::nullopt;
     if (aggInputsF32.size() < numAggs) return std::nullopt;
 
-    uint32_t cap = nextPow2(std::max<uint32_t>(128u, rowCount * 2u));
+    // Cap hash table capacity to avoid enormous Metal allocations.
+    // htKeys = cap*32 bytes, htAggs = cap*64 bytes.  Cap at 2^26 (~6.1 GB total).
+    constexpr uint32_t kMaxHTCap = 1u << 26; // 67M slots
+    uint64_t desired = static_cast<uint64_t>(rowCount) * 2u;
+    uint32_t cap = nextPow2(std::max<uint32_t>(128u, static_cast<uint32_t>(std::min<uint64_t>(desired, kMaxHTCap))));
+    if (cap > kMaxHTCap) cap = kMaxHTCap;
+
     // Stride increased from 4 to 8, size is cap * 8 * sizeof(uint32_t)
     auto htKeys = store.device()->newBuffer(static_cast<size_t>(cap) * 8 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     auto htAggs = store.device()->newBuffer(static_cast<size_t>(cap) * 16 * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    if (!htKeys || !htAggs) {
+        if (htKeys) htKeys->release();
+        if (htAggs) htAggs->release();
+        return std::nullopt; // fall back to CPU path
+    }
     std::memset(htKeys->contents(), 0, static_cast<size_t>(cap) * 8 * sizeof(uint32_t));
     std::memset(htAggs->contents(), 0, static_cast<size_t>(cap) * 16 * sizeof(uint32_t));
 

@@ -4,64 +4,69 @@
 ======================RESULT=======================
 ---------------------------------------------------
 avg_bal|cnt|
-5012.34|5626.00|
-4985.21|5559.00|
-5055.97|5540.00|
-4965.71|5516.00|
-4965.33|5509.00|
-4936.91|5501.00|
-5033.41|5478.00|
-5054.86|5473.00|
-4941.89|5466.00|
-4957.24|5463.00|
-5008.93|5460.00|
-5008.07|5453.00|
-5021.93|5451.00|
-5067.83|5443.00|
-5000.17|5434.00|
-4990.98|5433.00|
-5007.57|5424.00|
-4991.81|5424.00|
-5035.17|5422.00|
-4956.15|5415.00|
-4994.14|5386.00|
-4996.84|5380.00|
-4960.11|5364.00|
-4974.51|5347.00|
-5007.10|5341.00|
+4559.35|6161.00|
+4534.12|6100.00|
+4485.40|6100.00|
+4519.53|6078.00|
+4548.47|6042.00|
+4489.98|6033.00|
+4643.43|6024.00|
+4589.38|6020.00|
+4506.58|6011.00|
+4501.60|6009.00|
+4499.13|6008.00|
+4497.24|5999.00|
+4521.14|5995.00|
+4609.21|5992.00|
+4480.36|5983.00|
+4544.22|5975.00|
+4565.20|5975.00|
+4579.16|5974.00|
+4515.53|5963.00|
+4571.77|5952.00|
+4514.54|5948.00|
+4591.36|5925.00|
+4548.89|5921.00|
+4578.57|5908.00|
+4535.19|5904.00|
 ---------------------------------------------------
-Planning time: 0.64 ms
-Data Load Time (Disk+Upload): 112.75 ms
-GPU kernels time: 8.30 ms
-CPU postprocess time: 11.81 ms
-Total Internal Pipeline time: 132.86 ms
-Total Host Execution time: 133.06 ms
-Total Wall time (Plan+Exec): 133.70 ms
+Planning time: 0.88 ms
+Data Load Time (Disk+Upload): 134.45 ms
+GPU kernels time: 146.72 ms
+CPU postprocess time: 107.68 ms
+Node timing: Scan=69.8(g69.2)ms Project=24.3(g6.9)ms GroupBy=112.4(g45.7)ms OrderBy=47.9(g24.9)ms
+Total Internal Pipeline time: 388.84 ms
+Total Host Execution time: 389.01 ms
+Total Wall time (Plan+Exec): 389.89 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    0.415 ms (4.998%) [2 calls]
-  filter         :    1.194 ms (14.389%) [1 calls]
-  gather         :    0.970 ms (11.693%) [4 calls]
-  groupby        :    5.296 ms (63.841%) [2 calls]
-  sort           :    0.421 ms (5.078%) [2 calls]
+  batch_flush    :    7.957 ms (5.424%) [1 calls]
+  cast           :   14.878 ms (10.141%) [2 calls]
+  filter         :   69.183 ms (47.154%) [1 calls]
+  gather         :   15.821 ms (10.783%) [2 calls]
+  gather_dispatch:    0.016 ms (0.011%) [3 calls]
+  groupby        :   30.818 ms (21.005%) [2 calls]
+  sort           :    8.042 ms (5.481%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 8.295 ms
-  Kernel invocations: 11
+  TOTAL GPU TIME: 146.716 ms
+  Kernel invocations: 13
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_f32                   1.194         150000        125.668
-ops::gather_col_f32                  0.254         136308        536.910
-ops::gather_col_u32                  0.263         136308        517.626
-ops::gather_col_u32                  0.247         136308        551.390
-ops::groupby_agg_multi_key_ty        4.995         136308         27.288
-ops::ht_extract_compact              0.301             25          0.083
-ops::cast_u32_to_f32                 0.207             25          0.121
-ops::cast_u32_to_f32                 0.207             25          0.121
+ops::filter_gt_f32                  69.183         150000          2.168
+ops::gather_col_f32                  6.897         136308         19.765
+ops::groupby_agg_multi_key_ty        6.953         150000         21.574
+ops::ht_extract_compact             23.865             25          0.001
+ops::cast_u32_to_f32                 6.892             25          0.004
+ops::cast_u32_to_f32                 7.987             25          0.003
 block_sort_kv_u64                    0.000             25          0.000
-orderby_gpu_gather                   0.421             75          0.178
-ops::gather_col_u32                  0.206             25          0.122
+ops::gather_col_u32                  0.005             25          4.724
+ops::gather_col_f32                  0.006             25          4.110
+ops::gather_col_f32                  0.005             25          5.358
+sync                                 7.957              0          0.000
+orderby_gpu_gather                   8.042             75          0.009
+ops::gather_col_u32                  8.924             25          0.003
 ─────────────────────────────────────────────────────────────────
-TOTAL: 8.295 ms
+TOTAL: 146.716 ms

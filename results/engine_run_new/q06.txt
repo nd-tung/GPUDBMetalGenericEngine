@@ -1,0 +1,24 @@
+--- Running (Engine Host) ---
+[Main] Using GpuExecutor generic executor.
+---------------------------------------------------
+======================RESULT=======================
+---------------------------------------------------
+Scalar sum_no_overflow((l_extendedprice * l_discount)): 123141016.00
+---------------------------------------------------
+Planning time: 0.79 ms
+Data Load Time (Disk+Upload): 2800.22 ms
+GPU kernels time: 538.39 ms
+CPU postprocess time: 13.20 ms
+Node timing: Scan=477.2(g475.2)ms Project=40.3(g39.5)ms Aggregate=34.1(g23.7)ms
+Total Internal Pipeline time: 3351.81 ms
+Total Host Execution time: 3351.83 ms
+Total Wall time (Plan+Exec): 3352.63 ms
+---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  batch_flush    :   14.940 ms (2.775%) [2 calls]
+  filter         :  475.217 ms (88.266%) [5 calls]
+  gather         :   48.232 ms (8.959%) [6 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 538.389 ms
+  Kernel invocations: 13

@@ -1,10 +1,14 @@
 #pragma once
 
 #include "GpuBuffer.hpp"
+#include "FlatStringCol.hpp"
+#include "DictEncoded.hpp"
+#include "StringMaterializer.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -39,6 +43,12 @@ struct TableResult {
     // Used by recoverStringColumns() to choose O(1) dict lookup vs hash reverse-map.
     std::unordered_set<std::string> dictIdCols;
 
+    // GPU-resident deferred string columns (avoid N×string materialization).
+    // When present for a column name that appears in stringNames,
+    // the corresponding stringCols entry may be empty (deferred).
+    std::unordered_map<std::string, FlatStringCol> flatStringResults;
+    std::unordered_map<std::string, DictEncoded>   dictStringResults;
+
     std::size_t rowCount = 0;
 
     // GPU buffer mirrors (RAII — auto-retains on copy, auto-releases on destroy).
@@ -49,6 +59,34 @@ struct TableResult {
     double uploadMs = 0.0;
     double gpuMs = 0.0;
     double cpuPostMs = 0.0;
+
+    // Per-node wall-clock timing (name, wall milliseconds, gpu milliseconds)
+    struct NodeTiming { std::string name; double wallMs; double gpuMs; };
+    std::vector<NodeTiming> nodeTimings;
+
+    // Materialize all deferred string columns (from flatStringResults/dictStringResults)
+    // into stringCols for final output rendering. Call once before reading stringCols.
+    void materializeDeferredStrings() {
+        for (size_t ci = 0; ci < stringNames.size(); ++ci) {
+            if (ci >= stringCols.size()) break;
+            if (!stringCols[ci].empty()) continue;
+            const auto& name = stringNames[ci];
+            const FlatStringCol* flat = nullptr;
+            const DictEncoded* dict = nullptr;
+            auto fit = flatStringResults.find(name);
+            if (fit != flatStringResults.end()) flat = &fit->second;
+            auto dit = dictStringResults.find(name);
+            if (dit != dictStringResults.end()) dict = &dit->second;
+            auto result = StringMaterializer::materialize(flat, dict);
+            if (!result.empty()) stringCols[ci] = std::move(result);
+        }
+    }
+
+    // Clear deferred string storage (call when clearing tableResult)
+    void clearDeferredStrings() {
+        flatStringResults.clear();
+        dictStringResults.clear();
+    }
 };
 
 } // namespace engine

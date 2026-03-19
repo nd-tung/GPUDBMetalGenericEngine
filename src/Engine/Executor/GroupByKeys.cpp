@@ -24,11 +24,21 @@ void postProcessStringKeys(
     const std::vector<std::vector<uint32_t>>& keyVecs,
     const std::vector<std::vector<std::string>>& outputStringMaps,
     const std::vector<std::unordered_map<uint32_t, std::string>>& hashToStringMaps,
+    const std::vector<std::shared_ptr<std::vector<std::string>>>& dictRefMaps,
     TableResult& out, bool /*debug*/) {
     // Post-process string columns
     for (size_t k = 0; k < keyVecs.size(); ++k) {
-        // Check if we have hash->string mapping (for pre-hashed keys)
-        if (k < hashToStringMaps.size() && !hashToStringMaps[k].empty()) {
+        // Fast path: direct dict array indexing (0-based, no hash lookup)
+        if (k < dictRefMaps.size() && dictRefMaps[k]) {
+            const auto& dict = *dictRefMaps[k];
+            std::vector<std::string> strCol;
+            strCol.reserve(out.rowCount);
+            for (uint32_t val : out.u32Cols[k]) {
+                strCol.push_back(val < dict.size() ? dict[val] : "");
+            }
+            out.stringCols.push_back(std::move(strCol));
+            out.stringNames.push_back(out.u32Names[k]);
+        } else if (k < hashToStringMaps.size() && !hashToStringMaps[k].empty()) {
             // Use hash lookup
             std::vector<std::string> strCol;
             strCol.reserve(out.rowCount);
@@ -103,6 +113,7 @@ void buildGroupByOutputOrder(
     const std::vector<bool>& keyFromF32,
     const std::vector<std::vector<std::string>>& outputStringMaps,
     const std::vector<std::unordered_map<uint32_t, std::string>>& hashToStringMaps,
+    const std::vector<std::shared_ptr<std::vector<std::string>>>& dictRefMaps,
     TableResult& out) {
     // Build output order - check if any string column was produced
     out.order.clear();
@@ -114,7 +125,8 @@ void buildGroupByOutputOrder(
     }
     for (size_t i = 0; i < out.u32Names.size(); ++i) {
         bool hasStrings = (!outputStringMaps[i].empty()) || 
-                          (i < hashToStringMaps.size() && !hashToStringMaps[i].empty());
+                          (i < hashToStringMaps.size() && !hashToStringMaps[i].empty()) ||
+                          (i < dictRefMaps.size() && dictRefMaps[i]);
         bool wasF32 = (i < keyFromF32.size() && keyFromF32[i]);
         if (hasStrings) {
             out.order.push_back({TableResult::ColRef::Kind::String, strIdx++, out.u32Names[i]});
@@ -181,18 +193,13 @@ static bool buildDictIdKey(EvalContext& ctx, const std::string& col,
         }
     }
 
-    std::unordered_map<uint32_t, std::string> idToStr;
-    idToStr.reserve(dict.dictionary.size());
-    for (uint32_t d = 0; d < static_cast<uint32_t>(dict.dictionary.size()); ++d) {
-        idToStr[d] = dict.dictionary[d];
-    }
-
     kd.keyVecs.push_back(std::move(ids));
     kd.keyBufsGPU.push_back(idsBufGPU);
     kd.keyNames.push_back(keyName.empty() ? col : keyName);
     kd.keyFromF32.push_back(false);
     kd.outputStringMaps.push_back({});
-    kd.hashToStringMaps.push_back(std::move(idToStr));
+    kd.hashToStringMaps.push_back({});
+    kd.dictRefMaps.push_back(dict.dictionary.p);
     LOG_DEBUG("Exec", "GroupBy: Dict ID key for " << col << " (" << dict.dictionary.size() << " unique, collision-free)\n");
     return true;
 }
@@ -202,22 +209,7 @@ static bool buildDictIdKey(EvalContext& ctx, const std::string& col,
 static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
                                const std::string& keyName, size_t expectedKeyRows,
                                GroupByKeyData& kd, bool /*debug*/) {
-    if (!ctx.stringCols.count(col) && !ctx.hasDictCol(col))
-        return false;
-
-    ctx.ensureStringCol(col);
-    if (!ctx.stringCols.count(col) || ctx.stringCols.at(col).empty())
-        return false;
-
-    const auto& strData = ctx.stringCols.at(col);
-    ctx.ensureActiveRowsCPU();
-
-    if (strData.size() != expectedKeyRows && ctx.activeRows.empty())
-        return false;
-
-    // --- GPU FNV1a hash path ---
-    bool gpuHashOk = false;
-
+    // Locate flatStringCols key early to avoid expensive ensureStringCol
     std::string flatKey = col;
     if (!ctx.flatStringCols.count(flatKey)) {
         for (int sfx = 1; sfx <= 9; ++sfx) {
@@ -225,12 +217,45 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
             if (ctx.flatStringCols.count(sfxKey)) { flatKey = sfxKey; break; }
         }
     }
+    bool hasFlat = ctx.flatStringCols.count(flatKey) > 0;
+
+    if (!hasFlat && !ctx.stringCols.count(col) && !ctx.hasDictCol(col))
+        return false;
+
+    // If u32 data exists with correct row count, let the u32 path handle it
+    // (avoids expensive CPU sequential encoding; u32 values serve as direct keys)
+    {
+        auto u32It = ctx.u32Cols.find(col);
+        if (u32It != ctx.u32Cols.end() && u32It->second.size() == expectedKeyRows)
+            return false;
+        if (ctx.u32ColsGPU.count(col) && ctx.activeRowsGPU)
+            return false;
+    }
+
+    // Get source row count WITHOUT materializing strings when flat exists
+    uint32_t sourceRowCount = 0;
+    if (hasFlat) {
+        sourceRowCount = ctx.flatStringCols[flatKey].rowCount;
+    } else {
+        ctx.ensureStringCol(col);
+        if (!ctx.stringCols.count(col) || ctx.stringCols.at(col).empty())
+            return false;
+        sourceRowCount = (uint32_t)ctx.stringCols.at(col).size();
+    }
+
+    ctx.ensureActiveRowsCPU();
+
+    if (sourceRowCount != expectedKeyRows && ctx.activeRows.empty())
+        return false;
+
+    // --- GPU FNV1a hash path ---
+    bool gpuHashOk = false;
 
     MTL::Buffer* hashBuf = nullptr;
-    if (ctx.flatStringCols.count(flatKey)) {
+    if (hasFlat) {
         auto& flat = ctx.flatStringCols[flatKey];
         GpuBuffer gOff, gLen;
-        if (!ctx.activeRows.empty() && strData.size() != expectedKeyRows && ctx.activeRowsGPU) {
+        if (!ctx.activeRows.empty() && sourceRowCount != expectedKeyRows && ctx.activeRowsGPU) {
             gOff = GpuOps::gatherU32(flat.offsets, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
             gLen = GpuOps::gatherU32(flat.lengths, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
             hashBuf = GpuOps::stringFnv1aU64Fold32(flat.chars, gOff, gLen, expectedKeyRows).detach();
@@ -248,11 +273,15 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
             const uint32_t* lens = static_cast<const uint32_t*>(effLen->contents());
 
             std::unordered_map<uint32_t, std::string> hashMap;
+            hashMap.reserve(256);
             bool hasCollision = false;
             for (uint32_t i = 0; i < expectedKeyRows && !hasCollision; ++i) {
-                std::string_view sv(chars + offs[i], lens[i]);
-                auto [it2, inserted] = hashMap.try_emplace(hashes[i], std::string(sv));
-                if (!inserted && std::string_view(it2->second) != sv) {
+                uint32_t h = hashes[i];
+                auto it = hashMap.find(h);
+                if (it == hashMap.end()) {
+                    hashMap.emplace(h, std::string(chars + offs[i], lens[i]));
+                } else if (it->second.size() != lens[i] ||
+                           std::memcmp(it->second.data(), chars + offs[i], lens[i]) != 0) {
                     hasCollision = true;
                 }
             }
@@ -265,6 +294,7 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
                 kd.keyFromF32.push_back(false);
                 kd.outputStringMaps.push_back({});
                 kd.hashToStringMaps.push_back(std::move(hashMap));
+                kd.dictRefMaps.push_back(nullptr);
                 LOG_DEBUG("Exec", "GroupBy: GPU FNV1a-u64fold32 encoded string key " << col << " (" << kd.hashToStringMaps.back().size() << " unique, collision-free)\n");
             } else {
                 hashBuf->release();
@@ -277,6 +307,12 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
 
     // --- CPU fallback: sequential ID encoding ---
     if (!gpuHashOk) {
+        // Materialize strings now (deferred from above when flat path was tried)
+        ctx.ensureStringCol(col);
+        if (!ctx.stringCols.count(col) || ctx.stringCols.at(col).empty())
+            return false;
+        const auto& strData = ctx.stringCols.at(col);
+
         std::vector<uint32_t> ids;
         ids.reserve(expectedKeyRows);
         std::vector<std::string> reverseMap;
@@ -308,6 +344,7 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
         kd.keyFromF32.push_back(false);
         kd.outputStringMaps.push_back(std::move(reverseMap));
         kd.hashToStringMaps.push_back({});
+        kd.dictRefMaps.push_back(nullptr);
     }
     return true;
 }
@@ -338,6 +375,7 @@ static bool buildGroupByF32Key(EvalContext& ctx, const std::string& col,
             kd.keyFromF32.push_back(true);
             kd.outputStringMaps.push_back({});
             kd.hashToStringMaps.push_back({});
+            kd.dictRefMaps.push_back(nullptr);
             return true;
         }
     }
@@ -385,6 +423,7 @@ static bool buildGroupByF32Key(EvalContext& ctx, const std::string& col,
         kd.keyFromF32.push_back(true);
         kd.outputStringMaps.push_back({});
         kd.hashToStringMaps.push_back({});
+        kd.dictRefMaps.push_back(nullptr);
         return true;
     }
     return false;
@@ -411,6 +450,7 @@ GroupByKeyData buildGroupByKeys(
             kd.keyFromF32.push_back(false);
             kd.outputStringMaps.push_back({});
             kd.hashToStringMaps.push_back({});
+            kd.dictRefMaps.push_back(nullptr);
         }
         return kd;
     }
@@ -423,7 +463,9 @@ GroupByKeyData buildGroupByKeys(
             const std::string& col = keyExpr->asColumn().column;
 
             // LAZY FETCH: If vector is empty but on GPU, bring it back
-            if ((ctx.u32Cols.find(col) == ctx.u32Cols.end() || ctx.u32Cols[col].empty()) && ctx.u32ColsGPU.count(col)) {
+            // Skip if dictCols exist — buildDictIdKey uses dict IDs directly
+            if (!ctx.dictCols.count(col) &&
+                (ctx.u32Cols.find(col) == ctx.u32Cols.end() || ctx.u32Cols[col].empty()) && ctx.u32ColsGPU.count(col)) {
                  MTL::Buffer* buf = ctx.u32ColsGPU.at(col);
                  size_t count = buf->length() / sizeof(uint32_t);
                  if (count > 0) {
@@ -567,9 +609,11 @@ GroupByKeyData buildGroupByKeys(
                     LOG_DEBUG("Exec", "GroupBy: built hash->string map with " << hashToStr.size() << " entries\n");
                     kd.hashToStringMaps.push_back(std::move(hashToStr));
                     kd.outputStringMaps.push_back({});
+                    kd.dictRefMaps.push_back(nullptr);
                 } else {
                     kd.hashToStringMaps.push_back({});
                     kd.outputStringMaps.push_back({});
+                    kd.dictRefMaps.push_back(nullptr);
                 }
             } else {
                 // ── F32 key via bitcast ──
@@ -577,6 +621,9 @@ GroupByKeyData buildGroupByKeys(
             }
         }
     }
+    
+    // dictRefMaps is populated inline in each push site (dict path pushes dict ptr,
+    // all other paths push nullptr). No padding needed.
     
     return kd;
 }
