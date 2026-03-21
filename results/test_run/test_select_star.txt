@@ -10,25 +10,25 @@ r_regionkey|r_comment|r_name|
 3|ly final courts cajole furiously final excuse|EUROPE|
 4|uickly special accounts cajole carefully blithely close requests. carefully final asymptotes haggle furiousl|MIDDLE EAST|
 ---------------------------------------------------
-Planning time: 0.30 ms
-Data Load Time (Disk+Upload): 17.17 ms
+Planning time: 1.02 ms
+Data Load Time (Disk+Upload): 60.02 ms
 GPU kernels time: 0.00 ms
-CPU postprocess time: 18.06 ms
+CPU postprocess time: 0.28 ms
 Node timing: Scan=0.0(g0.0)ms
-Total Internal Pipeline time: 35.22 ms
-Total Host Execution time: 35.26 ms
-Total Wall time (Plan+Exec): 35.56 ms
+Total Internal Pipeline time: 60.30 ms
+Total Host Execution time: 60.33 ms
+Total Wall time (Plan+Exec): 61.35 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   18.013 ms (100.000%) [1 calls]
+  batch_flush    :    0.237 ms (100.000%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 18.013 ms
+  TOTAL GPU TIME: 0.237 ms
   Kernel invocations: 1
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-sync                                18.013              0          0.000
+sync                                 0.237              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 18.013 ms
+TOTAL: 0.237 ms

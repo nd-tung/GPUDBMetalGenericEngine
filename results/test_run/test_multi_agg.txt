@@ -3,33 +3,33 @@
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
-Scalar max(p_size): 36893488147419103232.00
+Scalar max(p_size): 1996.99
 ---------------------------------------------------
-Planning time: 0.56 ms
-Data Load Time (Disk+Upload): 96.56 ms
-GPU kernels time: 8.20 ms
-CPU postprocess time: 46.10 ms
-Node timing: Scan=0.0(g0.0)ms Project=0.9(g0.0)ms Aggregate=0.0(g0.0)ms Aggregate=19.5(g0.1)ms Aggregate=10.5(g0.0)ms Aggregate=14.3(g8.1)ms Aggregate=8.9(g0.0)ms
-Total Internal Pipeline time: 150.85 ms
-Total Host Execution time: 150.88 ms
-Total Wall time (Plan+Exec): 151.45 ms
+Planning time: 85.49 ms
+Data Load Time (Disk+Upload): 159.13 ms
+GPU kernels time: 0.65 ms
+CPU postprocess time: 54.15 ms
+Node timing: Scan=0.0(g0.0)ms Project=1.1(g0.0)ms Aggregate=0.0(g0.0)ms Aggregate=10.3(g0.1)ms Aggregate=4.5(g0.0)ms Aggregate=38.3(g0.5)ms Aggregate=0.5(g0.0)ms
+Total Internal Pipeline time: 213.93 ms
+Total Host Execution time: 214.05 ms
+Total Wall time (Plan+Exec): 299.54 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    8.207 ms (99.902%) [5 calls]
-  cast           :    0.008 ms (0.098%) [1 calls]
+  batch_flush    :    0.651 ms (97.175%) [5 calls]
+  cast           :    0.019 ms (2.825%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 8.215 ms
+  TOTAL GPU TIME: 0.669 ms
   Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-sync                                 0.086              0          0.000
-sync                                 0.031              0          0.000
-ops::cast_u32_to_f32                 0.008         200000      24743.288
-sync                                 8.051              0          0.000
-sync                                 0.021              0          0.000
-sync                                 0.018              0          0.000
+sync                                 0.108              0          0.000
+sync                                 0.032              0          0.000
+ops::cast_u32_to_f32                 0.019         200000      10573.060
+sync                                 0.471              0          0.000
+sync                                 0.020              0          0.000
+sync                                 0.019              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 8.215 ms
+TOTAL: 0.669 ms
