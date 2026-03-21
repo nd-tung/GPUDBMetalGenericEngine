@@ -3,29 +3,27 @@
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
-
+n_name|cnt|total|n_name|cnt|total|n_name|cnt|total|
 ---------------------------------------------------
-Planning time: 1.78 ms
-Data Load Time (Disk+Upload): 55.01 ms
-GPU kernels time: 0.62 ms
-CPU postprocess time: 0.16 ms
-Node timing: Scan=0.0(g0.0)ms Filter=0.7(g0.6)ms Project=0.0(g0.0)ms GroupBy=0.0(g0.0)ms OrderBy=0.0(g0.0)ms
-Total Internal Pipeline time: 55.80 ms
-Total Host Execution time: 55.82 ms
-Total Wall time (Plan+Exec): 57.59 ms
+Planning time: 0.68 ms
+Data Load Time (Disk+Upload): 14.75 ms
+GPU kernels time: 0.00 ms
+CPU postprocess time: 12.95 ms
+Node timing: Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=0.0(g0.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=0.0(g0.0)ms Project=0.0(g0.0)ms
+Total Internal Pipeline time: 27.70 ms
+Total Host Execution time: 27.74 ms
+Total Wall time (Plan+Exec): 28.42 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    0.037 ms (5.536%) [1 calls]
-  filter         :    0.625 ms (94.464%) [1 calls]
+  batch_flush    :   12.869 ms (100.000%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 0.662 ms
-  Kernel invocations: 2
+  TOTAL GPU TIME: 12.869 ms
+  Kernel invocations: 1
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_u32                   0.625             25          0.040
-sync                                 0.037              0          0.000
+sync                                12.869              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 0.662 ms
+TOTAL: 12.869 ms
