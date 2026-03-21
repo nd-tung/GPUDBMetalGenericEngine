@@ -57,7 +57,7 @@ static uint32_t getTotalRowCapacity(const EvalContext& ctx) {
     return cap;
 }
 
-static MTL::Buffer* evalColumnExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
+static GpuBuffer evalColumnExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
     if (expr->kind == TypedExpr::Kind::Column) {
     std::string col = expr->asColumn().column;
     MTL::Buffer* buf = nullptr;
@@ -111,36 +111,30 @@ static MTL::Buffer* evalColumnExpr(const TypedExprPtr& expr, EvalContext& ctx, u
         // Handle correct gathering from CPU vector
         if (vec.size() == 1 && count > 1) { // Scalar broadcast
             float val = vec[0];
-            return GpuOps::createFilledF32(val, count).detach();
+            return GpuOps::createFilledF32(val, count);
         } else {
             GpuBuffer rawBuf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(float));
             // Only gather if data is not already compacted to avoid OOB reads
             if (ctx.activeRowsGPU && vec.size() != count) {
-                GpuBuffer gathered = GpuOps::gatherF32(rawBuf, ctx.activeRowsGPU, count);
-                return gathered.detach();
+                return GpuOps::gatherF32(rawBuf, ctx.activeRowsGPU, count);
             }
-            return rawBuf.detach();
+            return rawBuf;
         }
     } else if (ctx.u32Cols.count(col) && !ctx.u32Cols[col].empty()) {
         const auto& vec = ctx.u32Cols[col];
         if (vec.size() == 1 && count > 1) { // Scalar broadcast
             float val = (float)vec[0];
-            return GpuOps::createFilledF32(val, count).detach();
+            return GpuOps::createFilledF32(val, count);
         } else {
             GpuBuffer rawBuf = GpuOps::createBuffer(vec.data(), vec.size() * sizeof(uint32_t));
-            MTL::Buffer* targetBuf = rawBuf;
-            bool temp = false;
 
             // Only gather if data is not already compacted
             if (ctx.activeRowsGPU && vec.size() != count) {
-                targetBuf = GpuOps::gatherU32(rawBuf, ctx.activeRowsGPU, count).detach();
-                temp = true;
+                GpuBuffer gathered = GpuOps::gatherU32(rawBuf, ctx.activeRowsGPU, count);
+                return GpuOps::castU32ToF32(gathered, count);
             }
 
-            GpuBuffer f32Buf = GpuOps::castU32ToF32(targetBuf, count);
-
-            if (temp) targetBuf->release();
-            return f32Buf.detach();
+            return GpuOps::castU32ToF32(rawBuf, count);
         }
     } else {
          // Suffix + RHS search via resolveGpuColName
@@ -204,43 +198,42 @@ static MTL::Buffer* evalColumnExpr(const TypedExprPtr& expr, EvalContext& ctx, u
                 else if (ctx.f32Cols.count(posKey) && !ctx.f32Cols[posKey].empty()) {
                     float val = ctx.f32Cols[posKey][0];
                     ctx.aggregateCounter++;
-                    return GpuOps::createFilledF32(val, count).detach();
+                    return GpuOps::createFilledF32(val, count);
                 }
                 else if (ctx.u32Cols.count(posKey) && !ctx.u32Cols[posKey].empty()) {
                     float val = (float)ctx.u32Cols[posKey][0];
                     ctx.aggregateCounter++;
-                    return GpuOps::createFilledF32(val, count).detach();
+                    return GpuOps::createFilledF32(val, count);
                 }
             }
         }
     }
 
-    if (!buf) return nullptr;
+    if (!buf) return GpuBuffer();
 
     // If U32, cast to F32 (and gather if needed)
     if (isU32) {
          if (ctx.activeRowsGPU) {
              // Gather to compact U32, then cast
              GpuBuffer gathered = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count);
-             GpuBuffer casted = GpuOps::castU32ToF32(gathered, count);
-             return casted.detach();
+             return GpuOps::castU32ToF32(gathered, count);
          } else {
-             return GpuOps::castU32ToF32(buf, count).detach();
+             return GpuOps::castU32ToF32(buf, count);
          }
     }
 
     // If F32
     if (ctx.activeRowsGPU) {
-        return GpuOps::gatherF32(buf, ctx.activeRowsGPU, count).detach();
+        return GpuOps::gatherF32(buf, ctx.activeRowsGPU, count);
     } else {
         buf->retain();
-        return buf; 
+        return GpuBuffer(buf);
     }
 }
-    return nullptr; // unreachable: call site guarantees expr->kind == Column
+    return GpuBuffer(); // unreachable: call site guarantees expr->kind == Column
 }
 
-static MTL::Buffer* evalCaseExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
+static GpuBuffer evalCaseExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
 if (expr->kind == TypedExpr::Kind::Case) {
     LOG_DEBUG("Exec", "evaluateExpression: Entering CASE expression handler\n");
@@ -248,7 +241,7 @@ if (expr->kind == TypedExpr::Kind::Case) {
     // Safely access CaseExpr data
     if (!std::holds_alternative<CaseExpr>(expr->data)) {
         LOG_ERROR("Exec", "ERROR: CASE expression kind but data is not CaseExpr!\n");
-        return nullptr;
+        return GpuBuffer();
     }
     const auto& c = expr->asCase();
 
@@ -257,7 +250,7 @@ if (expr->kind == TypedExpr::Kind::Case) {
     }
 
     // 1. Initialize output buffer based on ELSE
-    MTL::Buffer* outBuf = nullptr;
+    GpuBuffer outBuf;
 
     if (c.elseExpr) {
         LOG_DEBUG("Exec", "CASE: elseExpr kind=" << static_cast<int>(c.elseExpr->kind));
@@ -267,21 +260,19 @@ if (expr->kind == TypedExpr::Kind::Case) {
             if (std::holds_alternative<int64_t>(lit.value)) elseVal = (float)std::get<int64_t>(lit.value);
             else if (std::holds_alternative<double>(lit.value)) elseVal = (float)std::get<double>(lit.value);
 
-            outBuf = GpuOps::createFilledF32(elseVal, count).detach();
+            outBuf = GpuOps::createFilledF32(elseVal, count);
         } else {
-            MTL::Buffer* elseBuf = GpuExecutor::evaluateExpression(c.elseExpr, ctx);
-            if (!elseBuf) return nullptr;
+            GpuBuffer elseBuf = GpuExecutor::evaluateExpression(c.elseExpr, ctx);
+            if (!elseBuf) return GpuBuffer();
 
             // Copy elseBuf to outBuf (always copy to avoid modifying source columns)
-            outBuf = GpuOps::createBuffer(nullptr, count * sizeof(float)).detach();
+            outBuf = GpuOps::createBuffer(nullptr, count * sizeof(float));
             memcpy(outBuf->contents(), elseBuf->contents(), count * sizeof(float));
-
-            // Release elseBuf — always release since evaluateExpression transfers ownership
-            elseBuf->release();
+            // elseBuf auto-releases via GpuBuffer destructor
         }
     } else {
          // Default 0.0
-         outBuf = GpuOps::createFilledF32(0.0f, count).detach();
+         outBuf = GpuOps::createFilledF32(0.0f, count);
     } 
 
     // Helper to check if an expression contains DuckDB's "error" guard function
@@ -327,15 +318,14 @@ if (expr->kind == TypedExpr::Kind::Case) {
                  if (literalThen) {
                      GpuOps::scatterConstantF32(outBuf, subCtx.activeRowsGPU, subCtx.activeRowsCountGPU, thenVal);
                  } else {
-                     MTL::Buffer* thenBuf = GpuExecutor::evaluateExpression(w.then, subCtx);
+                     GpuBuffer thenBuf = GpuExecutor::evaluateExpression(w.then, subCtx);
                      if (thenBuf) {
                          GpuOps::scatterF32(thenBuf, outBuf, subCtx.activeRowsGPU, subCtx.activeRowsCountGPU);
-                         thenBuf->release();
+                         // thenBuf auto-releases via GpuBuffer destructor
                      } else {
                          // If evaluation fails (e.g. error function), and we have active rows, we can't proceed on GPU
                          LOG_DEBUG("Exec", "CASE THEN non-literal GPU eval failed\n");
-                         outBuf->release();
-                         return nullptr;
+                         return GpuBuffer(); // outBuf auto-releases
                      }
                  }
              }
@@ -344,16 +334,15 @@ if (expr->kind == TypedExpr::Kind::Case) {
          } else {
              LOG_DEBUG("Exec", "CASE condition eval failed on GPU\n");
              // subCtx goes out of scope; GpuBuffer destructor releases activeRowsGPU
-             outBuf->release(); 
-             return nullptr;
+             return GpuBuffer(); // outBuf auto-releases
          }
     }
     return outBuf;
 }
-    return nullptr; // unreachable: call site guarantees expr->kind == Case
+    return GpuBuffer(); // unreachable: call site guarantees expr->kind == Case
 }
 
-static MTL::Buffer* evalFunctionExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
+static GpuBuffer evalFunctionExpr(const TypedExprPtr& expr, EvalContext& ctx, uint32_t count) {
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
 if (expr->kind == TypedExpr::Kind::Function) {
     const auto& fn = expr->asFunction();
@@ -371,10 +360,10 @@ if (expr->kind == TypedExpr::Kind::Function) {
             MTL::Buffer* buf = ctx.f32ColsGPU.at(candidate);
             // Respect activeRowsGPU
             if (ctx.activeRowsGPU) {
-                 return GpuOps::gatherF32(buf, ctx.activeRowsGPU, count).detach();
+                 return GpuOps::gatherF32(buf, ctx.activeRowsGPU, count);
             } else {
                  buf->retain();
-                 return buf;  // reuse existing GPU buffer
+                 return GpuBuffer(buf);  // reuse existing GPU buffer
             }
         }
         if (ctx.u32ColsGPU.count(candidate)) {
@@ -382,10 +371,9 @@ if (expr->kind == TypedExpr::Kind::Function) {
             // Cast U32 -> F32
             if (ctx.activeRowsGPU) {
                  GpuBuffer gathered = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count);
-                 GpuBuffer asFloat = GpuOps::castU32ToF32(gathered, count);
-                 return asFloat.detach();
+                 return GpuOps::castU32ToF32(gathered, count);
             } else {
-                 return GpuOps::castU32ToF32(buf, count).detach();
+                 return GpuOps::castU32ToF32(buf, count);
             }
         }
     }
@@ -420,7 +408,7 @@ if (expr->kind == TypedExpr::Kind::Function) {
                     if (uniform) {
                         LOG_DEBUG("Exec", "evaluateExpression: FIRST using scalar column '" << colName << "' val=" << ptr[0]);
                         buf->retain();
-                        return buf;
+                        return GpuBuffer(buf);
                     }
                 }
             }
@@ -445,7 +433,7 @@ if (expr->kind == TypedExpr::Kind::Function) {
             if (lowerCol.find(fnPrefix) == 0 && buf) {
                 LOG_DEBUG("Exec", "evaluateExpression: Found aggregate col '" << colName << "' for " << fnName);
                 buf->retain();
-                return buf;
+                return GpuBuffer(buf);
             }
         }
         // Also check u32ColsGPU
@@ -456,10 +444,9 @@ if (expr->kind == TypedExpr::Kind::Function) {
                 LOG_DEBUG("Exec", "evaluateExpression: Found aggregate col (u32) '" << colName << "' for " << fnName << ", casting to f32\n");
                 if (ctx.activeRowsGPU) {
                     GpuBuffer gathered = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count);
-                    GpuBuffer casted = GpuOps::castU32ToF32(gathered, count);
-                    return casted.detach();
+                    return GpuOps::castU32ToF32(gathered, count);
                 } else {
-                    return GpuOps::castU32ToF32(buf, buf->length() / sizeof(uint32_t)).detach();
+                    return GpuOps::castU32ToF32(buf, buf->length() / sizeof(uint32_t));
                 }
             }
         }
@@ -472,37 +459,33 @@ if (expr->kind == TypedExpr::Kind::Function) {
              MTL::Buffer* buf = ctx.f32ColsGPU[posKey];
              buf->retain(); 
              ctx.aggregateCounter++; 
-             return buf;
+             return GpuBuffer(buf);
          }
          if (ctx.u32ColsGPU.count(posKey)) {
              MTL::Buffer* buf = ctx.u32ColsGPU[posKey];
              ctx.aggregateCounter++;
              if (ctx.activeRowsGPU) {
                   GpuBuffer gathered = GpuOps::gatherU32(buf, ctx.activeRowsGPU, count);
-                  GpuBuffer casted = GpuOps::castU32ToF32(gathered, count);
-                  return casted.detach();
+                  return GpuOps::castU32ToF32(gathered, count);
              } else {
-                  return GpuOps::castU32ToF32(buf, count).detach();
+                  return GpuOps::castU32ToF32(buf, count);
              }
          }
          if (ctx.f32Cols.count(posKey) && !ctx.f32Cols[posKey].empty()) {
              float val = ctx.f32Cols[posKey][0];
-             GpuBuffer outBuf = GpuOps::createFilledF32(val, count);
              ctx.aggregateCounter++;
-             return outBuf.detach();
+             return GpuOps::createFilledF32(val, count);
          }
          if (ctx.u32Cols.count(posKey) && !ctx.u32Cols[posKey].empty()) {
              float val = (float)ctx.u32Cols[posKey][0];
-             GpuBuffer outBuf = GpuOps::createFilledF32(val, count);
              ctx.aggregateCounter++;
-             return outBuf.detach();
+             return GpuOps::createFilledF32(val, count);
          }
     }
 
     // Handle explicit error throws (from scalar subquery checks) or "error" calls
     if (fnName == "ERROR" || fnName == "\"ERROR\"") {
-         GpuBuffer outBuf = GpuOps::createFilledF32(0.0f, count);
-         return outBuf.detach();
+         return GpuOps::createFilledF32(0.0f, count);
     }
 
     if (fnName == "EXTRACT" && fn.args.size() == 2) {
@@ -522,33 +505,28 @@ if (expr->kind == TypedExpr::Kind::Function) {
          std::transform(unitStr.begin(), unitStr.end(), unitStr.begin(), ::toupper);
 
          if (unitStr == "YEAR") {
-             MTL::Buffer* inBuf = GpuExecutor::evaluateExpression(valArg, ctx);
+             GpuBuffer inBuf = GpuExecutor::evaluateExpression(valArg, ctx);
              if (!inBuf) {
                  if (debug) {
                      LOG_ERROR("Exec", "EXTRACT failed: could not evaluate valArg. Kind=" << (int)valArg->kind);
                      if (valArg->kind == TypedExpr::Kind::Column) LOG_DEBUG("EVAL", "  Col: " << valArg->asColumn().column);
                  }
-                 return nullptr;
+                 return GpuBuffer();
              }
 
              // EXTRACT(YEAR) logic: floor(val / 10000)
              GpuBuffer divBuf = GpuOps::arithDivF32ColScalar(inBuf, 10000.0f, count);
              GpuBuffer floorBuf = GpuOps::mathFloorF32(divBuf, count);
 
-
-             bool isCtx = false;
-             for(auto& [k,v] : ctx.f32ColsGPU) if(v==inBuf) { isCtx=true; break; }
-             for(auto& [k,v] : ctx.u32ColsGPU) if(v==inBuf) { isCtx=true; break; }
-             if(!isCtx) inBuf->release();
-
-             return floorBuf.detach();
+             // inBuf auto-releases via GpuBuffer destructor
+             return floorBuf;
          }
     }
 
     LOG_DEBUG("Exec", "Unsupported GPU function: " << fn.name);
-    return nullptr; 
+    return GpuBuffer(); 
 }
-    return nullptr; // unreachable: call site guarantees expr->kind == Function
+    return GpuBuffer(); // unreachable: call site guarantees expr->kind == Function
 }
 
 // -- Extracted: filterStringFunction --
@@ -837,13 +815,13 @@ bool GpuExecutor::executeFilterRecursive(const TypedExprPtr& expr, EvalContext& 
 // -- Extracted: evalAggregateExpr --
 // Resolves an aggregate expression by alias, positional key (#N), or standard
 // aggregate prefix (SUM_#, COUNT_#, etc.), searching GPU and CPU columns.
-static MTL::Buffer* evalAggregateExpr(
+static GpuBuffer evalAggregateExpr(
     const engine::AggregateExpr& agg, EvalContext& ctx, uint32_t count, [[maybe_unused]] bool debug)
 {
     // Try alias
     if (!agg.alias.empty() && ctx.f32ColsGPU.count(agg.alias)) {
         MTL::Buffer* buf = ctx.f32ColsGPU[agg.alias];
-        buf->retain(); return buf;
+        buf->retain(); return GpuBuffer(buf);
     }
 
     // Try positional scalar aggregate lookup (#N)
@@ -854,21 +832,21 @@ static MTL::Buffer* evalAggregateExpr(
          std::string posKey = "#" + std::to_string(ctx.aggregateCounter);
          if (ctx.f32ColsGPU.count(posKey)) {
              MTL::Buffer* buf = ctx.f32ColsGPU[posKey];
-             buf->retain(); ctx.aggregateCounter++; return buf;
+             buf->retain(); ctx.aggregateCounter++; return GpuBuffer(buf);
          }
          if (ctx.f32Cols.count(posKey) && !ctx.f32Cols[posKey].empty()) {
              float val = ctx.f32Cols[posKey][0];
              ctx.aggregateCounter++;
-             return GpuOps::createFilledF32(val, count).detach();
+             return GpuOps::createFilledF32(val, count);
          }
          if (ctx.u32Cols.count(posKey) && !ctx.u32Cols[posKey].empty()) {
              float val = (float)ctx.u32Cols[posKey][0];
              ctx.aggregateCounter++;
-             return GpuOps::createFilledF32(val, count).detach();
+             return GpuOps::createFilledF32(val, count);
          }
          if (ctx.u32ColsGPU.count(posKey)) {
              ctx.aggregateCounter++;
-             return GpuOps::castU32ToF32(ctx.u32ColsGPU[posKey], count).detach();
+             return GpuOps::castU32ToF32(ctx.u32ColsGPU[posKey], count);
          }
     }
 
@@ -885,25 +863,25 @@ static MTL::Buffer* evalAggregateExpr(
     }
 
     for (const auto& [name, buf] : ctx.f32ColsGPU) {
-        if (name.rfind(prefix, 0) == 0) { buf->retain(); return buf; }
+        if (name.rfind(prefix, 0) == 0) { buf->retain(); return GpuBuffer(buf.get()); }
     }
     for (const auto& [name, vec] : ctx.f32Cols) {
         if (name.rfind(prefix, 0) == 0 && !vec.empty())
-            return GpuOps::createFilledF32(vec[0], count).detach();
+            return GpuOps::createFilledF32(vec[0], count);
     }
     for (const auto& [name, vec] : ctx.u32Cols) {
         if (name.rfind(prefix, 0) == 0 && !vec.empty())
-            return GpuOps::createFilledF32((float)vec[0], count).detach();
+            return GpuOps::createFilledF32((float)vec[0], count);
     }
     for (const auto& [name, buf] : ctx.u32ColsGPU) {
         if (name.rfind(prefix, 0) == 0)
-            return GpuOps::castU32ToF32(buf, count).detach();
+            return GpuOps::castU32ToF32(buf, count);
     }
 
-    return nullptr;
+    return GpuBuffer();
 }
 
-MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx) {
+GpuBuffer GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx) {
     // RAII guard: batch GPU arithmetic ops within expression evaluation.
     // Top-level call enables batching; nested recursive calls are no-ops.
     // On top-level destructor, flushes the GPU queue so all results are ready.
@@ -917,14 +895,14 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
         }
     } batchGuard;
 
-    if (!expr) return nullptr;
+    if (!expr) return GpuBuffer();
     const bool debug = env_truthy("GPUDB_DEBUG_OPS");
 
     // Determine effective row count for output buffer
     uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
     // Fallback if row count seems wrong
     if (count == 0 && ctx.rowCount > 0 && !ctx.activeRowsGPU) count = ctx.rowCount;
-    if (count == 0) return nullptr;
+    if (count == 0) return GpuBuffer();
     
     if (expr->kind == TypedExpr::Kind::Column) {
     return evalColumnExpr(expr, ctx, count);
@@ -936,11 +914,11 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
         if (std::holds_alternative<double>(lit.value)) val = (float)std::get<double>(lit.value);
         else if (std::holds_alternative<int64_t>(lit.value)) val = (float)std::get<int64_t>(lit.value);
         
-        return GpuOps::createFilledF32(val, count).detach();
+        return GpuOps::createFilledF32(val, count);
     }
 
     if (expr->kind == TypedExpr::Kind::Aggregate) {
-        MTL::Buffer* result = evalAggregateExpr(expr->asAggregate(), ctx, count, debug);
+        GpuBuffer result = evalAggregateExpr(expr->asAggregate(), ctx, count, debug);
         if (result) return result;
     }
 
@@ -964,11 +942,11 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
                  GpuOps::scatterConstantF32(outBuf, subCtx.activeRowsGPU, subCtx.activeRowsCountGPU, 1.0f);
             }
             
-            return outBuf.detach();
+            return outBuf;
         } else {
             // Filter eval failed -> return nullptr
             LOG_DEBUG("Exec", "Eval Compare: executeFilterRecursive failed\n");
-            return nullptr;
+            return GpuBuffer();
         }
     }
 
@@ -996,67 +974,30 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
             }
             
             if (leftIsLit) {
-                // Lit op Right
-                MTL::Buffer* rightBuf = evaluateExpression(bin.right, ctx);
-                if (!rightBuf) return nullptr;
-                MTL::Buffer* result = nullptr;
-                if (isMul) result = GpuOps::arithMulF32ColScalar(rightBuf, leftVal, count).detach();
-                else if (isAdd) result = GpuOps::arithAddF32ColScalar(rightBuf, leftVal, count).detach();
-                else if (isDiv) result = GpuOps::arithDivF32ScalarCol(leftVal, rightBuf, count).detach();
-                else result = GpuOps::arithSubF32ScalarCol(leftVal, rightBuf, count).detach();
-                // Release intermediate rightBuf if not a context column
-                bool borrowed = false;
-                for (const auto& [n, b] : ctx.f32ColsGPU) { if (b == rightBuf) { borrowed = true; break; } }
-                if (!borrowed) for (const auto& [n, b] : ctx.u32ColsGPU) { if (b == rightBuf) { borrowed = true; break; } }
-                if (!borrowed) rightBuf->release();
-                return result;
+                // Lit op Right — GpuBuffer auto-releases rightBuf
+                GpuBuffer rightBuf = evaluateExpression(bin.right, ctx);
+                if (!rightBuf) return GpuBuffer();
+                if (isMul) return GpuOps::arithMulF32ColScalar(rightBuf, leftVal, count);
+                else if (isAdd) return GpuOps::arithAddF32ColScalar(rightBuf, leftVal, count);
+                else if (isDiv) return GpuOps::arithDivF32ScalarCol(leftVal, rightBuf, count);
+                else return GpuOps::arithSubF32ScalarCol(leftVal, rightBuf, count);
             } else if (rightIsLit) {
-                // Left op Lit
-                MTL::Buffer* leftBuf = evaluateExpression(bin.left, ctx);
-                if (!leftBuf) return nullptr;
-                MTL::Buffer* result = nullptr;
-                if (isMul) result = GpuOps::arithMulF32ColScalar(leftBuf, rightVal, count).detach();
-                else if (isAdd) result = GpuOps::arithAddF32ColScalar(leftBuf, rightVal, count).detach();
-                else if (isDiv) result = GpuOps::arithDivF32ColScalar(leftBuf, rightVal, count).detach();
-                else result = GpuOps::arithSubF32ColScalar(leftBuf, rightVal, count).detach();
-                bool borrowed = false;
-                for (const auto& [n, b] : ctx.f32ColsGPU) { if (b == leftBuf) { borrowed = true; break; } }
-                if (!borrowed) for (const auto& [n, b] : ctx.u32ColsGPU) { if (b == leftBuf) { borrowed = true; break; } }
-                if (!borrowed) leftBuf->release();
-                return result;
+                // Left op Lit — GpuBuffer auto-releases leftBuf
+                GpuBuffer leftBuf = evaluateExpression(bin.left, ctx);
+                if (!leftBuf) return GpuBuffer();
+                if (isMul) return GpuOps::arithMulF32ColScalar(leftBuf, rightVal, count);
+                else if (isAdd) return GpuOps::arithAddF32ColScalar(leftBuf, rightVal, count);
+                else if (isDiv) return GpuOps::arithDivF32ColScalar(leftBuf, rightVal, count);
+                else return GpuOps::arithSubF32ColScalar(leftBuf, rightVal, count);
             } else {
-                // Left op Right
-                MTL::Buffer* leftBuf = evaluateExpression(bin.left, ctx);
-                MTL::Buffer* rightBuf = evaluateExpression(bin.right, ctx);
-                if (!leftBuf || !rightBuf) {
-                    // Clean up on partial failure
-                    if (leftBuf) {
-                        bool borrowed = false;
-                        for (const auto& [n, b] : ctx.f32ColsGPU) { if (b == leftBuf) { borrowed = true; break; } }
-                        if (!borrowed) leftBuf->release();
-                    }
-                    if (rightBuf) {
-                        bool borrowed = false;
-                        for (const auto& [n, b] : ctx.f32ColsGPU) { if (b == rightBuf) { borrowed = true; break; } }
-                        if (!borrowed) rightBuf->release();
-                    }
-                    return nullptr;
-                }
-                MTL::Buffer* result = nullptr;
-                if (isMul) result = GpuOps::arithMulF32ColCol(leftBuf, rightBuf, count).detach();
-                else if (isAdd) result = GpuOps::arithAddF32ColCol(leftBuf, rightBuf, count).detach();
-                else if (isDiv) result = GpuOps::arithDivF32ColCol(leftBuf, rightBuf, count).detach();
-                else result = GpuOps::arithSubF32ColCol(leftBuf, rightBuf, count).detach();
-                // Release intermediate buffers if not context columns
-                auto releaseIfIntermediate = [&](MTL::Buffer* buf) {
-                    bool borrowed = false;
-                    for (const auto& [n, b] : ctx.f32ColsGPU) { if (b == buf) { borrowed = true; break; } }
-                    if (!borrowed) for (const auto& [n, b] : ctx.u32ColsGPU) { if (b == buf) { borrowed = true; break; } }
-                    if (!borrowed) buf->release();
-                };
-                releaseIfIntermediate(leftBuf);
-                releaseIfIntermediate(rightBuf);
-                return result;
+                // Left op Right — GpuBuffers auto-release on scope exit
+                GpuBuffer leftBuf = evaluateExpression(bin.left, ctx);
+                GpuBuffer rightBuf = evaluateExpression(bin.right, ctx);
+                if (!leftBuf || !rightBuf) return GpuBuffer();
+                if (isMul) return GpuOps::arithMulF32ColCol(leftBuf, rightBuf, count);
+                else if (isAdd) return GpuOps::arithAddF32ColCol(leftBuf, rightBuf, count);
+                else if (isDiv) return GpuOps::arithDivF32ColCol(leftBuf, rightBuf, count);
+                else return GpuOps::arithSubF32ColCol(leftBuf, rightBuf, count);
             }
         }
     }
@@ -1077,7 +1018,7 @@ MTL::Buffer* GpuExecutor::evaluateExpression(const TypedExprPtr& expr, EvalConte
     return evalFunctionExpr(expr, ctx, count);
     }
 
-    return nullptr;
+    return GpuBuffer();
 }
 
 } // namespace engine

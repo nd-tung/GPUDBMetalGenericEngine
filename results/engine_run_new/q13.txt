@@ -47,25 +47,25 @@ custdist|c_count|
 2.00|41.00|
 1.00|39.00|
 ---------------------------------------------------
-Planning time: 0.83 ms
-Data Load Time (Disk+Upload): 1820.03 ms
-GPU kernels time: 294.52 ms
-CPU postprocess time: 386.31 ms
-Node timing: Scan=136.1(g89.1)ms Join=218.1(g71.3)ms Project=3.5(g0.0)ms GroupBy=173.6(g78.5)ms Project=0.1(g0.0)ms Project=0.0(g0.0)ms GroupBy=101.4(g37.7)ms OrderBy=48.0(g17.9)ms
-Total Internal Pipeline time: 2500.86 ms
-Total Host Execution time: 2605.52 ms
-Total Wall time (Plan+Exec): 2606.34 ms
+Planning time: 0.86 ms
+Data Load Time (Disk+Upload): 1824.07 ms
+GPU kernels time: 266.25 ms
+CPU postprocess time: 397.29 ms
+Node timing: Scan=138.8(g89.7)ms Join=215.1(g67.9)ms Project=4.1(g0.0)ms GroupBy=180.2(g53.0)ms Project=0.1(g0.0)ms Project=0.0(g0.0)ms GroupBy=110.3(g32.9)ms OrderBy=15.0(g22.7)ms
+Total Internal Pipeline time: 2487.61 ms
+Total Host Execution time: 2595.09 ms
+Total Wall time (Plan+Exec): 2595.95 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   45.766 ms (15.539%) [3 calls]
-  cast           :   19.573 ms (6.646%) [2 calls]
-  filter         :   89.112 ms (30.256%) [1 calls]
-  gather         :    5.418 ms (1.840%) [1 calls]
-  gather_dispatch:    0.095 ms (0.032%) [11 calls]
-  groupby        :   96.627 ms (32.808%) [4 calls]
-  hash_join_probe_u32:   28.948 ms (9.829%) [1 calls]
-  sort           :    8.984 ms (3.050%) [2 calls]
+  batch_flush    :   47.339 ms (17.778%) [5 calls]
+  cast           :   19.962 ms (7.497%) [2 calls]
+  filter         :   89.719 ms (33.694%) [1 calls]
+  gather         :    6.352 ms (2.385%) [1 calls]
+  gather_dispatch:    0.117 ms (0.044%) [11 calls]
+  groupby        :   65.899 ms (24.748%) [4 calls]
+  hash_join_probe_u32:   28.927 ms (10.864%) [1 calls]
+  sort           :    7.963 ms (2.991%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 294.525 ms
-  Kernel invocations: 25
+  TOTAL GPU TIME: 266.278 ms
+  Kernel invocations: 26

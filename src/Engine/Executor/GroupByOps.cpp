@@ -133,8 +133,6 @@ std::optional<GroupByHashTable> GpuOps::groupByAggMultiKeyTyped(const std::vecto
         
         auto t0 = std::chrono::high_resolution_clock::now();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "groupby_agg_multi_key_typed");
         auto t1 = std::chrono::high_resolution_clock::now();
         double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
         KernelTimer::instance().record("ops::groupby_agg_multi_key_typed", "groupby", ms, rowCount);
@@ -286,6 +284,7 @@ GpuBuffer GpuOps::dedupByKeys(const std::vector<MTL::Buffer*>& keys, uint32_t co
     if (keys.size() == 1) {
         // Copy key to avoid mutating original
         sortKeys.reset(dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+        sync(); // ensure any async GPU ops that produced key buffers have completed
         std::memcpy(sortKeys->contents(), keys[0]->contents(), count * sizeof(uint32_t));
     } else if (keys.size() == 2) {
         sortKeys = packU32ToU64(keys[0], keys[1], count);

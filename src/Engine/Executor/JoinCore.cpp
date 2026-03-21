@@ -114,36 +114,48 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool /*d
     GpuOps::sync();
     {
         auto& s = GpuColumnStore::instance();
+        // Phase 1: Dispatch CPU-only column gathers async
+        struct PendingU32 { std::string name; GpuBuffer dst; MTL::Buffer* tmpSrc; };
+        struct PendingF32 { std::string name; GpuBuffer dst; MTL::Buffer* tmpSrc; };
+        std::vector<PendingU32> pendU32;
+        std::vector<PendingF32> pendF32;
         for (auto& [name, vec] : ctx.u32Cols) {
             if (vec.size() > count) {
                 auto itGpu = ctx.u32ColsGPU.find(name);
                 if (itGpu != ctx.u32ColsGPU.end() && itGpu->second) {
-                    // GPU buffer already compacted — skip CPU download, lazy-fetch later
                     vec.clear();
                 } else {
                     MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                    GpuBuffer dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, true);
-                    vec.resize(count);
-                    std::memcpy(vec.data(), dst->contents(), count * sizeof(uint32_t));
-                    src->release();
+                    GpuBuffer dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, count, false);
+                    pendU32.push_back({name, std::move(dst), src});
                 }
             }
         }
-        // Compact CPU f32 columns via GPU gather
         for (auto& [name, vec] : ctx.f32Cols) {
             if (vec.size() > count) {
                 auto itGpu = ctx.f32ColsGPU.find(name);
                 if (itGpu != ctx.f32ColsGPU.end() && itGpu->second) {
-                    // GPU buffer already compacted — skip CPU download, lazy-fetch later
                     vec.clear();
                 } else {
                     MTL::Buffer* src = s.device()->newBuffer(vec.data(), vec.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                    GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, true);
-                    vec.resize(count);
-                    std::memcpy(vec.data(), dst->contents(), count * sizeof(float));
-                    src->release();
+                    GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, count, false);
+                    pendF32.push_back({name, std::move(dst), src});
                 }
             }
+        }
+        // Phase 2: Sync + download
+        if (!pendU32.empty() || !pendF32.empty()) GpuOps::sync();
+        for (auto& p : pendU32) {
+            auto& vec = ctx.u32Cols[p.name];
+            vec.resize(count);
+            std::memcpy(vec.data(), p.dst->contents(), count * sizeof(uint32_t));
+            p.tmpSrc->release();
+        }
+        for (auto& p : pendF32) {
+            auto& vec = ctx.f32Cols[p.name];
+            vec.resize(count);
+            std::memcpy(vec.data(), p.dst->contents(), count * sizeof(float));
+            p.tmpSrc->release();
         }
     }
     // Compact CPU string columns: prefer invalidation if dictCol exists, else GPU/CPU gather
@@ -425,8 +437,9 @@ static void postProcessSemiAntiJoin(
         uint32_t uniqueCount = 0;
         GpuBuffer uniqueIdx = GpuOps::dedupByKeys(dedupKeys, resCount, uniqueCount);
         if (uniqueIdx && uniqueCount > 0) {
-            auto newProbe = GpuOps::gatherU32(jRes.probeIndices, uniqueIdx, uniqueCount);
-            auto newBuild = GpuOps::gatherU32(jRes.buildIndices, uniqueIdx, uniqueCount);
+            auto newProbe = GpuOps::gatherU32(jRes.probeIndices, uniqueIdx, uniqueCount, false);
+            auto newBuild = GpuOps::gatherU32(jRes.buildIndices, uniqueIdx, uniqueCount, false);
+            GpuOps::sync();
             if (newProbe && newBuild) {
                 jRes.probeIndices = std::move(newProbe);
                 jRes.buildIndices = std::move(newBuild);

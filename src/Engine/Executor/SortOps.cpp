@@ -36,8 +36,6 @@ GpuBuffer GpuOps::floatToSortKeyU32(MTL::Buffer* in, uint32_t count, bool desc) 
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd);
     return GpuBuffer(out);
 }
 
@@ -60,8 +58,6 @@ GpuBuffer GpuOps::invertU32(MTL::Buffer* in, uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd);
     return GpuBuffer(out);
 }
 
@@ -83,8 +79,6 @@ static void blockSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count
     enc->dispatchThreads(MTL::Size::Make(tg, 1, 1), MTL::Size::Make(tg, 1, 1));
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd);
 }
 
 static void blockSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {
@@ -105,8 +99,6 @@ static void blockSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count
     enc->dispatchThreads(MTL::Size::Make(tg, 1, 1), MTL::Size::Make(tg, 1, 1));
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd);
 }
 
 void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t count) {

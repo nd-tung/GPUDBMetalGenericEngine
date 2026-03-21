@@ -162,17 +162,17 @@ uint32_t deduplicateContext(EvalContext& ctx,
         LOG_INFO("Exec", "GPU dedup: " << ctx.rowCount << " -> " << uniqueCount << " rows\n");
     }
 
-    // GPU gather u32 columns
+    // GPU gather u32 columns (async)
     for (auto& [name, buf] : ctx.u32ColsGPU) {
         if (buf) {
-            auto compacted = GpuOps::gatherU32(buf, uniqueIdx, uniqueCount);
+            auto compacted = GpuOps::gatherU32(buf, uniqueIdx, uniqueCount, false);
             if (compacted) buf = std::move(compacted);
         }
     }
-    // GPU gather f32 columns
+    // GPU gather f32 columns (async)
     for (auto& [name, buf] : ctx.f32ColsGPU) {
         if (buf) {
-            auto compacted = GpuOps::gatherF32(buf, uniqueIdx, uniqueCount);
+            auto compacted = GpuOps::gatherF32(buf, uniqueIdx, uniqueCount, false);
             if (compacted) buf = std::move(compacted);
         }
     }
@@ -185,36 +185,40 @@ uint32_t deduplicateContext(EvalContext& ctx,
     for (auto& [name, buf] : ctx.f32ColsGPU) {
         if (buf) ctx.f32Cols[name].clear();
     }
-    // CPU-only u32/f32 columns: upload → GPU gather → keep as GPU buffer
+    // CPU-only u32/f32 columns: upload → GPU gather (async) → keep as GPU buffer
     {
         auto& s = GpuColumnStore::instance();
+        std::vector<MTL::Buffer*> tempSrcs;
         for (auto& [name, col] : ctx.u32Cols) {
             if (!ctx.u32ColsGPU.count(name) && col.size() >= ctx.rowCount) {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                GpuBuffer dst = GpuOps::gatherU32(src, uniqueIdx, uniqueCount);
+                GpuBuffer dst = GpuOps::gatherU32(src, uniqueIdx, uniqueCount, false);
                 if (dst) {
                     ctx.u32ColsGPU[name] = std::move(dst);
                     col.clear();
                 }
-                src->release();
+                tempSrcs.push_back(src);
             }
         }
         for (auto& [name, col] : ctx.f32Cols) {
             if (!ctx.f32ColsGPU.count(name) && col.size() >= ctx.rowCount) {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                GpuBuffer dst = GpuOps::gatherF32(src, uniqueIdx, uniqueCount);
+                GpuBuffer dst = GpuOps::gatherF32(src, uniqueIdx, uniqueCount, false);
                 if (dst) {
                     ctx.f32ColsGPU[name] = std::move(dst);
                     col.clear();
                 }
-                src->release();
+                tempSrcs.push_back(src);
             }
         }
+        // Sync + release temp sources after all gathers dispatched
+        GpuOps::sync();
+        for (auto* s : tempSrcs) s->release();
     }
-    // String columns: GPU gather dict IDs (GPU-native dictionary encoding)
+    // String columns: GPU gather dict IDs (async — GPU-native dictionary encoding)
     for (auto& [name, dict] : ctx.dictCols) {
         if (dict.idsGPU) {
-            auto compacted = GpuOps::gatherU32(dict.idsGPU, uniqueIdx, uniqueCount);
+            auto compacted = GpuOps::gatherU32(dict.idsGPU, uniqueIdx, uniqueCount, false);
             if (compacted) {
                 dict.idsGPU = std::move(compacted);
                 dict.rowCount = uniqueCount;
@@ -262,30 +266,80 @@ void materializeContextToResult(
             bool hasAR = (currentCtx.activeRowsGPU && currentCtx.activeRowsCountGPU > 0);
             if (hasAR) arCount = currentCtx.activeRowsCountGPU;
 
+            // Phase 1: Dispatch all u32/f32 gathers async
+            struct PendU32 { std::string name; GpuBuffer buf; };
+            struct PendF32 { std::string name; GpuBuffer buf; };
+            std::vector<PendU32> pendU32;
+            std::vector<PendF32> pendF32;
+            std::vector<std::string> directU32Names, directF32Names;
+            std::vector<std::vector<uint32_t>> directU32Cols;
+            std::vector<std::vector<float>> directF32Cols;
+
             for (const auto& [name, buf] : currentCtx.u32ColsGPU) {
                 if (!buf) continue;
-                std::vector<uint32_t> col(arCount);
                 if (hasAR) {
-                    GpuBuffer gathered = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, arCount);
-                    std::memcpy(col.data(), gathered->contents(), arCount * sizeof(uint32_t));
+                    GpuBuffer gathered = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, arCount, false);
+                    pendU32.push_back({name, std::move(gathered)});
                 } else {
+                    std::vector<uint32_t> col(arCount);
                     std::memcpy(col.data(), buf->contents(), arCount * sizeof(uint32_t));
+                    directU32Names.push_back(name);
+                    directU32Cols.push_back(std::move(col));
                 }
-                tableResult.u32Names.push_back(name);
-                tableResult.u32Cols.push_back(std::move(col));
             }
             for (const auto& [name, buf] : currentCtx.f32ColsGPU) {
                 if (!buf) continue;
-                std::vector<float> col(arCount);
                 if (hasAR) {
-                    GpuBuffer gathered = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, arCount);
-                    std::memcpy(col.data(), gathered->contents(), arCount * sizeof(float));
+                    GpuBuffer gathered = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, arCount, false);
+                    pendF32.push_back({name, std::move(gathered)});
                 } else {
+                    std::vector<float> col(arCount);
                     std::memcpy(col.data(), buf->contents(), arCount * sizeof(float));
+                    directF32Names.push_back(name);
+                    directF32Cols.push_back(std::move(col));
                 }
-                tableResult.f32Names.push_back(name);
+            }
+            // Also dispatch dict ID gathers async
+            struct PendDict { std::string name; GpuBuffer ids; const DictEncoded* dict; };
+            std::vector<PendDict> pendDict;
+            for (const auto& [name, dict] : currentCtx.dictCols) {
+                if (!dict.valid()) continue;
+                if (hasAR) {
+                    GpuBuffer gatheredIds = GpuOps::gatherU32(dict.idsGPU, currentCtx.activeRowsGPU, arCount, false);
+                    PendDict pd;
+                    pd.name = name;
+                    pd.ids = std::move(gatheredIds);
+                    pd.dict = &dict;
+                    pendDict.push_back(std::move(pd));
+                }
+            }
+
+            // Phase 2: Sync all async gathers
+            if (hasAR && (!pendU32.empty() || !pendF32.empty() || !pendDict.empty()))
+                GpuOps::sync();
+
+            // Phase 3: Download results
+            for (auto& p : pendU32) {
+                std::vector<uint32_t> col(arCount);
+                std::memcpy(col.data(), p.buf->contents(), arCount * sizeof(uint32_t));
+                tableResult.u32Names.push_back(p.name);
+                tableResult.u32Cols.push_back(std::move(col));
+            }
+            for (size_t i = 0; i < directU32Names.size(); ++i) {
+                tableResult.u32Names.push_back(directU32Names[i]);
+                tableResult.u32Cols.push_back(std::move(directU32Cols[i]));
+            }
+            for (auto& p : pendF32) {
+                std::vector<float> col(arCount);
+                std::memcpy(col.data(), p.buf->contents(), arCount * sizeof(float));
+                tableResult.f32Names.push_back(p.name);
                 tableResult.f32Cols.push_back(std::move(col));
             }
+            for (size_t i = 0; i < directF32Names.size(); ++i) {
+                tableResult.f32Names.push_back(directF32Names[i]);
+                tableResult.f32Cols.push_back(std::move(directF32Cols[i]));
+            }
+
             for (const auto& [name, vec] : currentCtx.stringCols) {
                 // Skip if dict or flat alternative available — let those loops handle it
                 if (currentCtx.dictCols.count(name) || currentCtx.flatStringCols.count(name)) continue;
@@ -303,19 +357,20 @@ void materializeContextToResult(
                         std::vector<std::string>(vec.begin(), vec.begin() + std::min((size_t)arCount, vec.size())));
                 }
             }
-            // Materialize dict-only string columns not yet in stringCols
-            for (const auto& [name, dict] : currentCtx.dictCols) {
-                if (!dict.valid()) continue;
-                if (hasAR) {
-                    GpuBuffer gatheredIds = GpuOps::gatherU32(dict.idsGPU, currentCtx.activeRowsGPU, arCount);
-                    std::vector<std::string> col(arCount);
-                    const uint32_t* ids = static_cast<const uint32_t*>(gatheredIds->contents());
-                    for (uint32_t i = 0; i < arCount; ++i) {
-                        col[i] = dict.lookupString(ids[i]);
-                    }
-                    tableResult.stringNames.push_back(name);
-                    tableResult.stringCols.push_back(std::move(col));
-                } else {
+            // Materialize dict-only string columns
+            for (auto& p : pendDict) {
+                std::vector<std::string> col(arCount);
+                const uint32_t* ids = static_cast<const uint32_t*>(p.ids->contents());
+                for (uint32_t i = 0; i < arCount; ++i) {
+                    col[i] = p.dict->lookupString(ids[i]);
+                }
+                tableResult.stringNames.push_back(p.name);
+                tableResult.stringCols.push_back(std::move(col));
+            }
+            // Non-AR dict columns
+            if (!hasAR) {
+                for (const auto& [name, dict] : currentCtx.dictCols) {
+                    if (!dict.valid()) continue;
                     tableResult.stringNames.push_back(name);
                     tableResult.stringCols.push_back(dict.materialize());
                 }

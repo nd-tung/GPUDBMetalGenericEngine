@@ -26,23 +26,23 @@ c_custkey|revenue|c_acctbal|c_name|n_name|c_address|c_phone|c_comment|
 23431|554269.50|3381.86|Customer#000023431|ROMANIA|HgiV0phqhaIa9aydNoIlb|29-915-458-2654|nusual, even instructions: furiously stealthy n|
 ---------------------------------------------------
 Planning time: 1.91 ms
-Data Load Time (Disk+Upload): 3395.64 ms
-GPU kernels time: 1388.24 ms
-CPU postprocess time: 446.83 ms
-Node timing: Scan=76.2(g66.8)ms Join=143.8(g94.9)ms Join=255.0(g212.9)ms Save=0.0(g0.0)ms Scan=144.0(g143.6)ms Join=136.0(g88.1)ms Project=329.1(g335.6)ms Project=15.1(g14.7)ms GroupBy=189.6(g30.7)ms Project=242.2(g281.4)ms Project=0.0(g0.0)ms OrderBy=232.8(g55.7)ms Limit=71.1(g63.9)ms
-Total Internal Pipeline time: 5230.71 ms
-Total Host Execution time: 5247.90 ms
-Total Wall time (Plan+Exec): 5249.82 ms
+Data Load Time (Disk+Upload): 3370.77 ms
+GPU kernels time: 1390.60 ms
+CPU postprocess time: 269.66 ms
+Node timing: Scan=78.8(g69.0)ms Join=149.4(g94.6)ms Join=256.0(g215.7)ms Save=0.0(g0.0)ms Scan=152.0(g151.6)ms Join=153.0(g96.9)ms Project=336.1(g347.6)ms Project=15.1(g14.7)ms GroupBy=181.4(g24.0)ms Project=242.4(g276.7)ms Project=0.0(g0.0)ms OrderBy=18.0(g22.2)ms Limit=77.9(g77.8)ms
+Total Internal Pipeline time: 5031.03 ms
+Total Host Execution time: 5048.30 ms
+Total Wall time (Plan+Exec): 5050.22 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  191.272 ms (13.778%) [8 calls]
-  filter         :  356.028 ms (25.646%) [4 calls]
-  gather         :  720.759 ms (51.919%) [33 calls]
-  gather_dispatch:    1.543 ms (0.111%) [73 calls]
-  groupby        :   30.666 ms (2.209%) [2 calls]
-  hash_join_probe_u32:   80.025 ms (5.764%) [3 calls]
-  sort           :    7.951 ms (0.573%) [2 calls]
+  batch_flush    :  207.633 ms (14.931%) [10 calls]
+  filter         :  367.172 ms (26.403%) [4 calls]
+  gather         :  702.061 ms (50.485%) [28 calls]
+  gather_dispatch:    1.590 ms (0.114%) [78 calls]
+  groupby        :   23.951 ms (1.722%) [2 calls]
+  hash_join_probe_u32:   80.976 ms (5.823%) [3 calls]
+  sort           :    7.245 ms (0.521%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1388.243 ms
-  Kernel invocations: 125
+  TOTAL GPU TIME: 1390.629 ms
+  Kernel invocations: 126

@@ -390,6 +390,11 @@ static void compactTableResultAfterFilter(EvalContext& ctx, TableResult& tableRe
     if (sizeMatch && ctx.activeRowsCountGPU > 0 && ctx.activeRowsGPU) {
         uint32_t arCount = ctx.activeRowsCountGPU;
         auto& s = GpuColumnStore::instance();
+        // Phase 1: Dispatch all u32/f32 gathers async
+        struct PendingGatherU32 { size_t ci; GpuBuffer dst; MTL::Buffer* tmpSrc; };
+        struct PendingGatherF32 { size_t ci; GpuBuffer dst; MTL::Buffer* tmpSrc; };
+        std::vector<PendingGatherU32> pendU32;
+        std::vector<PendingGatherF32> pendF32;
         for (size_t ci = 0; ci < tableResult.u32Cols.size(); ++ci) {
             auto& col = tableResult.u32Cols[ci];
             MTL::Buffer* gpuBuf = nullptr;
@@ -398,15 +403,12 @@ static void compactTableResultAfterFilter(EvalContext& ctx, TableResult& tableRe
                 if (it != ctx.u32ColsGPU.end()) gpuBuf = it->second;
             }
             if (gpuBuf) {
-                GpuBuffer dst = GpuOps::gatherU32(gpuBuf, ctx.activeRowsGPU, arCount);
-                col.resize(arCount);
-                std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
+                GpuBuffer dst = GpuOps::gatherU32(gpuBuf, ctx.activeRowsGPU, arCount, false);
+                pendU32.push_back({ci, std::move(dst), nullptr});
             } else {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-                GpuBuffer dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, arCount);
-                col.resize(arCount);
-                std::memcpy(col.data(), dst->contents(), arCount * sizeof(uint32_t));
-                src->release();
+                GpuBuffer dst = GpuOps::gatherU32(src, ctx.activeRowsGPU, arCount, false);
+                pendU32.push_back({ci, std::move(dst), src});
             }
         }
         for (size_t ci = 0; ci < tableResult.f32Cols.size(); ++ci) {
@@ -417,16 +419,28 @@ static void compactTableResultAfterFilter(EvalContext& ctx, TableResult& tableRe
                 if (it != ctx.f32ColsGPU.end()) gpuBuf = it->second;
             }
             if (gpuBuf) {
-                GpuBuffer dst = GpuOps::gatherF32(gpuBuf, ctx.activeRowsGPU, arCount);
-                col.resize(arCount);
-                std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
+                GpuBuffer dst = GpuOps::gatherF32(gpuBuf, ctx.activeRowsGPU, arCount, false);
+                pendF32.push_back({ci, std::move(dst), nullptr});
             } else {
                 MTL::Buffer* src = s.device()->newBuffer(col.data(), col.size() * sizeof(float), MTL::ResourceStorageModeShared);
-                GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, arCount);
-                col.resize(arCount);
-                std::memcpy(col.data(), dst->contents(), arCount * sizeof(float));
-                src->release();
+                GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, arCount, false);
+                pendF32.push_back({ci, std::move(dst), src});
             }
+        }
+        // Phase 2: Single sync for all gathers
+        GpuOps::sync();
+        // Phase 3: Download results
+        for (auto& p : pendU32) {
+            auto& col = tableResult.u32Cols[p.ci];
+            col.resize(arCount);
+            std::memcpy(col.data(), p.dst->contents(), arCount * sizeof(uint32_t));
+            if (p.tmpSrc) p.tmpSrc->release();
+        }
+        for (auto& p : pendF32) {
+            auto& col = tableResult.f32Cols[p.ci];
+            col.resize(arCount);
+            std::memcpy(col.data(), p.dst->contents(), arCount * sizeof(float));
+            if (p.tmpSrc) p.tmpSrc->release();
         }
         for (auto& col : tableResult.stringCols) {
             if (col.empty()) continue;  // deferred — compacted via ctx
@@ -485,19 +499,20 @@ static void compactContextAfterFilter(EvalContext& ctx) {
 
     uint32_t compactCount = ctx.activeRowsCountGPU;
 
-    // GPU-direct compaction: gather u32/f32 GPU columns
+    // GPU-direct compaction: gather u32/f32 GPU columns (async batch)
     for (auto& [name, buf] : ctx.u32ColsGPU) {
         if (buf) {
-            auto compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, compactCount);
+            auto compacted = GpuOps::gatherU32(buf, ctx.activeRowsGPU, compactCount, false);
             if (compacted) { buf = std::move(compacted); }
         }
     }
     for (auto& [name, buf] : ctx.f32ColsGPU) {
         if (buf) {
-            auto compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, compactCount);
+            auto compacted = GpuOps::gatherF32(buf, ctx.activeRowsGPU, compactCount, false);
             if (compacted) { buf = std::move(compacted); }
         }
     }
+    GpuOps::sync();
 
     // Compact CPU-only columns via GPU gather — retain gathered GPU buffer
     {

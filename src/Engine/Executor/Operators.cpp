@@ -499,8 +499,6 @@ GpuBuffer GpuOps::logicOrU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t coun
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "logicOrU32");
     
     return GpuBuffer(outMask);
 }
@@ -526,8 +524,6 @@ GpuBuffer GpuOps::logicAndNotU32(MTL::Buffer* colA, MTL::Buffer* colB, uint32_t 
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "logicAndNotU32");
     
     return GpuBuffer(outMask);
 }
@@ -562,8 +558,6 @@ GpuBuffer GpuOps::indicesToMask(MTL::Buffer* indices, uint32_t indexCount, uint3
     enc2->endEncoding();
     
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "indicesToMask");
     
     return GpuBuffer(mask);
 }
@@ -591,8 +585,6 @@ void GpuOps::fillU32(MTL::Buffer* buf, uint32_t val, uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "fillU32");
 }
 
 GpuBuffer GpuOps::createFilledU32(uint32_t val, uint32_t count) {
@@ -619,8 +611,6 @@ void GpuOps::fillF32(MTL::Buffer* buf, float val, uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "fillF32");
 }
 
 GpuBuffer GpuOps::createFilledF32(float val, uint32_t count) {
@@ -648,8 +638,6 @@ GpuBuffer GpuOps::iotaU32(uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "iotaU32");
     
     return GpuBuffer(buf);
 }
@@ -679,8 +667,6 @@ GpuBuffer GpuOps::bitcastF32ToU32(MTL::Buffer* in, uint32_t count) {
     dispatch1D(enc, count);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "bitcastF32ToU32");
     return GpuBuffer(out);
 }
 
@@ -1008,8 +994,6 @@ GpuBuffer GpuOps::stringHashEncodeU32(
     dispatch1D(enc, rowCount);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "stringHashEncodeU32");
 
     return GpuBuffer(outBuf);
 }
@@ -1039,8 +1023,6 @@ GpuBuffer GpuOps::stringFnv1aU32(
     dispatch1D(enc, rowCount);
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "stringFnv1aU32");
 
     return GpuBuffer(outBuf);
 }
@@ -1119,15 +1101,23 @@ GpuBuffer GpuOps::stringFnv1aU64Fold32(
     auto lib = store.library();
     if (!dev || !lib || !store.queue()) return {};
 
-    // Step 1: compute 64-bit hashes
+    // Step 1: compute 64-bit hashes, Step 2: XOR-fold to u32
+    // Both kernels in a single command buffer (serial queue ordering).
     auto hashBuf64 = dev->newBuffer(rowCount * sizeof(uint64_t), MTL::ResourceStorageModeShared);
     if (!hashBuf64) return {};
 
     auto pso1 = makePSO(dev, lib, "ops::string_fnv1a_u64");
     if (!pso1) { hashBuf64->release(); return {}; }
 
-    auto cmd1 = store.queue()->commandBuffer();
-    auto enc1 = cmd1->computeCommandEncoder();
+    auto outBuf = dev->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    if (!outBuf) { hashBuf64->release(); return {}; }
+
+    auto pso2 = makePSO(dev, lib, "ops::fold_u64_to_u32");
+    if (!pso2) { hashBuf64->release(); outBuf->release(); return {}; }
+
+    auto cmd = store.queue()->commandBuffer();
+
+    auto enc1 = cmd->computeCommandEncoder();
     enc1->setComputePipelineState(pso1);
     enc1->setBuffer(chars, 0, 0);
     enc1->setBuffer(offsets, 0, 1);
@@ -1136,31 +1126,44 @@ GpuBuffer GpuOps::stringFnv1aU64Fold32(
     enc1->setBytes(&rowCount, sizeof(rowCount), 4);
     dispatch1D(enc1, rowCount);
     enc1->endEncoding();
-    cmd1->commit();
-    cmd1->waitUntilCompleted();
-    checkGpuStatus(cmd1, "stringFnv1aU64");
 
-    // Step 2: XOR-fold to u32
-    auto outBuf = dev->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    if (!outBuf) { hashBuf64->release(); return {}; }
-
-    auto pso2 = makePSO(dev, lib, "ops::fold_u64_to_u32");
-    if (!pso2) { hashBuf64->release(); outBuf->release(); return {}; }
-
-    auto cmd2 = store.queue()->commandBuffer();
-    auto enc2 = cmd2->computeCommandEncoder();
+    auto enc2 = cmd->computeCommandEncoder();
     enc2->setComputePipelineState(pso2);
     enc2->setBuffer(hashBuf64, 0, 0);
     enc2->setBuffer(outBuf, 0, 1);
     enc2->setBytes(&rowCount, sizeof(rowCount), 2);
     dispatch1D(enc2, rowCount);
     enc2->endEncoding();
-    cmd2->commit();
-    cmd2->waitUntilCompleted();
-    checkGpuStatus(cmd2, "foldU64ToU32");
+
+    cmd->commit();
 
     hashBuf64->release();
     return GpuBuffer(outBuf);
+}
+
+// Helper: dispatch string_prefix_u64_gathered kernel
+static MTL::Buffer* dispatchPrefixGathered(
+    MTL::Device* dev, MTL::Library* lib, MTL::CommandQueue* queue,
+    MTL::Buffer* chars, MTL::Buffer* offsets, MTL::Buffer* lengths,
+    MTL::Buffer* indices, uint32_t rowCount, uint32_t byteOffset) {
+    auto buf = dev->newBuffer(rowCount * sizeof(uint64_t), MTL::ResourceStorageModeShared);
+    if (!buf) return nullptr;
+    auto pso = makePSO(dev, lib, "ops::string_prefix_u64_gathered");
+    if (!pso) { buf->release(); return nullptr; }
+    auto cmd = queue->commandBuffer();
+    auto enc = cmd->computeCommandEncoder();
+    enc->setComputePipelineState(pso);
+    enc->setBuffer(chars, 0, 0);
+    enc->setBuffer(offsets, 0, 1);
+    enc->setBuffer(lengths, 0, 2);
+    enc->setBuffer(indices, 0, 3);
+    enc->setBuffer(buf, 0, 4);
+    enc->setBytes(&rowCount, sizeof(rowCount), 5);
+    enc->setBytes(&byteOffset, sizeof(byteOffset), 6);
+    dispatch1D(enc, rowCount);
+    enc->endEncoding();
+    cmd->commit();
+    return buf;
 }
 
 GpuBuffer GpuOps::stringRankByPrefix(
@@ -1172,65 +1175,67 @@ GpuBuffer GpuOps::stringRankByPrefix(
     auto lib = store.library();
     if (!dev || !lib || !store.queue()) return {};
 
-    // Step 1: compute prefix-u64 keys
-    auto prefixBuf = dev->newBuffer(rowCount * sizeof(uint64_t), MTL::ResourceStorageModeShared);
-    if (!prefixBuf) return {};
+    // 16-byte two-pass stable radix sort:
+    // Sort by secondary key (bytes 8-15) first, then primary key (bytes 0-7).
+    // Stable sort preserves secondary ordering within equal primary keys.
 
-    {
-        auto pso = makePSO(dev, lib, "ops::string_prefix_u64");
-        if (!pso) { prefixBuf->release(); return {}; }
-        auto cmd = store.queue()->commandBuffer();
-        auto enc = cmd->computeCommandEncoder();
-        enc->setComputePipelineState(pso);
-        enc->setBuffer(chars, 0, 0);
-        enc->setBuffer(offsets, 0, 1);
-        enc->setBuffer(lengths, 0, 2);
-        enc->setBuffer(prefixBuf, 0, 3);
-        enc->setBytes(&rowCount, sizeof(rowCount), 4);
-        dispatch1D(enc, rowCount);
-        enc->endEncoding();
-        cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "stringPrefixU64");
-    }
-
-    // Step 2: radix sort prefix keys + indices
+    // Step 1: compute lo = prefix bytes 8-15 (identity indices)
     GpuBuffer idxBuf = iotaU32(rowCount);
-    radixSortU64(prefixBuf, idxBuf, rowCount);
+    uint32_t byteOff8 = 8;
+    MTL::Buffer* loBuf = dispatchPrefixGathered(
+        dev, lib, store.queue(), chars, offsets, lengths, idxBuf, rowCount, byteOff8);
+    if (!loBuf) return {};
 
-    // Step 3: mark boundaries in sorted prefix array
+    // Step 2: radix sort by secondary key (lo) — stable
+    radixSortU64(loBuf, idxBuf, rowCount);
+
+    // Step 3: compute hi = prefix bytes 0-7 gathered by sorted indices
+    uint32_t byteOff0 = 0;
+    MTL::Buffer* hiBuf = dispatchPrefixGathered(
+        dev, lib, store.queue(), chars, offsets, lengths, idxBuf, rowCount, byteOff0);
+    if (!hiBuf) { loBuf->release(); return {}; }
+
+    // Step 4: radix sort by primary key (hi) — stable preserves lo ordering
+    radixSortU64(hiBuf, idxBuf, rowCount);
+
+    // Step 5: recompute lo gathered by final indices (for boundary marking)
+    loBuf->release();
+    loBuf = dispatchPrefixGathered(
+        dev, lib, store.queue(), chars, offsets, lengths, idxBuf, rowCount, byteOff8);
+    if (!loBuf) { hiBuf->release(); return {}; }
+
+    // Step 6: mark boundaries using both hi and lo keys
     auto markBuf = dev->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    if (!markBuf) { prefixBuf->release(); return {}; }
+    if (!markBuf) { hiBuf->release(); loBuf->release(); return {}; }
 
     {
-        auto pso = makePSO(dev, lib, "ops::mark_sorted_boundaries_u64");
-        if (!pso) { prefixBuf->release(); markBuf->release(); return {}; }
+        auto pso = makePSO(dev, lib, "ops::mark_sorted_boundaries_2xu64");
+        if (!pso) { hiBuf->release(); loBuf->release(); markBuf->release(); return {}; }
         auto cmd = store.queue()->commandBuffer();
         auto enc = cmd->computeCommandEncoder();
         enc->setComputePipelineState(pso);
-        enc->setBuffer(prefixBuf, 0, 0);
-        enc->setBuffer(markBuf, 0, 1);
-        enc->setBytes(&rowCount, sizeof(rowCount), 2);
+        enc->setBuffer(hiBuf, 0, 0);
+        enc->setBuffer(loBuf, 0, 1);
+        enc->setBuffer(markBuf, 0, 2);
+        enc->setBytes(&rowCount, sizeof(rowCount), 3);
         dispatch1D(enc, rowCount);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "markSortedBoundaries");
     }
 
-    prefixBuf->release();
+    hiBuf->release();
+    loBuf->release();
 
-    // Step 4: prefix sum on boundary marks → cumulative ranks
+    // Step 7: prefix sum on boundary marks → cumulative ranks
     uint64_t uniqueCount = scanInPlace(markBuf, rowCount);
 
-    // Check for ties: if uniqueCount < rowCount-1, some prefixes are identical
+    // Check for ties: if uniqueCount < rowCount-1, 16-byte prefixes still tied
     if (rowCount > 1 && uniqueCount < rowCount - 1) {
-        // Ties detected — caller must fall back to CPU
         markBuf->release();
         return {};
     }
 
-    // Step 5: scatter ranks to original row positions
+    // Step 8: scatter ranks to original row positions
     auto rankBuf = dev->newBuffer(rowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
     if (!rankBuf) { markBuf->release(); return {}; }
 
@@ -1247,13 +1252,11 @@ GpuBuffer GpuOps::stringRankByPrefix(
         dispatch1D(enc, rowCount);
         enc->endEncoding();
         cmd->commit();
-        cmd->waitUntilCompleted();
-        checkGpuStatus(cmd, "scatterRank");
     }
 
     markBuf->release();
 
-    // Step 6: if descending, invert ranks
+    // Step 9: if descending, invert ranks
     if (!ascending) {
         GpuBuffer inv = invertU32(rankBuf, rowCount);
         rankBuf->release();
@@ -1391,8 +1394,6 @@ void GpuOps::scatterConstantF32(MTL::Buffer* output, MTL::Buffer* indices, uint3
     
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "scatterConstantF32");
 }
 
 void GpuOps::scatterF32(MTL::Buffer* input, MTL::Buffer* output, MTL::Buffer* indices, uint32_t count) {
@@ -1419,8 +1420,6 @@ void GpuOps::scatterF32(MTL::Buffer* input, MTL::Buffer* output, MTL::Buffer* in
     
     enc->endEncoding();
     cmd->commit();
-    cmd->waitUntilCompleted();
-    checkGpuStatus(cmd, "scatterF32");
 }
 
 GpuBuffer GpuOps::mathFloorF32(MTL::Buffer* col, uint32_t count) {

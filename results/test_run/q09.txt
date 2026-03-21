@@ -4,287 +4,288 @@
 ======================RESULT=======================
 ---------------------------------------------------
 o_year|sum_profit|nation|
-1998|27136898.00|ALGERIA|
-1997|48611852.00|ALGERIA|
-1996|48285520.00|ALGERIA|
-1995|44402280.00|ALGERIA|
-1994|48694028.00|ALGERIA|
-1993|46044212.00|ALGERIA|
-1992|45636828.00|ALGERIA|
-1998|28341682.00|ARGENTINA|
-1997|47143952.00|ARGENTINA|
-1996|45255252.00|ARGENTINA|
-1995|45631760.00|ARGENTINA|
-1994|48268828.00|ARGENTINA|
-1993|48605652.00|ARGENTINA|
-1992|46654232.00|ARGENTINA|
-1998|26527710.00|BRAZIL|
+1998|27136916.00|ALGERIA|
+1997|48611840.00|ALGERIA|
+1996|48285496.00|ALGERIA|
+1995|44402240.00|ALGERIA|
+1994|48693964.00|ALGERIA|
+1993|46044224.00|ALGERIA|
+1992|45636860.00|ALGERIA|
+1998|28341684.00|ARGENTINA|
+1997|47144024.00|ARGENTINA|
+1996|45255268.00|ARGENTINA|
+1995|45631716.00|ARGENTINA|
+1994|48268872.00|ARGENTINA|
+1993|48605592.00|ARGENTINA|
+1992|46654256.00|ARGENTINA|
+1998|26527728.00|BRAZIL|
 1997|45640636.00|BRAZIL|
-1996|45090644.00|BRAZIL|
-1995|44015888.00|BRAZIL|
-1994|44854228.00|BRAZIL|
-1993|45766628.00|BRAZIL|
-1992|45280208.00|BRAZIL|
-1998|26828996.00|CANADA|
+1996|45090612.00|BRAZIL|
+1995|44015884.00|BRAZIL|
+1994|44854200.00|BRAZIL|
+1993|45766648.00|BRAZIL|
+1992|45280220.00|BRAZIL|
+1998|26828990.00|CANADA|
 1997|44849936.00|CANADA|
-1996|46307960.00|CANADA|
-1995|47311968.00|CANADA|
-1994|46691472.00|CANADA|
-1993|46634808.00|CANADA|
-1992|45873844.00|CANADA|
-1998|27510134.00|CHINA|
-1997|46123868.00|CHINA|
-1996|49532736.00|CHINA|
-1995|46734644.00|CHINA|
-1994|46397928.00|CHINA|
-1993|49634704.00|CHINA|
-1992|46949432.00|CHINA|
-1998|28401470.00|EGYPT|
-1997|47674844.00|EGYPT|
-1996|47745720.00|EGYPT|
-1995|45897132.00|EGYPT|
-1994|47194924.00|EGYPT|
-1993|49133676.00|EGYPT|
+1996|46307956.00|CANADA|
+1995|47311936.00|CANADA|
+1994|46691484.00|CANADA|
+1993|46634792.00|CANADA|
+1992|45873828.00|CANADA|
+1998|27510172.00|CHINA|
+1997|46123888.00|CHINA|
+1996|49532812.00|CHINA|
+1995|46734628.00|CHINA|
+1994|46397916.00|CHINA|
+1993|49634700.00|CHINA|
+1992|46949436.00|CHINA|
+1998|28401490.00|EGYPT|
+1997|47674904.00|EGYPT|
+1996|47745700.00|EGYPT|
+1995|45897152.00|EGYPT|
+1994|47194904.00|EGYPT|
+1993|49133692.00|EGYPT|
 1992|47000560.00|EGYPT|
-1998|25135054.00|ETHIOPIA|
-1997|43010568.00|ETHIOPIA|
-1996|43636300.00|ETHIOPIA|
-1995|43575748.00|ETHIOPIA|
-1994|41597192.00|ETHIOPIA|
-1993|42622848.00|ETHIOPIA|
-1992|44385740.00|ETHIOPIA|
-1998|26210392.00|FRANCE|
-1997|42392980.00|FRANCE|
-1996|43306300.00|FRANCE|
-1995|46377404.00|FRANCE|
-1994|43447372.00|FRANCE|
-1993|43729948.00|FRANCE|
-1992|44052324.00|FRANCE|
-1998|25991242.00|GERMANY|
-1997|43968352.00|GERMANY|
-1996|45882092.00|GERMANY|
+1998|25135048.00|ETHIOPIA|
+1997|43010564.00|ETHIOPIA|
+1996|43636308.00|ETHIOPIA|
+1995|43575760.00|ETHIOPIA|
+1994|41597224.00|ETHIOPIA|
+1993|42622840.00|ETHIOPIA|
+1992|44385728.00|ETHIOPIA|
+1998|26210396.00|FRANCE|
+1997|42392956.00|FRANCE|
+1996|43306308.00|FRANCE|
+1995|46377424.00|FRANCE|
+1994|43447368.00|FRANCE|
+1993|43729912.00|FRANCE|
+1992|44052300.00|FRANCE|
+1998|25991268.00|GERMANY|
+1997|43968356.00|GERMANY|
+1996|45882116.00|GERMANY|
 1995|43314360.00|GERMANY|
-1994|44617044.00|GERMANY|
-1993|45126648.00|GERMANY|
-1992|44361140.00|GERMANY|
-1998|29626408.00|INDIA|
-1997|51386124.00|INDIA|
-1996|47570972.00|INDIA|
-1995|49344092.00|INDIA|
-1994|50106980.00|INDIA|
-1993|48112808.00|INDIA|
-1992|47914304.00|INDIA|
-1998|27734928.00|INDONESIA|
-1997|44593868.00|INDONESIA|
+1994|44616988.00|GERMANY|
+1993|45126684.00|GERMANY|
+1992|44361204.00|GERMANY|
+1998|29626426.00|INDIA|
+1997|51386108.00|INDIA|
+1996|47571052.00|INDIA|
+1995|49344088.00|INDIA|
+1994|50106988.00|INDIA|
+1993|48112784.00|INDIA|
+1992|47914360.00|INDIA|
+1998|27734924.00|INDONESIA|
+1997|44593776.00|INDONESIA|
 1996|44746736.00|INDONESIA|
-1995|45593604.00|INDONESIA|
-1994|45988528.00|INDONESIA|
-1993|46147956.00|INDONESIA|
-1992|45185768.00|INDONESIA|
-1998|26661618.00|IRAN|
-1997|45019152.00|IRAN|
-1996|45891396.00|IRAN|
-1995|44414280.00|IRAN|
-1994|43696392.00|IRAN|
-1993|45362732.00|IRAN|
-1992|43052376.00|IRAN|
-1998|31188524.00|IRAQ|
-1997|48585344.00|IRAQ|
-1996|50036560.00|IRAQ|
-1995|48774808.00|IRAQ|
-1994|48795840.00|IRAQ|
-1993|47435696.00|IRAQ|
-1992|47562416.00|IRAQ|
-1998|24694104.00|JAPAN|
-1997|42377100.00|JAPAN|
-1996|40267776.00|JAPAN|
-1995|40925264.00|JAPAN|
-1994|41159476.00|JAPAN|
-1993|39589056.00|JAPAN|
-1992|39113504.00|JAPAN|
-1998|23489860.00|JORDAN|
-1997|41615976.00|JORDAN|
-1996|41860888.00|JORDAN|
-1995|39931636.00|JORDAN|
-1994|40707584.00|JORDAN|
-1993|39060408.00|JORDAN|
-1992|41657556.00|JORDAN|
-1998|25566334.00|KENYA|
+1995|45593652.00|INDONESIA|
+1994|45988520.00|INDONESIA|
+1993|46147968.00|INDONESIA|
+1992|45185792.00|INDONESIA|
+1998|26661614.00|IRAN|
+1997|45019128.00|IRAN|
+1996|45891404.00|IRAN|
+1995|44414272.00|IRAN|
+1994|43696340.00|IRAN|
+1993|45362764.00|IRAN|
+1992|43052380.00|IRAN|
+1998|31188514.00|IRAQ|
+1997|48585292.00|IRAQ|
+1996|50036596.00|IRAQ|
+1995|48774744.00|IRAQ|
+1994|48795868.00|IRAQ|
+1993|47435656.00|IRAQ|
+1992|47562376.00|IRAQ|
+1998|24694102.00|JAPAN|
+1997|42377096.00|JAPAN|
+1996|40267800.00|JAPAN|
+1995|40925272.00|JAPAN|
+1994|41159504.00|JAPAN|
+1993|39589060.00|JAPAN|
+1992|39113500.00|JAPAN|
+1998|23489854.00|JORDAN|
+1997|41615944.00|JORDAN|
+1996|41860868.00|JORDAN|
+1995|39931680.00|JORDAN|
+1994|40707576.00|JORDAN|
+1993|39060392.00|JORDAN|
+1992|41657560.00|JORDAN|
+1998|25566344.00|KENYA|
 1997|43108872.00|KENYA|
-1996|43482976.00|KENYA|
-1995|42517980.00|KENYA|
-1994|43612460.00|KENYA|
-1993|42724068.00|KENYA|
+1996|43482988.00|KENYA|
+1995|42518020.00|KENYA|
+1994|43612508.00|KENYA|
+1993|42724048.00|KENYA|
 1992|43217124.00|KENYA|
-1998|24915506.00|MOROCCO|
-1997|42698372.00|MOROCCO|
-1996|42986088.00|MOROCCO|
-1995|42316072.00|MOROCCO|
-1994|43458576.00|MOROCCO|
-1993|42672324.00|MOROCCO|
-1992|42800772.00|MOROCCO|
-1998|28279858.00|MOZAMBIQUE|
-1997|51159208.00|MOZAMBIQUE|
-1996|48072568.00|MOZAMBIQUE|
-1995|48905196.00|MOZAMBIQUE|
-1994|46092080.00|MOZAMBIQUE|
-1993|48555880.00|MOZAMBIQUE|
-1992|47809060.00|MOZAMBIQUE|
-1998|26713948.00|PERU|
+1998|24915508.00|MOROCCO|
+1997|42698364.00|MOROCCO|
+1996|42986108.00|MOROCCO|
+1995|42316096.00|MOROCCO|
+1994|43458604.00|MOROCCO|
+1993|42672292.00|MOROCCO|
+1992|42800860.00|MOROCCO|
+1998|28279866.00|MOZAMBIQUE|
+1997|51159168.00|MOZAMBIQUE|
+1996|48072524.00|MOZAMBIQUE|
+1995|48905192.00|MOZAMBIQUE|
+1994|46092076.00|MOZAMBIQUE|
+1993|48555884.00|MOZAMBIQUE|
+1992|47809092.00|MOZAMBIQUE|
+1998|26713954.00|PERU|
 1997|48324032.00|PERU|
-1996|50310012.00|PERU|
-1995|49647100.00|PERU|
-1994|46420876.00|PERU|
-1993|51536848.00|PERU|
-1992|47711632.00|PERU|
-1998|27271994.00|ROMANIA|
-1997|45063024.00|ROMANIA|
-1996|47492292.00|ROMANIA|
-1995|45710620.00|ROMANIA|
-1994|46088060.00|ROMANIA|
-1993|47515040.00|ROMANIA|
-1992|44111420.00|ROMANIA|
-1998|27935340.00|RUSSIA|
-1997|48222280.00|RUSSIA|
-1996|47553584.00|RUSSIA|
+1996|50309996.00|PERU|
+1995|49647016.00|PERU|
+1994|46420908.00|PERU|
+1993|51536852.00|PERU|
+1992|47711696.00|PERU|
+1998|27272008.00|ROMANIA|
+1997|45063056.00|ROMANIA|
+1996|47492308.00|ROMANIA|
+1995|45710676.00|ROMANIA|
+1994|46088024.00|ROMANIA|
+1993|47515116.00|ROMANIA|
+1992|44111452.00|ROMANIA|
+1998|27935318.00|RUSSIA|
+1997|48222316.00|RUSSIA|
+1996|47553576.00|RUSSIA|
 1995|46756024.00|RUSSIA|
-1994|48000484.00|RUSSIA|
-1993|48569608.00|RUSSIA|
-1992|47672860.00|RUSSIA|
-1998|27113504.00|SAUDI ARABIA|
-1997|46690512.00|SAUDI ARABIA|
-1996|47775776.00|SAUDI ARABIA|
-1995|46657168.00|SAUDI ARABIA|
-1994|48181656.00|SAUDI ARABIA|
-1993|45692612.00|SAUDI ARABIA|
-1992|48924944.00|SAUDI ARABIA|
-1998|26366678.00|UNITED KINGDOM|
-1997|44518148.00|UNITED KINGDOM|
-1996|45539724.00|UNITED KINGDOM|
+1994|48000468.00|RUSSIA|
+1993|48569656.00|RUSSIA|
+1992|47672800.00|RUSSIA|
+1998|27113518.00|SAUDI ARABIA|
+1997|46690460.00|SAUDI ARABIA|
+1996|47775748.00|SAUDI ARABIA|
+1995|46657156.00|SAUDI ARABIA|
+1994|48181632.00|SAUDI ARABIA|
+1993|45692588.00|SAUDI ARABIA|
+1992|48924904.00|SAUDI ARABIA|
+1998|26366660.00|UNITED KINGDOM|
+1997|44518164.00|UNITED KINGDOM|
+1996|45539692.00|UNITED KINGDOM|
 1995|46845856.00|UNITED KINGDOM|
-1994|43081628.00|UNITED KINGDOM|
-1993|44770176.00|UNITED KINGDOM|
-1992|44123404.00|UNITED KINGDOM|
+1994|43081644.00|UNITED KINGDOM|
+1993|44770160.00|UNITED KINGDOM|
+1992|44123408.00|UNITED KINGDOM|
 1998|27826602.00|UNITED STATES|
-1997|46638604.00|UNITED STATES|
-1996|46688276.00|UNITED STATES|
-1995|48951544.00|UNITED STATES|
-1994|45099092.00|UNITED STATES|
-1993|46181548.00|UNITED STATES|
-1992|46168212.00|UNITED STATES|
-1998|27281920.00|VIETNAM|
-1997|48735868.00|VIETNAM|
-1996|47824580.00|VIETNAM|
-1995|48235136.00|VIETNAM|
-1994|47729256.00|VIETNAM|
-1993|45352672.00|VIETNAM|
-1992|47846292.00|VIETNAM|
+1997|46638560.00|UNITED STATES|
+1996|46688228.00|UNITED STATES|
+1995|48951524.00|UNITED STATES|
+1994|45099116.00|UNITED STATES|
+1993|46181572.00|UNITED STATES|
+1992|46168188.00|UNITED STATES|
+1998|27281928.00|VIETNAM|
+1997|48735924.00|VIETNAM|
+1996|47824596.00|VIETNAM|
+1995|48235124.00|VIETNAM|
+1994|47729260.00|VIETNAM|
+1993|45352720.00|VIETNAM|
+1992|47846344.00|VIETNAM|
 ---------------------------------------------------
-Planning time: 2.37 ms
-Data Load Time (Disk+Upload): 3977.22 ms
-GPU kernels time: 566.62 ms
-CPU postprocess time: 400.31 ms
-Node timing: Scan=0.0(g0.0)ms Join=62.9(g31.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=90.0(g49.0)ms Save=0.0(g0.0)ms Scan=73.9(g69.8)ms Save=3.6(g0.0)ms Scan=9.6(g0.0)ms Join=182.9(g96.4)ms Join=106.9(g58.2)ms Join=136.0(g39.1)ms Project=98.1(g90.7)ms Project=0.1(g0.0)ms Project=0.1(g0.0)ms GroupBy=93.9(g33.2)ms Project=29.9(g35.7)ms Project=0.0(g0.0)ms OrderBy=48.0(g24.9)ms Project=31.0(g37.9)ms
-Total Internal Pipeline time: 4944.15 ms
-Total Host Execution time: 4961.52 ms
-Total Wall time (Plan+Exec): 4963.89 ms
+Planning time: 2.07 ms
+Data Load Time (Disk+Upload): 3865.13 ms
+GPU kernels time: 576.23 ms
+CPU postprocess time: 414.63 ms
+Node timing: Scan=0.0(g0.0)ms Join=78.8(g31.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=90.0(g49.0)ms Save=0.0(g0.0)ms Scan=75.3(g69.8)ms Save=3.9(g0.0)ms Scan=10.3(g0.0)ms Join=189.6(g98.5)ms Join=105.0(g56.1)ms Join=135.0(g38.3)ms Project=101.3(g93.5)ms Project=0.1(g0.0)ms Project=0.1(g0.0)ms GroupBy=116.6(g25.9)ms Project=28.9(g33.7)ms Project=0.0(g0.0)ms OrderBy=17.0(g25.7)ms Project=39.0(g53.9)ms
+Total Internal Pipeline time: 4855.99 ms
+Total Host Execution time: 4874.41 ms
+Total Wall time (Plan+Exec): 4876.49 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  173.835 ms (30.680%) [8 calls]
-  filter         :   69.849 ms (12.327%) [1 calls]
-  gather         :  149.579 ms (26.399%) [7 calls]
-  gather_dispatch:    1.386 ms (0.245%) [57 calls]
-  groupby        :   33.183 ms (5.856%) [2 calls]
-  hash_join_probe_u32:  130.825 ms (23.089%) [4 calls]
-  sort           :    7.959 ms (1.405%) [2 calls]
+  batch_flush    :  180.794 ms (31.374%) [10 calls]
+  filter         :   69.836 ms (12.119%) [1 calls]
+  gather         :  157.407 ms (27.316%) [6 calls]
+  gather_dispatch:    1.570 ms (0.272%) [58 calls]
+  groupby        :   25.943 ms (4.502%) [2 calls]
+  hash_join_probe_u32:  131.906 ms (22.890%) [4 calls]
+  sort           :    8.793 ms (1.526%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 566.615 ms
-  Kernel invocations: 81
+  TOTAL GPU TIME: 576.249 ms
+  Kernel invocations: 82
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi         16.885          10000          0.592
-ops::gather_col_u32                  0.007          10000       1481.481
-ops::gather_col_u32                  0.005          10000       1846.040
-ops::gather_col_u32                  0.081          10000        123.329
-ops::gather_col_u32                  0.059          10000        169.133
-ops::gather_col_u32                  0.053          10000        188.235
-sync                                14.664              0          0.000
-hash_join_probe_write_multi         23.968         800000         33.378
-ops::gather_col_u32                  0.010         800000      77737.829
-ops::gather_col_u32                  0.007         800000     119994.000
-ops::gather_col_f32                  0.010         800000      78048.780
-ops::gather_col_u32                  0.008         800000     100000.000
-ops::gather_col_u32                  0.007         800000     114975.568
-ops::gather_col_u32                  0.070         800000      11394.551
-ops::gather_col_u32                  0.086         800000       9293.356
-ops::gather_col_u32                  0.085         800000       9458.165
-sync                                24.710              0          0.000
-ops::filter_string_contains         69.849         200000          2.863
-ops::gather_col_u32                  0.021          10664        502.805
-ops::gather_col_u32                  0.005          10664       1938.909
-ops::gather_col_u32                  0.005          10664       2015.117
-sync                                 9.803              0          0.000
-hash_join_probe_write_multi         65.999        6001215         90.929
-ops::gather_col_u32                  0.009         319404      36675.164
-ops::gather_col_u32                  0.004         319404      79021.277
-ops::gather_col_u32                  0.004         319404      85174.400
-ops::gather_col_f32                  0.005         319404      61317.719
-ops::gather_col_f32                  0.005         319404      61828.107
-ops::gather_col_f32                  0.005         319404      58509.617
-ops::gather_col_u32                  0.005         319404      62322.732
-ops::gather_col_u32                  0.006         319404      56782.933
-ops::gather_col_u32                  0.059         319404       5413.627
-sync                                20.427              0          0.000
-hash_join_probe_write_multi         23.973         319404         13.323
-ops::gather_col_u32                  0.011         319404      29828.539
-ops::gather_col_u32                  0.006         319404      50434.865
-ops::gather_col_u32                  0.004         319404      84231.013
-ops::gather_col_u32                  0.005         319404      62322.732
-ops::gather_col_u32                  0.004         319404      70978.667
-ops::gather_col_f32                  0.005         319404      67842.821
-ops::gather_col_f32                  0.004         319404      79021.277
-ops::gather_col_f32                  0.006         319404      54748.714
-ops::gather_col_u32                  0.005         319404      60367.416
-ops::gather_col_u32                  0.033         319404       9654.626
-ops::gather_col_u32                  0.052         319404       6152.323
-sync                                34.102              0          0.000
-ops::gather_col_u32                  0.005         319404      64959.121
-ops::gather_col_u32                  0.004         319404      83308.294
-ops::gather_col_u32                  0.004         319404      84253.231
-ops::gather_col_u32                  0.004         319404      83330.029
-ops::gather_col_u32                  0.004         319404      88111.448
-ops::gather_col_u32                  0.003         319404     102209.280
-ops::gather_col_u32                  0.005         319404      67828.414
-ops::gather_col_f32                  0.004         319404      76650.828
+hash_join_probe_write_multi         16.921          10000          0.591
+ops::gather_col_u32                  0.007          10000       1371.554
+ops::gather_col_u32                  0.005          10000       1860.465
+ops::gather_col_u32                  0.081          10000        123.077
+ops::gather_col_u32                  0.074          10000        134.680
+ops::gather_col_u32                  0.061          10000        163.712
+sync                                14.632              0          0.000
+hash_join_probe_write_multi         24.001         800000         33.332
+ops::gather_col_u32                  0.010         800000      80669.557
+ops::gather_col_u32                  0.007         800000     121525.141
+ops::gather_col_f32                  0.006         800000     127145.582
+ops::gather_col_u32                  0.007         800000     109709.270
+ops::gather_col_u32                  0.007         800000     106666.667
+ops::gather_col_u32                  0.076         800000      10480.258
+ops::gather_col_u32                  0.089         800000       9005.561
+ops::gather_col_u32                  0.091         800000       8815.427
+sync                                24.674              0          0.000
+ops::filter_string_contains         69.836         200000          2.864
+ops::gather_col_u32                  0.023          10664        462.807
+ops::gather_col_u32                  0.006          10664       1882.104
+ops::gather_col_u32                  0.005          10664       1968.617
+sync                                 9.965              0          0.000
+hash_join_probe_write_multi         66.958        6001215         89.627
+ops::gather_col_u32                  0.008         319404      38519.537
+ops::gather_col_u32                  0.005         319404      64972.335
+ops::gather_col_u32                  0.004         319404      79851.000
+ops::gather_col_f32                  0.005         319404      62837.694
+ops::gather_col_f32                  0.005         319404      62322.732
 ops::gather_col_f32                  0.005         319404      60838.857
-ops::gather_col_f32                  0.007         319404      46744.329
+ops::gather_col_u32                  0.005         319404      65518.769
+ops::gather_col_u32                  0.005         319404      59880.765
+ops::gather_col_u32                  0.040         319404       7943.792
+sync                                21.418              0          0.000
+hash_join_probe_write_multi         24.027         319404         13.294
+ops::gather_col_u32                  0.016         319404      20387.056
+ops::gather_col_u32                  0.004         319404      84231.013
+ops::gather_col_u32                  0.004         319404      86139.159
+ops::gather_col_u32                  0.005         319404      60838.857
+ops::gather_col_u32                  0.005         319404      67842.821
+ops::gather_col_f32                  0.004         319404      75885.959
+ops::gather_col_f32                  0.004         319404      81543.018
+ops::gather_col_f32                  0.004         319404      75885.959
+ops::gather_col_u32                  0.005         319404      64421.944
+ops::gather_col_u32                  0.044         319404       7321.582
+ops::gather_col_u32                  0.052         319404       6162.175
+sync                                31.968              0          0.000
+ops::gather_col_u32                  0.010         319404      32897.724
+ops::gather_col_u32                  0.004         319404      83330.029
+ops::gather_col_u32                  0.005         319404      62322.732
+ops::gather_col_u32                  0.004         319404      82426.839
+ops::gather_col_u32                  0.003         319404      98278.154
+ops::gather_col_u32                  0.003         319404     103568.093
 ops::gather_col_u32                  0.004         319404      71631.307
-ops::gather_col_u32                  0.056         319404       5742.094
-ops::gather_col_u32                  0.071         319404       4514.544
-ops::gather_col_u32                  0.095         319404       3365.087
-ops::gather_col_u32                  0.057         319404       5591.317
-ops::gather_col_u32                  0.077         319404       4134.680
-ops::gather_col_f32                  0.069         319404       4637.445
-ops::gather_col_u32                  0.085         319404       3739.349
-ops::gather_col_u32                  0.046         319404       7013.394
-sync                                38.480              0          0.000
-ops::gather_col_u32                  5.969         319404         53.512
-ops::gather_flat_string             60.988         319404          5.237
-sync                                23.732              0          0.000
-ops::groupby_agg_multi_key_ty        6.241         319404         51.178
-ops::ht_extract_compact             26.942            175          0.006
-ops::gather_col_u32                  5.862            175          0.030
-ops::gather_flat_string             29.871            175          0.006
-block_sort_kv_u64                    0.000            175          0.000
-ops::gather_col_u32                  0.019            175          9.354
-ops::gather_col_f32                  0.005            175         35.000
-sync                                 7.917              0          0.000
-orderby_gpu_gather                   7.959            350          0.044
-ops::gather_col_u32                  8.992            175          0.019
-ops::gather_col_u32                  6.952            175          0.025
-ops::gather_flat_string             30.945            175          0.006
+ops::gather_col_f32                  0.005         319404      68453.493
+ops::gather_col_f32                  0.005         319404      60356.009
+ops::gather_col_f32                  0.005         319404      67242.947
+ops::gather_col_u32                  0.005         319404      69060.324
+ops::gather_col_u32                  0.037         319404       8555.541
+ops::gather_col_u32                  0.075         319404       4239.895
+ops::gather_col_u32                  0.071         319404       4506.582
+ops::gather_col_u32                  0.071         319404       4480.222
+ops::gather_col_u32                  0.086         319404       3714.000
+ops::gather_col_f32                  0.053         319404       6040.738
+ops::gather_col_u32                  0.264         319404       1211.203
+ops::gather_col_u32                  0.045         319404       7019.868
+sync                                37.551              0          0.000
+ops::gather_col_u32                  6.897         319404         46.308
+ops::gather_flat_string             62.909         319404          5.077
+sync                                23.736              0          0.000
+ops::groupby_agg_multi_key_ty        0.003         319404     119761.530
+ops::ht_extract_compact             25.940            175          0.007
+ops::gather_col_u32                  4.854            175          0.036
+ops::gather_flat_string             28.874            175          0.006
+sync                                 8.051              0          0.000
+ops::gather_col_u32                  0.005            175         36.209
+ops::gather_col_f32                  0.005            175         38.529
+sync                                 8.778              0          0.000
+orderby_gpu_gather                   8.793            350          0.040
+ops::gather_col_u32                  0.019            175          9.292
+ops::gather_col_u32                 14.927            175          0.012
+ops::gather_flat_string             38.946            175          0.004
+sync                                 0.020              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 566.615 ms
+TOTAL: 576.249 ms

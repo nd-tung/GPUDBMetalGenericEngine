@@ -191,6 +191,7 @@ static MTL::Buffer* buildRankStringStatic(
 
 // -- Extracted: gpuRadixSortComposite --
 // Packs rank GPU buffers into composite u64 keys and runs GPU radix sort.
+// For small row counts, falls back to CPU std::stable_sort to avoid GPU dispatch overhead.
 // Returns the sorted index buffer (caller must release).
 static MTL::Buffer* gpuRadixSortComposite(
     std::vector<MTL::Buffer*>& rankBufs,
@@ -199,6 +200,7 @@ static MTL::Buffer* gpuRadixSortComposite(
     auto& store = GpuColumnStore::instance();
 
     if (debug) {
+        GpuOps::sync(); // ensure rank buffers are complete before CPU debug read
         LOG_INFO("Exec", "OrderBy: sortCols.size()=" << sortCols.size() << " rankBufs.size()=" << rankBufs.size() << " n=" << n);
         for (size_t k = 0; k < rankBufs.size(); ++k) {
             LOG_INFO("Exec", "OrderBy: rankBufs[" << k << "] first few = [");
@@ -207,6 +209,32 @@ static MTL::Buffer* gpuRadixSortComposite(
                 LOG_INFO("SORT", p[i] << (i+1<n?",":""));
             LOG_INFO("SORT", "]\n");
         }
+    }
+
+    // CPU sort for small row counts — avoids GPU command buffer overhead
+    constexpr uint32_t kCpuSortThreshold = 131072;
+    if (n <= kCpuSortThreshold) {
+        GpuOps::sync(); // ensure rank buffers from async GPU ops are complete before CPU read
+        auto* idxBuf = store.device()->newBuffer(n * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+        auto* idx = static_cast<uint32_t*>(idxBuf->contents());
+        for (uint32_t i = 0; i < n; ++i) idx[i] = i;
+
+        // Build pointers to rank data for fast access
+        size_t numCols = sortCols.size();
+        std::vector<const uint32_t*> ranks(numCols);
+        for (size_t k = 0; k < numCols; ++k)
+            ranks[k] = static_cast<const uint32_t*>(rankBufs[k]->contents());
+
+        std::stable_sort(idx, idx + n, [&](uint32_t a, uint32_t b) {
+            for (size_t k = 0; k < numCols; ++k) {
+                uint32_t ra = ranks[k][a], rb = ranks[k][b];
+                if (ra != rb) return ra < rb;
+            }
+            return false;
+        });
+
+        for (auto* rb : rankBufs) rb->release();
+        return idxBuf;
     }
 
     GpuBuffer idxBuf = GpuOps::iotaU32(n);
@@ -227,13 +255,27 @@ static MTL::Buffer* gpuRadixSortComposite(
 
         GpuOps::radixSortU64(keyBuf, idxBuf, n);
     } else {
-        for (int k = (int)sortCols.size() - 1; k >= 0; --k) {
-            GpuBuffer gatheredRank = GpuOps::gatherU32(rankBufs[k], idxBuf, n, true);
-            rankBufs[k]->release();
-            GpuBuffer posBuf = GpuOps::iotaU32(n);
-            GpuBuffer keyBuf = GpuOps::packU32ToU64(gatheredRank, posBuf, n);
+        // Stable cascade: sort pairs from least significant to most significant.
+        size_t numCols = sortCols.size();
+        for (int pairStart = (int)numCols - 2; pairStart >= -1; pairStart -= 2) {
+            int c0 = std::max(pairStart, 0);
+            int c1 = c0 + 1;
+            bool hasTwoCols = (pairStart >= 0);
+
+            GpuBuffer g0 = GpuOps::gatherU32(rankBufs[c0], idxBuf, n, false);
+            GpuBuffer g1;
+            if (hasTwoCols && c1 < (int)numCols) {
+                g1 = GpuOps::gatherU32(rankBufs[c1], idxBuf, n, false);
+            } else {
+                g1 = GpuOps::createFilledU32(0, n);
+            }
+
+
+            GpuBuffer keyBuf = GpuOps::packU32ToU64(g0, g1, n);
             GpuOps::radixSortU64(keyBuf, idxBuf, n);
+            if (pairStart <= 0) break;
         }
+        for (auto* rb : rankBufs) rb->release();
     }
 
     if (debug) {
@@ -337,7 +379,7 @@ static void reorderStringColumns(
             // Check tableResult.dictStringResults
             auto tDictIt = table.dictStringResults.find(colName);
             if (tDictIt != table.dictStringResults.end() && tDictIt->second.idsGPU && tDictIt->second.rowCount == n) {
-                GpuBuffer gatheredIds = GpuOps::gatherU32(tDictIt->second.idsGPU, idxBuf, n);
+                GpuBuffer gatheredIds = GpuOps::gatherU32(tDictIt->second.idsGPU, idxBuf, n, false);
                 DictEncoded reordered;
                 reordered.dictionary = tDictIt->second.dictionary;
                 reordered.idsGPU = std::move(gatheredIds);
@@ -348,7 +390,7 @@ static void reorderStringColumns(
                 continue;
             }
             if (dictIt != dictCols.end() && dictIt->second.idsGPU && dictIt->second.rowCount == n) {
-                GpuBuffer gatheredIds = GpuOps::gatherU32(dictIt->second.idsGPU, idxBuf, n);
+                GpuBuffer gatheredIds = GpuOps::gatherU32(dictIt->second.idsGPU, idxBuf, n, false);
                 DictEncoded reordered;
                 reordered.dictionary = dictIt->second.dictionary;
                 reordered.idsGPU = std::move(gatheredIds);

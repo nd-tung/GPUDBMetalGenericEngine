@@ -5,31 +5,32 @@
 ---------------------------------------------------
 Scalar count_star(): 25.00
 ---------------------------------------------------
-Planning time: 0.44 ms
-Data Load Time (Disk+Upload): 105.87 ms
-GPU kernels time: 73.07 ms
-CPU postprocess time: 42.64 ms
-Node timing: Scan=0.0(g0.0)ms Project=0.4(g0.0)ms Project=0.2(g0.0)ms GroupBy=84.2(g35.5)ms Project=30.9(g37.6)ms Aggregate=0.0(g0.0)ms
-Total Internal Pipeline time: 221.58 ms
-Total Host Execution time: 221.72 ms
-Total Wall time (Plan+Exec): 222.17 ms
+Planning time: 0.51 ms
+Data Load Time (Disk+Upload): 91.16 ms
+GPU kernels time: 78.87 ms
+CPU postprocess time: 48.24 ms
+Node timing: Scan=0.0(g0.0)ms Project=0.5(g0.0)ms Project=0.2(g0.0)ms GroupBy=94.6(g39.3)ms Project=31.8(g39.5)ms Aggregate=0.0(g0.0)ms
+Total Internal Pipeline time: 218.27 ms
+Total Host Execution time: 218.44 ms
+Total Wall time (Plan+Exec): 218.94 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    0.046 ms (0.063%) [1 calls]
-  gather         :   37.593 ms (51.451%) [2 calls]
-  groupby        :   35.426 ms (48.486%) [2 calls]
+  batch_flush    :   15.391 ms (19.505%) [2 calls]
+  gather         :   39.544 ms (50.114%) [2 calls]
+  groupby        :   23.974 ms (30.382%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 73.065 ms
-  Kernel invocations: 5
+  TOTAL GPU TIME: 78.909 ms
+  Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-sync                                 0.046              0          0.000
-ops::groupby_agg_multi_key_ty       11.460         200000         17.452
-ops::ht_extract_compact             23.966             25          0.001
-ops::gather_col_u32                  6.767             25          0.004
-ops::gather_flat_string             30.826             25          0.001
+sync                                15.356              0          0.000
+ops::groupby_agg_multi_key_ty        0.006         200000      31786.395
+ops::ht_extract_compact             23.967             25          0.001
+ops::gather_col_u32                  7.739             25          0.003
+ops::gather_flat_string             31.805             25          0.001
+sync                                 0.035              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 73.065 ms
+TOTAL: 78.909 ms

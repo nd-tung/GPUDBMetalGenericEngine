@@ -181,7 +181,7 @@ static AggColumnResult resolveAggColumnAsF32(
         MTL::Buffer* src = u32Buf;
         bool ownSrc = false;
         if (!ctx.activeRows.empty() && itU->second.size() > expectedKeyRows && ctx.activeRowsGPU) {
-            src = GpuOps::gatherU32(u32Buf, ctx.activeRowsGPU, (uint32_t)expectedKeyRows).detach();
+            src = GpuOps::gatherU32(u32Buf, ctx.activeRowsGPU, (uint32_t)expectedKeyRows, false).detach();
             ownSrc = true;
         }
         uint32_t castCount = ownSrc ? (uint32_t)expectedKeyRows : (uint32_t)itU->second.size();
@@ -214,7 +214,7 @@ static AggColumnResult resolveAggColumnAsF32(
             MTL::Buffer* src = ctx.f32ColsGPU.count(col) ? ctx.f32ColsGPU[col]
                 : s.device()->newBuffer(itF->second.data(), itF->second.size() * sizeof(float), MTL::ResourceStorageModeShared);
             bool ownSrc = !ctx.f32ColsGPU.count(col);
-            GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, (uint32_t)expectedKeyRows);
+            GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, (uint32_t)expectedKeyRows, false);
             // Skip CPU download — GPU buffer passed directly to kernel
             result.gpuBuf = dst.detach();
             result.gpuOwned = true;
@@ -312,13 +312,13 @@ static GroupByAggData buildAggInputs(
             }
 
             if (!foundPrecomputed) {
-                MTL::Buffer* buf = GpuExecutor::evaluateExpression(spec.input, ctx);
+                GpuBuffer buf = GpuExecutor::evaluateExpression(spec.input, ctx);
                 if (buf) {
                      uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
                      if (ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0) count = 0;
                      input.resize(count);
                      if (count > 0) std::memcpy(input.data(), buf->contents(), count * sizeof(float));
-                     inputGPU = buf;  // keep GPU buffer
+                     inputGPU = buf.detach();  // transfer ownership to raw ptr for aggBufsGPU
                      inputGPUOwned = true;
                 }
             }

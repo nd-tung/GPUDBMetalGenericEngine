@@ -5,22 +5,22 @@
 ---------------------------------------------------
 Scalar promo_revenue: 16.38
 ---------------------------------------------------
-Planning time: 1.27 ms
-Data Load Time (Disk+Upload): 2809.73 ms
-GPU kernels time: 455.00 ms
-CPU postprocess time: 262.00 ms
-Node timing: Scan=0.0(g0.0)ms Save=0.7(g0.0)ms Scan=249.2(g247.9)ms Join=100.6(g57.4)ms Project=198.7(g104.5)ms Aggregate=129.1(g16.0)ms Aggregate=24.0(g14.7)ms Project=14.7(g14.6)ms
-Total Internal Pipeline time: 3526.74 ms
-Total Host Execution time: 3527.30 ms
-Total Wall time (Plan+Exec): 3528.58 ms
+Planning time: 1.29 ms
+Data Load Time (Disk+Upload): 2822.66 ms
+GPU kernels time: 489.58 ms
+CPU postprocess time: 202.67 ms
+Node timing: Scan=0.0(g0.0)ms Save=0.7(g0.0)ms Scan=240.4(g239.1)ms Join=100.6(g57.2)ms Project=191.7(g127.3)ms Aggregate=121.0(g38.7)ms Aggregate=24.0(g13.7)ms Project=13.7(g13.6)ms
+Total Internal Pipeline time: 3514.91 ms
+Total Host Execution time: 3515.50 ms
+Total Wall time (Plan+Exec): 3516.78 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   77.250 ms (16.978%) [7 calls]
-  filter         :  247.948 ms (54.494%) [2 calls]
-  gather         :  105.652 ms (23.220%) [6 calls]
-  gather_dispatch:    0.256 ms (0.056%) [11 calls]
-  hash_join_probe_u32:   23.897 ms (5.252%) [1 calls]
+  batch_flush    :  123.477 ms (25.220%) [8 calls]
+  filter         :  239.067 ms (48.829%) [2 calls]
+  gather         :  102.830 ms (21.003%) [6 calls]
+  gather_dispatch:    0.208 ms (0.042%) [11 calls]
+  hash_join_probe_u32:   24.019 ms (4.906%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 455.003 ms
-  Kernel invocations: 27
+  TOTAL GPU TIME: 489.600 ms
+  Kernel invocations: 28

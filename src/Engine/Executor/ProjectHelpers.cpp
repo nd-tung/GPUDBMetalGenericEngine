@@ -204,6 +204,7 @@ bool projectSubstring(const FunctionCall& func,
                 auto& flat = flatIt->second;
                 GpuBuffer hashBuf = GpuOps::stringFnv1aU32(flat.chars, flat.offsets, flat.lengths, flat.rowCount);
                 if (hashBuf) {
+                    GpuOps::sync(); // ensure GPU hash kernel completes before CPU read
                     std::vector<uint32_t> encoded(flat.rowCount);
                     std::memcpy(encoded.data(), hashBuf->contents(), flat.rowCount * sizeof(uint32_t));
                     ctx.u32Cols[outName] = encoded;
@@ -295,7 +296,7 @@ bool projectExtractYear(const FunctionCall& func,
 
                 // Gather by activeRows if needed
                 if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && ctx.activeRowsCountGPU != gpuCount) {
-                    inputBuf = GpuOps::gatherU32(gpuBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU).detach();
+                    inputBuf = GpuOps::gatherU32(gpuBuf, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false).detach();
                     gpuCount = ctx.activeRowsCountGPU;
                     ownInput = true;
                 }
@@ -504,7 +505,7 @@ bool projectCrossTableLookup(const std::string& lookupCol,
 
             if (ctx.u32ColsGPU.count(currentKey)) {
                 if (ctx.activeRowsGPU) {
-                    probeKeysGPU = GpuOps::gatherU32(ctx.u32ColsGPU[currentKey], ctx.activeRowsGPU, ctx.activeRowsCountGPU).detach();
+                    probeKeysGPU = GpuOps::gatherU32(ctx.u32ColsGPU[currentKey], ctx.activeRowsGPU, ctx.activeRowsCountGPU, false).detach();
                     probeCount = ctx.activeRowsCountGPU;
                     probeOwned = true;
                 } else {
@@ -516,11 +517,11 @@ bool projectCrossTableLookup(const std::string& lookupCol,
                 GpuBuffer probeSrc = GpuOps::createBuffer(probeKeysFull.data(), probeKeysFull.size() * sizeof(uint32_t));
                 if (!ctx.activeRows.empty() || ctx.activeRowsGPU) {
                     if (ctx.activeRowsGPU) {
-                        probeKeysGPU = GpuOps::gatherU32(probeSrc, ctx.activeRowsGPU, ctx.activeRowsCountGPU).detach();
+                        probeKeysGPU = GpuOps::gatherU32(probeSrc, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false).detach();
                         probeCount = ctx.activeRowsCountGPU;
                     } else {
                         GpuBuffer arBuf = GpuOps::createBuffer(ctx.activeRows.data(), ctx.activeRows.size() * sizeof(uint32_t));
-                        probeKeysGPU = GpuOps::gatherU32(probeSrc, arBuf, static_cast<uint32_t>(ctx.activeRows.size())).detach();
+                        probeKeysGPU = GpuOps::gatherU32(probeSrc, arBuf, static_cast<uint32_t>(ctx.activeRows.size()), false).detach();
                         probeCount = static_cast<uint32_t>(ctx.activeRows.size());
                     }
                 } else {
@@ -684,14 +685,14 @@ bool projectComputedExpression(
         return true;
     }
 
-    MTL::Buffer* gpuBuf = GpuExecutor::evaluateExpression(expr, ctx);
+    GpuBuffer gpuBuf = GpuExecutor::evaluateExpression(expr, ctx);
     std::vector<float> values;
 
     if (gpuBuf) {
         LOG_DEBUG("Exec", "Project: computed expr[" << exprIndex << "] on GPU\n");
-        ctx.f32ColsGPU[posName].reset(gpuBuf);
+        ctx.f32ColsGPU[posName] = gpuBuf;
         if (!outName.empty()) {
-            ctx.f32ColsGPU[outName] = ctx.f32ColsGPU[posName];
+            ctx.f32ColsGPU[outName] = gpuBuf;
         }
 
         uint32_t cnt = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;

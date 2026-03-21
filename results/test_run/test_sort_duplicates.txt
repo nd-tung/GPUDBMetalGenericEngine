@@ -9,55 +9,56 @@ n_regionkey|n_name|
 0|KENYA|
 0|MOROCCO|
 0|MOZAMBIQUE|
-1|CANADA|
-1|BRAZIL|
 1|ARGENTINA|
-1|UNITED STATES|
+1|BRAZIL|
+1|CANADA|
 1|PERU|
+1|UNITED STATES|
 2|INDIA|
-2|VIETNAM|
-2|CHINA|
 2|INDONESIA|
 2|JAPAN|
+2|CHINA|
+2|VIETNAM|
 3|FRANCE|
-3|UNITED KINGDOM|
-3|RUSSIA|
-3|ROMANIA|
 3|GERMANY|
-4|JORDAN|
-4|IRAQ|
-4|IRAN|
-4|SAUDI ARABIA|
+3|ROMANIA|
+3|RUSSIA|
+3|UNITED KINGDOM|
 4|EGYPT|
+4|IRAN|
+4|IRAQ|
+4|JORDAN|
+4|SAUDI ARABIA|
 ---------------------------------------------------
-Planning time: 0.41 ms
-Data Load Time (Disk+Upload): 30.28 ms
-GPU kernels time: 64.58 ms
-CPU postprocess time: 7.43 ms
-Node timing: Scan=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=40.0(g24.7)ms Project=32.0(g39.9)ms
-Total Internal Pipeline time: 102.29 ms
-Total Host Execution time: 102.31 ms
-Total Wall time (Plan+Exec): 102.72 ms
+Planning time: 0.47 ms
+Data Load Time (Disk+Upload): 17.69 ms
+GPU kernels time: 86.99 ms
+CPU postprocess time: -21.48 ms
+Node timing: Scan=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=25.4(g31.1)ms Project=40.0(g55.9)ms
+Total Internal Pipeline time: 83.20 ms
+Total Host Execution time: 83.21 ms
+Total Wall time (Plan+Exec): 83.68 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    8.750 ms (13.548%) [1 calls]
-  gather         :   46.947 ms (72.691%) [3 calls]
-  gather_dispatch:    0.010 ms (0.015%) [1 calls]
-  sort           :    8.877 ms (13.745%) [2 calls]
+  batch_flush    :   25.201 ms (28.958%) [3 calls]
+  gather         :   55.895 ms (64.230%) [2 calls]
+  gather_dispatch:    0.043 ms (0.050%) [2 calls]
+  sort           :    5.885 ms (6.762%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 64.584 ms
-  Kernel invocations: 7
+  TOTAL GPU TIME: 87.024 ms
+  Kernel invocations: 8
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-block_sort_kv_u64                    0.000             25          0.000
-ops::gather_col_u32                  0.010             25          2.575
-sync                                 8.750              0          0.000
-orderby_gpu_gather                   8.877             25          0.003
-ops::gather_col_u32                  7.027             25          0.004
-ops::gather_col_u32                  7.954             25          0.003
-ops::gather_flat_string             31.967             25          0.001
+sync                                19.434              0          0.000
+ops::gather_col_u32                  0.027             25          0.933
+sync                                 5.729              0          0.000
+orderby_gpu_gather                   5.885             25          0.004
+ops::gather_col_u32                  0.016             25          1.527
+ops::gather_col_u32                 15.939             25          0.002
+ops::gather_flat_string             39.956             25          0.001
+sync                                 0.037              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 64.584 ms
+TOTAL: 87.024 ms

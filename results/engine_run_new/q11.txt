@@ -1053,25 +1053,24 @@ ps_partkey|value|
 72073|7877736.00|
 5182|7874521.50|
 ---------------------------------------------------
-Planning time: 2.83 ms
-Data Load Time (Disk+Upload): 387.18 ms
-GPU kernels time: 474.55 ms
-CPU postprocess time: 383.59 ms
-Node timing: Scan=0.0(g0.0)ms Join=114.1(g81.7)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=113.0(g71.7)ms Project=15.3(g14.9)ms Aggregate=24.1(g15.7)ms Project=8.6(g8.5)ms Project=0.0(g0.0)ms Aggregate=7.0(g7.0)ms Aggregate=0.0(g0.0)ms Project=0.0(g0.0)ms Save=0.1(g0.0)ms Scan=0.1(g0.0)ms Join=112.8(g80.6)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=103.0(g54.7)ms Project=0.2(g0.0)ms Project=16.9(g16.7)ms GroupBy=63.0(g21.3)ms Join=87.9(g87.7)ms Project=0.0(g0.0)ms OrderBy=192.0(g13.9)ms
-Total Internal Pipeline time: 1245.32 ms
-Total Host Execution time: 1245.41 ms
-Total Wall time (Plan+Exec): 1248.24 ms
+Planning time: 2.51 ms
+Data Load Time (Disk+Upload): 378.98 ms
+GPU kernels time: 448.35 ms
+CPU postprocess time: 202.96 ms
+Node timing: Scan=0.0(g0.0)ms Join=131.2(g97.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=96.0(g55.7)ms Project=16.3(g15.9)ms Aggregate=24.1(g16.7)ms Project=7.5(g7.5)ms Project=0.0(g0.0)ms Aggregate=9.0(g9.0)ms Aggregate=0.0(g0.0)ms Project=0.0(g0.0)ms Save=0.1(g0.0)ms Scan=0.1(g0.0)ms Join=110.8(g79.7)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=88.0(g39.8)ms Project=0.2(g0.0)ms Project=16.9(g16.7)ms GroupBy=63.0(g15.0)ms Join=71.9(g71.8)ms Project=0.0(g0.0)ms OrderBy=16.0(g22.8)ms
+Total Internal Pipeline time: 1030.29 ms
+Total Host Execution time: 1030.38 ms
+Total Wall time (Plan+Exec): 1032.89 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  188.011 ms (39.619%) [13 calls]
-  cast           :    0.019 ms (0.004%) [3 calls]
-  filter         :  132.524 ms (27.926%) [3 calls]
-  gather         :   30.929 ms (6.518%) [4 calls]
-  gather_dispatch:    0.875 ms (0.184%) [42 calls]
-  groupby        :   21.314 ms (4.492%) [2 calls]
-  hash_join_probe_u32:   93.905 ms (19.788%) [4 calls]
-  sort           :    6.969 ms (1.468%) [2 calls]
+  batch_flush    :  189.005 ms (42.154%) [16 calls]
+  cast           :    0.024 ms (0.005%) [3 calls]
+  filter         :  146.705 ms (32.720%) [3 calls]
+  gather_dispatch:    0.834 ms (0.186%) [46 calls]
+  groupby        :   14.958 ms (3.336%) [2 calls]
+  hash_join_probe_u32:   89.899 ms (20.050%) [4 calls]
+  sort           :    6.946 ms (1.549%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 474.545 ms
-  Kernel invocations: 73
+  TOTAL GPU TIME: 448.370 ms
+  Kernel invocations: 75

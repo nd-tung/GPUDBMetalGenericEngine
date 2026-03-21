@@ -46,21 +46,8 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
         }
     }
 
-    MTL::Buffer* gpuInput = evaluateExpression(agg.expr, ctx);
+    GpuBuffer gpuInput = evaluateExpression(agg.expr, ctx);
     if (gpuInput) {
-        // Check if buffer is an intermediate (owned) vs borrowed from context
-        bool isOwned = true;
-        for (const auto& [name, buf] : ctx.f32ColsGPU) {
-            if (buf == gpuInput) { isOwned = false; break; }
-        }
-        if (isOwned) {
-            for (const auto& [name, buf] : ctx.u32ColsGPU) {
-                if (buf == gpuInput) { isOwned = false; break; }
-            }
-        }
-        // Also check against activeRowsGPU
-        if (ctx.activeRowsGPU == gpuInput) isOwned = false;
-
         bool success = true;
         if (agg.func == AggFunc::Sum) {
             outValue = (double)GpuOps::reduceSumF32(gpuInput, count);
@@ -85,8 +72,7 @@ bool GpuExecutor::executeAggregate(const IRAggregate& agg, EvalContext& ctx,
              success = false;
         }
 
-        if (isOwned) gpuInput->release();
-        
+        // gpuInput auto-releases via GpuBuffer destructor
         if (success) return true;
     }
 

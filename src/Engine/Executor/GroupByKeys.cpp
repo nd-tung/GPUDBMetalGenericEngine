@@ -171,7 +171,7 @@ static bool buildDictIdKey(EvalContext& ctx, const std::string& col,
     MTL::Buffer* idsBufGPU = nullptr;
     if (!ctx.activeRows.empty() && dict.ids.size() != expectedKeyRows) {
         if (dict.idsGPU && ctx.activeRowsGPU) {
-            GpuBuffer gathered = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+            GpuBuffer gathered = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false);
             // Skip CPU download — GPU buffer passed directly to kernel
             idsBufGPU = gathered.detach();
         } else {
@@ -256,8 +256,9 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
         auto& flat = ctx.flatStringCols[flatKey];
         GpuBuffer gOff, gLen;
         if (!ctx.activeRows.empty() && sourceRowCount != expectedKeyRows && ctx.activeRowsGPU) {
-            gOff = GpuOps::gatherU32(flat.offsets, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
-            gLen = GpuOps::gatherU32(flat.lengths, ctx.activeRowsGPU, ctx.activeRowsCountGPU);
+            gOff = GpuOps::gatherU32(flat.offsets, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false);
+            gLen = GpuOps::gatherU32(flat.lengths, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false);
+            GpuOps::sync();
             hashBuf = GpuOps::stringFnv1aU64Fold32(flat.chars, gOff, gLen, expectedKeyRows).detach();
         } else {
             hashBuf = GpuOps::stringFnv1aU64Fold32(flat.chars, flat.offsets, flat.lengths, expectedKeyRows).detach();
@@ -267,84 +268,40 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
         if (hashBuf) {
             MTL::Buffer* effOff = gOff ? gOff.get() : flat.offsets.get();
             MTL::Buffer* effLen = gLen ? gLen.get() : flat.lengths.get();
+            GpuOps::sync(); // ensure hash kernel completes before CPU read
             const uint32_t* hashes = static_cast<const uint32_t*>(hashBuf->contents());
             const char* chars = static_cast<const char*>(flat.chars->contents());
             const uint32_t* offs = static_cast<const uint32_t*>(effOff->contents());
             const uint32_t* lens = static_cast<const uint32_t*>(effLen->contents());
 
+            // Build hash→string map for output reconstruction (first occurrence wins)
             std::unordered_map<uint32_t, std::string> hashMap;
             hashMap.reserve(256);
-            bool hasCollision = false;
-            for (uint32_t i = 0; i < expectedKeyRows && !hasCollision; ++i) {
+            for (uint32_t i = 0; i < expectedKeyRows; ++i) {
                 uint32_t h = hashes[i];
-                auto it = hashMap.find(h);
-                if (it == hashMap.end()) {
+                if (hashMap.find(h) == hashMap.end()) {
                     hashMap.emplace(h, std::string(chars + offs[i], lens[i]));
-                } else if (it->second.size() != lens[i] ||
-                           std::memcmp(it->second.data(), chars + offs[i], lens[i]) != 0) {
-                    hasCollision = true;
                 }
             }
 
-            if (!hasCollision) {
-                gpuHashOk = true;
-                kd.keyVecs.push_back({});
-                kd.keyBufsGPU.push_back(hashBuf);
-                kd.keyNames.push_back(keyName.empty() ? col : keyName);
-                kd.keyFromF32.push_back(false);
-                kd.outputStringMaps.push_back({});
-                kd.hashToStringMaps.push_back(std::move(hashMap));
-                kd.dictRefMaps.push_back(nullptr);
-                LOG_DEBUG("Exec", "GroupBy: GPU FNV1a-u64fold32 encoded string key " << col << " (" << kd.hashToStringMaps.back().size() << " unique, collision-free)\n");
-            } else {
-                hashBuf->release();
-                LOG_DEBUG("Exec", "GroupBy: GPU FNV1a-u64fold32 collision for " << col << ", falling back to CPU\n");
-            }
+            gpuHashOk = true;
+            kd.keyVecs.push_back({});
+            kd.keyBufsGPU.push_back(hashBuf);
+            kd.keyNames.push_back(keyName.empty() ? col : keyName);
+            kd.keyFromF32.push_back(false);
+            kd.outputStringMaps.push_back({});
+            kd.hashToStringMaps.push_back(std::move(hashMap));
+            kd.dictRefMaps.push_back(nullptr);
+            LOG_DEBUG("Exec", "GroupBy: GPU FNV1a-u64fold32 encoded string key " << col << " (" << kd.hashToStringMaps.back().size() << " unique)\n");
         }
     } else {
         LOG_DEBUG("Exec", "GroupBy: WARN no flatStringCols for " << col << ", skipping GPU hash\n");
     }
 
-    // --- CPU fallback: sequential ID encoding ---
+    // GPU hash path covers all cases — no CPU fallback needed
     if (!gpuHashOk) {
-        // Materialize strings now (deferred from above when flat path was tried)
-        ctx.ensureStringCol(col);
-        if (!ctx.stringCols.count(col) || ctx.stringCols.at(col).empty())
-            return false;
-        const auto& strData = ctx.stringCols.at(col);
-
-        std::vector<uint32_t> ids;
-        ids.reserve(expectedKeyRows);
-        std::vector<std::string> reverseMap;
-        std::map<std::string, uint32_t> forwardMap;
-        uint32_t nextId = 1;
-
-        auto processStr = [&](const std::string& s) {
-            if (forwardMap.find(s) == forwardMap.end()) {
-                forwardMap[s] = nextId;
-                reverseMap.push_back(s);
-                nextId++;
-            }
-            ids.push_back(forwardMap[s]);
-        };
-
-        if (!ctx.activeRows.empty() && strData.size() != expectedKeyRows) {
-            for (uint32_t r : ctx.activeRows) {
-                if (r < strData.size()) processStr(strData[r]);
-                else ids.push_back(0);
-            }
-        } else {
-            for (const auto& s : strData) processStr(s);
-        }
-
-        LOG_DEBUG("Exec", "GroupBy: CPU encoded string key " << col << " to u32 IDs (" << reverseMap.size() << " unique)\n");
-        kd.keyVecs.push_back(std::move(ids));
-        kd.keyBufsGPU.push_back(nullptr);
-        kd.keyNames.push_back(keyName.empty() ? col : keyName);
-        kd.keyFromF32.push_back(false);
-        kd.outputStringMaps.push_back(std::move(reverseMap));
-        kd.hashToStringMaps.push_back({});
-        kd.dictRefMaps.push_back(nullptr);
+        LOG_DEBUG("Exec", "GroupBy: no flat buffers for string key " << col << ", cannot encode\n");
+        return false;
     }
     return true;
 }
@@ -361,7 +318,7 @@ static bool buildGroupByF32Key(EvalContext& ctx, const std::string& col,
         if (gpuCount > 0) {
             MTL::Buffer* gpuU32 = nullptr;
             if (ctx.activeRowsGPU && ctx.activeRowsCountGPU > 0 && gpuCount != (uint32_t)expectedKeyRows) {
-                GpuBuffer gathered = GpuOps::gatherF32(gpuF32, ctx.activeRowsGPU, ctx.activeRowsCountGPU, true);
+                GpuBuffer gathered = GpuOps::gatherF32(gpuF32, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false);
                 gpuU32 = GpuOps::bitcastF32ToU32(gathered, ctx.activeRowsCountGPU).detach();
                 gpuCount = ctx.activeRowsCountGPU;
             } else {
@@ -562,7 +519,7 @@ GroupByKeyData buildGroupByKeys(
                 // ── U32 key ──
                 if (!ctx.activeRows.empty() && it->second.size() != expectedKeyRows) {
                     if (ctx.activeRowsGPU && ctx.u32ColsGPU.count(col) && ctx.u32ColsGPU[col]) {
-                        GpuBuffer gathered = GpuOps::gatherU32(ctx.u32ColsGPU[col], ctx.activeRowsGPU, (uint32_t)expectedKeyRows);
+                        GpuBuffer gathered = GpuOps::gatherU32(ctx.u32ColsGPU[col], ctx.activeRowsGPU, (uint32_t)expectedKeyRows, false);
                         // Skip CPU download — GPU buffer passed directly to kernel
                         kd.keyVecs.push_back({});
                         kd.keyBufsGPU.push_back(gathered.detach());

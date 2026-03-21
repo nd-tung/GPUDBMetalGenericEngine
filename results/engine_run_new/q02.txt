@@ -105,24 +105,24 @@ p_partkey|s_acctbal|s_name|n_name|p_mfgr|s_address|s_phone|s_comment|
 86501|7850.66|Supplier#000001518|UNITED KINGDOM|Manufacturer#1|ONda3YJiHKJOC|33-730-383-3892|ifts haggle fluffily pending pai|
 11680|7843.52|Supplier#000006683|FRANCE|Manufacturer#4|2Z0JGkiv01Y00oCFwUGfviIbhzCdy|16-464-517-8943|express, final pinto beans x-ray slyly asymptotes. unusual, unusual|
 ---------------------------------------------------
-Planning time: 2.65 ms
-Data Load Time (Disk+Upload): 610.57 ms
-GPU kernels time: 2448.59 ms
-CPU postprocess time: 799.45 ms
-Node timing: Scan=0.0(g0.0)ms Join=113.0(g88.4)ms Save=0.0(g0.0)ms Scan=0.1(g0.0)ms Join=96.4(g64.8)ms Save=0.0(g0.0)ms Scan=199.8(g167.2)ms Save=1.4(g0.0)ms Scan=2.0(g0.0)ms Join=99.3(g63.2)ms Join=88.0(g54.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=96.0(g71.9)ms Save=0.0(g0.0)ms Scan=0.3(g0.0)ms Join=71.7(g39.9)ms Save=0.0(g0.0)ms Scan=401.0(g328.4)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=103.0(g63.9)ms Join=72.0(g39.9)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=72.0(g24.9)ms Save=0.0(g0.0)ms Scan=401.0(g328.6)ms Join=159.0(g55.9)ms Project=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=160.0(g54.7)ms Filter=512.0(g455.2)ms Project=288.1(g339.5)ms Project=0.0(g0.0)ms OrderBy=208.0(g111.6)ms Limit=104.0(g95.9)ms
-Total Internal Pipeline time: 3858.61 ms
-Total Host Execution time: 3861.74 ms
-Total Wall time (Plan+Exec): 3864.39 ms
+Planning time: 2.98 ms
+Data Load Time (Disk+Upload): 480.30 ms
+GPU kernels time: 1512.50 ms
+CPU postprocess time: 688.28 ms
+Node timing: Scan=0.0(g0.0)ms Join=136.7(g112.2)ms Save=0.0(g0.0)ms Scan=0.1(g0.0)ms Join=96.4(g64.6)ms Save=0.0(g0.0)ms Scan=199.9(g167.2)ms Save=1.4(g0.0)ms Scan=2.1(g0.0)ms Join=91.2(g54.1)ms Join=89.0(g56.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=96.0(g71.8)ms Save=0.0(g0.0)ms Scan=0.3(g0.0)ms Join=71.6(g40.9)ms Save=0.0(g0.0)ms Scan=120.2(g47.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=127.0(g64.0)ms Join=65.0(g41.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=71.9(g17.0)ms Save=0.0(g0.0)ms Scan=120.1(g48.0)ms Join=191.9(g87.7)ms Project=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=159.0(g55.8)ms Filter=105.2(g48.0)ms Project=311.9(g375.0)ms Project=0.0(g0.0)ms OrderBy=24.0(g40.9)ms Limit=119.9(g119.7)ms
+Total Internal Pipeline time: 2681.08 ms
+Total Host Execution time: 2684.57 ms
+Total Wall time (Plan+Exec): 2687.55 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  364.038 ms (14.867%) [14 calls]
-  filter         :  225.152 ms (9.195%) [4 calls]
-  gather         : 1634.241 ms (66.742%) [174 calls]
-  gather_dispatch:    4.385 ms (0.179%) [242 calls]
-  groupby        :   24.889 ms (1.016%) [2 calls]
-  hash_join_probe_u32:  179.889 ms (7.347%) [11 calls]
-  sort           :   15.998 ms (0.653%) [9 calls]
+  batch_flush    :  538.457 ms (35.600%) [23 calls]
+  filter         :  246.691 ms (16.310%) [4 calls]
+  gather         :  515.578 ms (34.087%) [27 calls]
+  gather_dispatch:    5.055 ms (0.334%) [385 calls]
+  groupby        :   16.955 ms (1.121%) [2 calls]
+  hash_join_probe_u32:  172.789 ms (11.424%) [11 calls]
+  sort           :   16.994 ms (1.124%) [5 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 2448.592 ms
-  Kernel invocations: 456
+  TOTAL GPU TIME: 1512.520 ms
+  Kernel invocations: 457

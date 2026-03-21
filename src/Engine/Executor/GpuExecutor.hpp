@@ -10,6 +10,7 @@
 #include "TypedExpr.hpp"
 #include "Schema.hpp"
 #include "ResultTable.hpp"
+#include "GpuBuffer.hpp"
 
 namespace MTL { class Buffer; }
 
@@ -58,7 +59,7 @@ public:
     static bool executeProject(const IRProject& project, EvalContext& ctx, TableResult& out, std::unordered_map<std::string, EvalContext>* tableContexts = nullptr);
 
     // Evaluate a TypedExpr tree into a GPU float buffer
-    static MTL::Buffer* evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx);
+    static GpuBuffer evaluateExpression(const TypedExprPtr& expr, EvalContext& ctx);
     
     // Recursively evaluate filter predicates on GPU
     static bool executeFilterRecursive(const TypedExprPtr& expr, EvalContext& ctx);

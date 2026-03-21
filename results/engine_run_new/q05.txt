@@ -5,29 +5,29 @@
 ---------------------------------------------------
 revenue|n_name|
 55502052.00|INDONESIA|
-55295096.00|VIETNAM|
+55295080.00|VIETNAM|
 53724484.00|CHINA|
-52035532.00|INDIA|
+52035504.00|INDIA|
 45410180.00|JAPAN|
 ---------------------------------------------------
-Planning time: 2.04 ms
-Data Load Time (Disk+Upload): 3144.34 ms
-GPU kernels time: 720.21 ms
-CPU postprocess time: 335.80 ms
-Node timing: Scan=0.0(g0.0)ms Join=103.0(g78.6)ms Save=0.0(g0.0)ms Scan=72.0(g71.9)ms Join=96.0(g55.7)ms Save=0.0(g0.0)ms Scan=145.9(g145.6)ms Join=102.0(g61.6)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=184.0(g102.6)ms Join=107.0(g8.8)ms Project=45.2(g50.9)ms Project=15.8(g15.6)ms GroupBy=72.0(g24.9)ms Project=32.1(g40.0)ms Project=0.0(g0.0)ms OrderBy=47.8(g22.1)ms Project=33.0(g41.9)ms
-Total Internal Pipeline time: 4200.36 ms
-Total Host Execution time: 4200.44 ms
-Total Wall time (Plan+Exec): 4202.48 ms
+Planning time: 1.98 ms
+Data Load Time (Disk+Upload): 3159.21 ms
+GPU kernels time: 737.62 ms
+CPU postprocess time: 308.15 ms
+Node timing: Scan=0.0(g0.0)ms Join=118.7(g94.3)ms Save=0.0(g0.0)ms Scan=72.0(g71.9)ms Join=96.0(g54.7)ms Save=0.0(g0.0)ms Scan=145.9(g145.7)ms Join=101.0(g59.6)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=185.0(g104.5)ms Join=108.0(g9.7)ms Project=43.1(g45.8)ms Project=16.9(g16.8)ms GroupBy=72.0(g17.0)ms Project=30.9(g37.8)ms Project=0.0(g0.0)ms OrderBy=17.0(g25.8)ms Project=39.0(g53.9)ms
+Total Internal Pipeline time: 4204.98 ms
+Total Host Execution time: 4205.07 ms
+Total Wall time (Plan+Exec): 4207.04 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  171.870 ms (23.864%) [10 calls]
-  filter         :  256.353 ms (35.594%) [4 calls]
-  gather         :  140.615 ms (19.524%) [7 calls]
-  gather_dispatch:    1.380 ms (0.192%) [71 calls]
-  groupby        :   24.902 ms (3.458%) [2 calls]
-  hash_join_probe_u32:  117.925 ms (16.374%) [4 calls]
-  sort           :    7.168 ms (0.995%) [2 calls]
+  batch_flush    :  180.925 ms (24.527%) [12 calls]
+  filter         :  271.229 ms (36.770%) [4 calls]
+  gather         :  137.478 ms (18.637%) [6 calls]
+  gather_dispatch:    1.180 ms (0.160%) [72 calls]
+  groupby        :   16.957 ms (2.299%) [2 calls]
+  hash_join_probe_u32:  120.911 ms (16.392%) [4 calls]
+  sort           :    8.964 ms (1.215%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 720.212 ms
-  Kernel invocations: 100
+  TOTAL GPU TIME: 737.643 ms
+  Kernel invocations: 101

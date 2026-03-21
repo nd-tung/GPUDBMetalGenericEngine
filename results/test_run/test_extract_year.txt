@@ -4,36 +4,38 @@
 ======================RESULT=======================
 ---------------------------------------------------
 num_orders|total_revenue|
-228626.00|34609328128.00|
-228637.00|34546282496.00|
-133623.00|20212600832.00|
-227783.00|34373648384.00|
-227089.00|34330845184.00|
-227597.00|34416377856.00|
-226645.00|34340286464.00|
+228626.00|34609336320.00|
+228637.00|34546343936.00|
+133623.00|20212750336.00|
+227783.00|34373578752.00|
+227089.00|34330830848.00|
+227597.00|34416304128.00|
+226645.00|34340345856.00|
 ---------------------------------------------------
-Planning time: 0.69 ms
-Data Load Time (Disk+Upload): 541.86 ms
-GPU kernels time: 155.96 ms
-CPU postprocess time: 121.07 ms
-Node timing: Scan=0.0(g0.0)ms Project=23.4(g0.0)ms GroupBy=253.6(g156.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=0.0(g0.0)ms Project=0.0(g0.0)ms
-Total Internal Pipeline time: 818.88 ms
-Total Host Execution time: 818.90 ms
-Total Wall time (Plan+Exec): 819.59 ms
+Planning time: 0.72 ms
+Data Load Time (Disk+Upload): 546.85 ms
+GPU kernels time: 39.82 ms
+CPU postprocess time: 212.02 ms
+Node timing: Scan=0.0(g0.0)ms Project=22.6(g0.0)ms GroupBy=229.2(g39.8)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=0.0(g0.0)ms Project=0.0(g0.0)ms
+Total Internal Pipeline time: 798.68 ms
+Total Host Execution time: 798.71 ms
+Total Wall time (Plan+Exec): 799.43 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  cast           :    2.942 ms (1.887%) [1 calls]
-  groupby        :  153.014 ms (98.113%) [2 calls]
+  batch_flush    :    0.022 ms (0.055%) [1 calls]
+  cast           :    4.869 ms (12.221%) [1 calls]
+  groupby        :   34.948 ms (87.724%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 155.956 ms
-  Kernel invocations: 3
+  TOTAL GPU TIME: 39.838 ms
+  Kernel invocations: 4
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::groupby_agg_multi_key_ty      117.062        1500000         12.814
-ops::ht_extract_compact             35.952              7          0.000
-ops::cast_u32_to_f32                 2.942              7          0.002
+ops::groupby_agg_multi_key_ty        0.013        1500000     119598.150
+ops::ht_extract_compact             34.935              7          0.000
+ops::cast_u32_to_f32                 4.869              7          0.001
+sync                                 0.022              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 155.956 ms
+TOTAL: 39.838 ms

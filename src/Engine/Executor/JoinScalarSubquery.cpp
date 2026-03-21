@@ -267,7 +267,7 @@ bool handleScalarSubquerySavedPipelines(
             if (!buf) continue;
             uint32_t bufRows = (uint32_t)(buf->length() / sizeof(uint32_t));
             if (bufRows > count) {
-                auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, count, true);
+                auto compacted = GpuOps::gatherU32(buf, currentCtx.activeRowsGPU, count, false);
                 if (compacted) buf.reset(compacted);
             }
         }
@@ -275,10 +275,11 @@ bool handleScalarSubquerySavedPipelines(
             if (!buf) continue;
             uint32_t bufRows = (uint32_t)(buf->length() / sizeof(float));
             if (bufRows > count) {
-                auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, count, true);
+                auto compacted = GpuOps::gatherF32(buf, currentCtx.activeRowsGPU, count, false);
                 if (compacted) buf.reset(compacted);
             }
         }
+        GpuOps::sync();
         // Compact CPU columns: clear when GPU compacted, else CPU gather
         for (auto& [name, vec] : currentCtx.u32Cols) {
             if (vec.size() > count) {
@@ -525,7 +526,7 @@ bool handleScalarSubqueryTableContexts(
             std::unordered_map<MTL::Buffer*, MTL::Buffer*> u32Replacements;
             for (auto& [name, buf] : dataCtx.u32ColsGPU) {
                 if (buf && u32Replacements.find(buf) == u32Replacements.end()) {
-                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount).detach();
+                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount, false).detach();
                 }
             }
             // Update map with new buffers
@@ -545,7 +546,7 @@ bool handleScalarSubqueryTableContexts(
             std::unordered_map<MTL::Buffer*, MTL::Buffer*> f32Replacements;
             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
                 if (buf && f32Replacements.find(buf.get()) == f32Replacements.end()) {
-                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount).detach();
+                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount, false).detach();
                 }
             }
             for (auto& [name, buf] : dataCtx.f32ColsGPU) {

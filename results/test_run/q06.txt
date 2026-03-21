@@ -3,41 +3,42 @@
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
-Scalar sum_no_overflow((l_extendedprice * l_discount)): 123140864.00
+Scalar sum_no_overflow((l_extendedprice * l_discount)): 123140936.00
 ---------------------------------------------------
-Planning time: 1.03 ms
-Data Load Time (Disk+Upload): 2801.79 ms
-GPU kernels time: 542.86 ms
-CPU postprocess time: 13.18 ms
-Node timing: Scan=481.6(g479.7)ms Project=40.3(g39.5)ms Aggregate=34.1(g23.6)ms
-Total Internal Pipeline time: 3357.82 ms
-Total Host Execution time: 3357.85 ms
-Total Wall time (Plan+Exec): 3358.88 ms
+Planning time: 0.83 ms
+Data Load Time (Disk+Upload): 2820.98 ms
+GPU kernels time: 531.87 ms
+CPU postprocess time: 12.41 ms
+Node timing: Scan=469.8(g467.7)ms Project=41.3(g40.5)ms Aggregate=33.1(g23.6)ms
+Total Internal Pipeline time: 3365.26 ms
+Total Host Execution time: 3365.29 ms
+Total Wall time (Plan+Exec): 3366.12 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   14.889 ms (2.743%) [2 calls]
-  filter         :  479.725 ms (88.370%) [5 calls]
-  gather         :   48.244 ms (8.887%) [6 calls]
+  batch_flush    :   15.964 ms (3.001%) [3 calls]
+  filter         :  467.749 ms (87.941%) [5 calls]
+  gather         :   48.174 ms (9.057%) [6 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 542.858 ms
-  Kernel invocations: 13
+  TOTAL GPU TIME: 531.887 ms
+  Kernel invocations: 14
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                 153.635        6001215         39.062
-ops::filter_lt_u32_indexed         113.373        4336142         38.247
-ops::filter_ge_f32_indexed          68.936         909455         13.193
-ops::filter_le_f32_indexed          71.908         495300          6.888
-ops::filter_lt_f32_indexed          71.873         248078          3.452
-ops::gather_col_f32                  8.907         114160         12.818
-ops::gather_col_f32                  6.995         114160         16.321
-sync                                 7.924              0          0.000
-ops::gather_col_f32                  8.834         114160         12.922
-ops::gather_col_f32                  6.828         114160         16.719
-ops::gather_col_f32                  7.703         114160         14.821
-ops::gather_col_f32                  8.978         114160         12.716
-sync                                 6.965              0          0.000
+ops::filter_ge_u32                 137.645        6001215         43.599
+ops::filter_lt_u32_indexed         116.400        4336142         37.252
+ops::filter_ge_f32_indexed          69.888         909455         13.013
+ops::filter_le_f32_indexed          71.896         495300          6.889
+ops::filter_lt_f32_indexed          71.919         248078          3.449
+ops::gather_col_f32                  7.905         114160         14.441
+ops::gather_col_f32                  8.966         114160         12.732
+sync                                 6.957              0          0.000
+ops::gather_col_f32                  7.798         114160         14.639
+ops::gather_col_f32                  8.856         114160         12.891
+ops::gather_col_f32                  6.688         114160         17.069
+ops::gather_col_f32                  7.960         114160         14.342
+sync                                 8.988              0          0.000
+sync                                 0.019              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 542.858 ms
+TOTAL: 531.887 ms

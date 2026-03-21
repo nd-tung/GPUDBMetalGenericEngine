@@ -5,30 +5,31 @@
 ---------------------------------------------------
 Scalar avg(n_regionkey): 0.00
 ---------------------------------------------------
-Planning time: 0.62 ms
-Data Load Time (Disk+Upload): 15.32 ms
-GPU kernels time: 12.12 ms
-CPU postprocess time: 31.38 ms
-Node timing: Scan=0.0(g0.0)ms Project=0.0(g0.0)ms Aggregate=0.0(g0.0)ms Aggregate=19.5(g12.0)ms Aggregate=8.0(g0.0)ms Aggregate=9.1(g0.0)ms Aggregate=6.9(g0.0)ms
-Total Internal Pipeline time: 58.82 ms
-Total Host Execution time: 58.84 ms
-Total Wall time (Plan+Exec): 59.46 ms
+Planning time: 0.54 ms
+Data Load Time (Disk+Upload): 14.35 ms
+GPU kernels time: 19.06 ms
+CPU postprocess time: 29.42 ms
+Node timing: Scan=0.0(g0.0)ms Project=0.0(g0.0)ms Aggregate=0.0(g0.0)ms Aggregate=23.3(g19.0)ms Aggregate=12.2(g0.0)ms Aggregate=6.0(g0.0)ms Aggregate=7.0(g0.0)ms
+Total Internal Pipeline time: 62.83 ms
+Total Host Execution time: 62.85 ms
+Total Wall time (Plan+Exec): 63.40 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   11.945 ms (98.522%) [4 calls]
-  cast           :    0.179 ms (1.478%) [1 calls]
+  batch_flush    :   18.917 ms (99.140%) [5 calls]
+  cast           :    0.164 ms (0.860%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 12.124 ms
-  Kernel invocations: 5
+  TOTAL GPU TIME: 19.081 ms
+  Kernel invocations: 6
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::cast_u32_to_f32                 0.179             25          0.140
-sync                                11.862              0          0.000
-sync                                 0.023              0          0.000
-sync                                 0.036              0          0.000
+ops::cast_u32_to_f32                 0.164             25          0.152
+sync                                18.819              0          0.000
 sync                                 0.024              0          0.000
+sync                                 0.034              0          0.000
+sync                                 0.020              0          0.000
+sync                                 0.020              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 12.124 ms
+TOTAL: 19.081 ms

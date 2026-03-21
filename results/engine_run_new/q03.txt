@@ -15,24 +15,24 @@ l_orderkey|o_orderdate|o_shippriority|revenue|
 993600|1995-03-05|0|371407.44|
 2300070|1995-03-13|0|367371.16|
 ---------------------------------------------------
-Planning time: 1.41 ms
-Data Load Time (Disk+Upload): 3345.88 ms
-GPU kernels time: 615.10 ms
-CPU postprocess time: 346.43 ms
-Node timing: Scan=75.5(g75.3)ms Join=255.0(g213.0)ms Save=0.0(g0.0)ms Scan=134.9(g134.6)ms Join=153.0(g92.2)ms Project=0.2(g0.0)ms Project=14.9(g14.7)ms GroupBy=88.0(g24.6)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=199.9(g29.9)ms Limit=40.0(g30.9)ms
-Total Internal Pipeline time: 4307.41 ms
-Total Host Execution time: 4307.57 ms
-Total Wall time (Plan+Exec): 4308.98 ms
+Planning time: 1.44 ms
+Data Load Time (Disk+Upload): 3365.73 ms
+GPU kernels time: 611.21 ms
+CPU postprocess time: 169.21 ms
+Node timing: Scan=69.4(g69.1)ms Join=255.0(g212.8)ms Save=0.0(g0.0)ms Scan=132.0(g131.6)ms Join=156.0(g87.6)ms Project=0.3(g0.0)ms Project=14.8(g14.6)ms GroupBy=88.1(g16.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=23.9(g38.6)ms Limit=41.0(g40.9)ms
+Total Internal Pipeline time: 4146.15 ms
+Total Host Execution time: 4146.34 ms
+Total Wall time (Plan+Exec): 4147.78 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  124.486 ms (20.238%) [7 calls]
-  filter         :  351.473 ms (57.141%) [4 calls]
-  gather         :   30.947 ms (5.031%) [4 calls]
-  gather_dispatch:    0.729 ms (0.119%) [33 calls]
-  groupby        :   24.586 ms (3.997%) [2 calls]
-  hash_join_probe_u32:   67.927 ms (11.043%) [2 calls]
-  sort           :   14.948 ms (2.430%) [2 calls]
+  batch_flush    :  127.931 ms (20.930%) [9 calls]
+  filter         :  342.276 ms (55.998%) [4 calls]
+  gather         :   40.883 ms (6.689%) [4 calls]
+  gather_dispatch:    0.732 ms (0.120%) [33 calls]
+  groupby        :   15.965 ms (2.612%) [2 calls]
+  hash_join_probe_u32:   67.994 ms (11.124%) [2 calls]
+  sort           :   15.452 ms (2.528%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 615.096 ms
-  Kernel invocations: 54
+  TOTAL GPU TIME: 611.233 ms
+  Kernel invocations: 55

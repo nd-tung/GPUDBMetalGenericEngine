@@ -236,17 +236,18 @@ static bool filterCompareColVsCol(const TypedExpr* leftRaw,
     if (useF32 && !lIsF32) { finalA = GpuOps::castU32ToF32(rootA, ctx.rowCount).detach(); freeFinalA = true; }
     if (useF32 && !rIsF32) { finalB = GpuOps::castU32ToF32(rootB, ctx.rowCount).detach(); freeFinalB = true; }
 
-    // 2. Gather if active rows
+    // 2. Gather if active rows (dispatch both async, single sync)
     if (ctx.activeRowsGPU) {
-        MTL::Buffer* gA = useF32 ? GpuOps::gatherF32(finalA, ctx.activeRowsGPU, workingCount).detach()
-                                 : GpuOps::gatherU32(finalA, ctx.activeRowsGPU, workingCount).detach();
+        MTL::Buffer* gA = useF32 ? GpuOps::gatherF32(finalA, ctx.activeRowsGPU, workingCount, false).detach()
+                                 : GpuOps::gatherU32(finalA, ctx.activeRowsGPU, workingCount, false).detach();
         if (freeFinalA) finalA->release();
         finalA = gA; freeFinalA = true;
 
-        MTL::Buffer* gB = useF32 ? GpuOps::gatherF32(finalB, ctx.activeRowsGPU, workingCount).detach()
-                                 : GpuOps::gatherU32(finalB, ctx.activeRowsGPU, workingCount).detach();
+        MTL::Buffer* gB = useF32 ? GpuOps::gatherF32(finalB, ctx.activeRowsGPU, workingCount, false).detach()
+                                 : GpuOps::gatherU32(finalB, ctx.activeRowsGPU, workingCount, false).detach();
         if (freeFinalB) finalB->release();
         finalB = gB; freeFinalB = true;
+        GpuOps::sync();
     }
 
     // 3. Execute
@@ -260,7 +261,7 @@ static bool filterCompareColVsCol(const TypedExpr* leftRaw,
 
     if (res) {
         if (ctx.activeRowsGPU) {
-            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
+            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count, false);
             ctx.activeRowsGPU.reset(newActive);
             ctx.activeRowsCountGPU = res->count;
         } else {
@@ -352,7 +353,7 @@ static bool filterCompareStringCol(const CompareExpr& cmp, EvalContext& ctx, boo
     if (res) {
         if (ctx.activeRowsGPU) {
             auto joinRes = GpuOps::joinHash(ctx.activeRowsGPU, ctx.activeRowsCountGPU, res->indices, res->count);
-            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
+            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count, false);
             ctx.activeRowsGPU.reset(newActive);
             ctx.activeRowsCountGPU = joinRes.count;
         } else {
@@ -433,7 +434,7 @@ static bool filterCompareGenericExpression(
     uint32_t count = (ctx.activeRowsGPU != nullptr) ? ctx.activeRowsCountGPU : ctx.rowCount;
     if (count == 0) return true;
 
-    MTL::Buffer* leftBuf = nullptr;
+    GpuBuffer leftBuf;
     float leftLitVal = 0.0f;
     bool leftIsLit = false;
 
@@ -447,7 +448,7 @@ static bool filterCompareGenericExpression(
         if (!leftBuf) return false;
     }
 
-    MTL::Buffer* rightBuf = nullptr;
+    GpuBuffer rightBuf;
     float rightLitVal = 0.0f;
     bool rightIsLit = false;
 
@@ -458,7 +459,7 @@ static bool filterCompareGenericExpression(
         else if (std::holds_alternative<int64_t>(lit.value)) rightLitVal = (float)std::get<int64_t>(lit.value);
     } else {
         rightBuf = GpuExecutor::evaluateExpression(right, ctx);
-        if (!rightBuf) { if (leftBuf) leftBuf->release(); return false; }
+        if (!rightBuf) return false; // leftBuf auto-releases
     }
 
     std::optional<FilterResult> res;
@@ -484,14 +485,13 @@ static bool filterCompareGenericExpression(
         res = GpuOps::filterColColF32(leftBuf, rightBuf, count, (int)op);
     }
 
-    if (leftBuf) leftBuf->release();
-    if (rightBuf) rightBuf->release();
+    // leftBuf and rightBuf auto-release via GpuBuffer destructors
 
     if (res) {
         LOG_DEBUG("Exec", "Generic Filter Result: " << res->count << " rows\n");
         if (ctx.activeRowsGPU) {
             LOG_DEBUG("Exec", "Intersecting Generic with " << ctx.activeRowsCountGPU << " rows\n");
-            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
+            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count, false);
             ctx.activeRowsGPU.reset(newActive);
         } else {
             ctx.activeRowsGPU = std::move(res->indices);
@@ -563,12 +563,13 @@ static bool filterCompareColColResolved(
     std::vector<GpuBuffer> temp;
 
     if (ctx.activeRowsGPU) {
-        temp.push_back(f1 ? GpuOps::gatherF32(b1, ctx.activeRowsGPU, currentCount)
-                          : GpuOps::gatherU32(b1, ctx.activeRowsGPU, currentCount));
+        temp.push_back(f1 ? GpuOps::gatherF32(b1, ctx.activeRowsGPU, currentCount, false)
+                          : GpuOps::gatherU32(b1, ctx.activeRowsGPU, currentCount, false));
         input1 = temp.back();
-        temp.push_back(f2 ? GpuOps::gatherF32(b2, ctx.activeRowsGPU, currentCount)
-                          : GpuOps::gatherU32(b2, ctx.activeRowsGPU, currentCount));
+        temp.push_back(f2 ? GpuOps::gatherF32(b2, ctx.activeRowsGPU, currentCount, false)
+                          : GpuOps::gatherU32(b2, ctx.activeRowsGPU, currentCount, false));
         input2 = temp.back();
+        GpuOps::sync();
     }
 
     std::optional<FilterResult> res;
@@ -584,7 +585,7 @@ static bool filterCompareColColResolved(
 
     if (res) {
         if (ctx.activeRowsGPU) {
-            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count);
+            GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, res->indices, res->count, false);
             ctx.activeRowsGPU.reset(newActive);
         } else {
             ctx.activeRowsGPU = std::move(res->indices);
@@ -938,7 +939,7 @@ if (expr->kind == TypedExpr::Kind::Compare) {
                       res->indices, res->count
                   );
 
-                  GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
+                  GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count, false);
 
                   ctx.activeRowsGPU.reset(newActive);
 
@@ -1085,7 +1086,7 @@ bool filterColumnAsBool(const TypedExprPtr& expr, EvalContext& ctx) {
                               ctx.activeRowsGPU, ctx.activeRowsCountGPU,
                               res->indices, res->count
                           );
-                          GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count);
+                          GpuBuffer newActive = GpuOps::gatherU32(ctx.activeRowsGPU, joinRes.buildIndices, joinRes.count, false);
 
                           ctx.activeRowsGPU.reset(newActive);
 

@@ -18319,25 +18319,25 @@ p_size|supplier_cnt|p_brand|p_type|
 19|3.00|Brand#55|PROMO PLATED BRASS|
 49|3.00|Brand#55|STANDARD PLATED TIN|
 ---------------------------------------------------
-Planning time: 1.61 ms
-Data Load Time (Disk+Upload): 454.18 ms
-GPU kernels time: 1820.13 ms
-CPU postprocess time: 1548.98 ms
-Node timing: Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=1409.3(g679.3)ms Join=0.0(g0.0)ms Filter=143.3(g157.9)ms Project=0.8(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=214.6(g214.1)ms Join=288.0(g254.7)ms Filter=0.0(g0.0)ms Project=127.9(g141.7)ms Project=0.1(g0.0)ms Project=0.1(g0.0)ms GroupBy=226.5(g92.8)ms Project=94.4(g106.5)ms Project=0.0(g0.0)ms OrderBy=768.0(g63.5)ms Project=95.9(g109.7)ms
-Total Internal Pipeline time: 3823.28 ms
-Total Host Execution time: 3823.72 ms
-Total Wall time (Plan+Exec): 3825.33 ms
+Planning time: 1.60 ms
+Data Load Time (Disk+Upload): 427.96 ms
+GPU kernels time: 1749.28 ms
+CPU postprocess time: 788.47 ms
+Node timing: Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=1356.0(g680.8)ms Join=0.0(g0.0)ms Filter=110.3(g128.8)ms Project=0.8(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=214.7(g214.2)ms Join=297.0(g256.7)ms Filter=0.0(g0.0)ms Project=126.9(g141.7)ms Project=0.1(g0.0)ms Project=0.1(g0.0)ms GroupBy=217.6(g70.1)ms Project=94.4(g108.5)ms Project=0.0(g0.0)ms OrderBy=17.1(g23.2)ms Project=102.9(g125.5)ms
+Total Internal Pipeline time: 2965.71 ms
+Total Host Execution time: 2966.05 ms
+Total Wall time (Plan+Exec): 2967.65 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   15.738 ms (0.865%) [4 calls]
-  cast           :   26.219 ms (1.441%) [3 calls]
-  filter         :  703.046 ms (38.626%) [10 calls]
-  gather         :  953.334 ms (52.377%) [37 calls]
-  gather_dispatch:    0.407 ms (0.022%) [25 calls]
-  groupby        :   66.544 ms (3.656%) [4 calls]
-  hash_join_probe_u32:   47.873 ms (2.630%) [2 calls]
-  sort           :    6.966 ms (0.383%) [5 calls]
+  batch_flush    :   35.399 ms (2.024%) [7 calls]
+  cast           :   22.145 ms (1.266%) [3 calls]
+  filter         :  713.423 ms (40.783%) [10 calls]
+  gather         :  874.473 ms (49.990%) [24 calls]
+  gather_dispatch:    0.381 ms (0.022%) [34 calls]
+  groupby        :   47.927 ms (2.740%) [4 calls]
+  hash_join_probe_u32:   47.849 ms (2.735%) [2 calls]
+  sort           :    7.703 ms (0.440%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1820.128 ms
-  Kernel invocations: 90
+  TOTAL GPU TIME: 1749.299 ms
+  Kernel invocations: 85

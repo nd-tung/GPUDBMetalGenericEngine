@@ -251,11 +251,22 @@ GpuExecutor::ExecutionResult GpuExecutor::execute(const Plan& plan, const std::s
     auto endTime = std::chrono::high_resolution_clock::now();
     double pipelineWallMs = std::chrono::duration<double, std::milli>(endTime - loadEnd).count();
 
+    auto t0 = std::chrono::high_resolution_clock::now();
     resolveOutputColumnNames(currentCtx, tableResult, debug);
-
+    auto t1 = std::chrono::high_resolution_clock::now();
 
     recoverStringColumns(currentCtx, tableResult, datasetPath, debug);
+    auto t2 = std::chrono::high_resolution_clock::now();
     tableResult.uploadMs = result.table.uploadMs;
+
+    if (env_truthy("GPUDB_KERNEL_TIMER")) {
+        double resolveMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        double recoverMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
+        std::cerr << "PostProcess breakdown: resolveNames=" << resolveMs << "ms  recoverStrings=" << recoverMs << "ms\n";
+    }
+
+    // Sync pending GPU work before materializing GPU-only columns to CPU
+    GpuOps::sync();
 
     // Materialize any GPU-only columns to CPU for output printing
     for (size_t i = 0; i < tableResult.u32Cols.size(); ++i) {

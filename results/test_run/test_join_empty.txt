@@ -5,12 +5,25 @@
 ---------------------------------------------------
 
 ---------------------------------------------------
-Planning time: 0.53 ms
-Data Load Time (Disk+Upload): 15.57 ms
+Planning time: 0.55 ms
+Data Load Time (Disk+Upload): 15.76 ms
 GPU kernels time: 0.00 ms
-CPU postprocess time: 0.02 ms
+CPU postprocess time: 0.15 ms
 Node timing: Save=0.0(g0.0)ms Join=0.0(g0.0)ms
-Total Internal Pipeline time: 15.59 ms
-Total Host Execution time: 15.60 ms
-Total Wall time (Plan+Exec): 16.14 ms
+Total Internal Pipeline time: 15.91 ms
+Total Host Execution time: 15.92 ms
+Total Wall time (Plan+Exec): 16.47 ms
 ---------------------------------------------------
+GPU Kernel Timing Summary:
+─────────────────────────────────────────
+  batch_flush    :    0.076 ms (100.000%) [1 calls]
+─────────────────────────────────────────
+  TOTAL GPU TIME: 0.076 ms
+  Kernel invocations: 1
+Detailed Kernel Timings:
+─────────────────────────────────────────────────────────────────
+Kernel                           Time (ms)       Elements           ME/s
+─────────────────────────────────────────────────────────────────
+sync                                 0.076              0          0.000
+─────────────────────────────────────────────────────────────────
+TOTAL: 0.076 ms

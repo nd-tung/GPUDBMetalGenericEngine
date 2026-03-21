@@ -105,25 +105,25 @@ numwait|s_name|
 12.00|Supplier#000002357|
 12.00|Supplier#000002483|
 ---------------------------------------------------
-Planning time: 2.36 ms
-Data Load Time (Disk+Upload): 3067.94 ms
-GPU kernels time: 1602.74 ms
-CPU postprocess time: 3165.34 ms
-Node timing: Scan=0.0(g0.0)ms Join=119.1(g86.6)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=272.0(g127.8)ms Project=19.8(g0.0)ms Join=172.4(g100.1)ms Save=0.0(g0.0)ms Scan=74.8(g74.7)ms Join=109.0(g69.3)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=329.0(g88.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=223.0(g73.3)ms Project=17.3(g16.2)ms Join=695.8(g132.8)ms Save=0.3(g0.0)ms Scan=0.6(g0.0)ms Join=743.0(g176.2)ms Save=0.1(g0.0)ms Scan=383.9(g128.7)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=191.9(g59.9)ms Project=14.5(g0.0)ms Join=216.5(g78.8)ms Project=16.1(g15.3)ms Save=0.6(g0.0)ms Scan=0.6(g0.0)ms Join=639.7(g206.4)ms Save=0.0(g0.0)ms Scan=0.1(g0.0)ms Join=326.9(g38.7)ms Project=48.0(g56.6)ms GroupBy=81.1(g30.8)ms OrderBy=47.9(g24.9)ms Limit=23.9(g17.0)ms
-Total Internal Pipeline time: 7836.02 ms
-Total Host Execution time: 7838.57 ms
-Total Wall time (Plan+Exec): 7840.92 ms
+Planning time: 2.40 ms
+Data Load Time (Disk+Upload): 3058.34 ms
+GPU kernels time: 1004.39 ms
+CPU postprocess time: 3274.62 ms
+Node timing: Scan=0.0(g0.0)ms Join=126.8(g94.4)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=176.0(g33.8)ms Project=20.8(g0.0)ms Join=187.3(g107.5)ms Save=0.0(g0.0)ms Scan=73.9(g73.8)ms Join=118.0(g69.5)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=288.0(g30.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=233.0(g82.3)ms Project=15.3(g14.2)ms Join=656.7(g78.4)ms Save=0.6(g0.0)ms Scan=0.7(g0.0)ms Join=646.7(g40.5)ms Save=0.2(g0.0)ms Scan=302.9(g47.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=161.9(g25.9)ms Project=15.4(g0.0)ms Join=215.7(g67.3)ms Project=15.1(g14.3)ms Save=0.6(g0.0)ms Scan=0.7(g0.0)ms Join=535.6(g47.8)ms Save=0.0(g0.0)ms Scan=0.1(g0.0)ms Join=311.9(g40.7)ms Project=48.0(g54.6)ms GroupBy=79.1(g23.8)ms OrderBy=23.9(g32.4)ms Limit=24.1(g24.0)ms
+Total Internal Pipeline time: 7337.35 ms
+Total Host Execution time: 7341.92 ms
+Total Wall time (Plan+Exec): 7344.32 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  314.663 ms (19.633%) [13 calls]
-  cast           :    8.907 ms (0.556%) [1 calls]
-  filter         :  114.604 ms (7.151%) [2 calls]
-  gather         :  923.260 ms (57.605%) [99 calls]
-  gather_dispatch:    1.752 ms (0.109%) [128 calls]
-  groupby        :   21.860 ms (1.364%) [2 calls]
-  hash_join_probe_u32:  209.710 ms (13.084%) [5 calls]
-  sort           :    7.981 ms (0.498%) [10 calls]
+  batch_flush    :  478.024 ms (47.592%) [23 calls]
+  cast           :    6.895 ms (0.686%) [1 calls]
+  filter         :  121.531 ms (12.100%) [2 calls]
+  gather         :  153.078 ms (15.240%) [14 calls]
+  gather_dispatch:    2.229 ms (0.222%) [213 calls]
+  groupby        :   16.932 ms (1.686%) [2 calls]
+  hash_join_probe_u32:  216.944 ms (21.599%) [5 calls]
+  sort           :    8.785 ms (0.875%) [9 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1602.735 ms
-  Kernel invocations: 260
+  TOTAL GPU TIME: 1004.418 ms
+  Kernel invocations: 269

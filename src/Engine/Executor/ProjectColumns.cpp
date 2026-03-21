@@ -464,10 +464,6 @@ bool projectU32Column(
 
     if (debug) {
         LOG_INFO("Exec", "Project: column " << lookupCol << " size=" << colData.size());
-        if (!colData.empty()) std::cerr << " first=" << colData[0];
-        if (colData.size() > 1) std::cerr << " second=" << colData[1];
-        std::set<uint32_t> uniq(colData.begin(), colData.end());
-        LOG_INFO("PROJECT", " distinct=" << uniq.size());
     }
 
     if (!rowCountInitialized) { projectedRowCount = colData.size(); rowCountInitialized = true; }
@@ -558,11 +554,6 @@ bool projectF32Column(
 
     if (debug) {
         LOG_INFO("Exec", "Project: f32 column " << lookupCol << " size=" << colData.size());
-        if (!colData.empty()) std::cerr << " first=" << colData[0];
-        if (colData.size() > 1) std::cerr << " second=" << colData[1];
-        float minV = colData.empty() ? 0 : colData[0], maxV = minV;
-        for (float v : colData) { minV = std::min(minV, v); maxV = std::max(maxV, v); }
-        LOG_INFO("PROJECT", " min=" << minV << " max=" << maxV);
     }
 
     if (!rowCountInitialized) { projectedRowCount = colData.size(); rowCountInitialized = true; }

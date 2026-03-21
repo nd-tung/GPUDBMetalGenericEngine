@@ -161,7 +161,7 @@ struct EvalContext {
             if (dict.idsGPU) {
                 uint32_t bufRows = (uint32_t)(dict.idsGPU->length() / sizeof(uint32_t));
                 if (bufRows > compactCount) {
-                    GpuBuffer compacted = GpuOps::gatherU32(dict.idsGPU, activeRowsGPU, compactCount, true);
+                    GpuBuffer compacted = GpuOps::gatherU32(dict.idsGPU, activeRowsGPU, compactCount, false);
                     if (compacted) {
                         dict.idsGPU = std::move(compacted);
                         dict.rowCount = compactCount;
@@ -230,12 +230,12 @@ struct EvalContext {
     void gatherAllGPU(MTL::Buffer* indices, uint32_t count) {
         for (auto& [name, buf] : u32ColsGPU) {
             if (!buf) continue;
-            GpuBuffer gathered = GpuOps::gatherU32(buf, indices, count);
+            GpuBuffer gathered = GpuOps::gatherU32(buf, indices, count, false);
             buf = std::move(gathered);
         }
         for (auto& [name, buf] : f32ColsGPU) {
             if (!buf) continue;
-            GpuBuffer gathered = GpuOps::gatherF32(buf, indices, count);
+            GpuBuffer gathered = GpuOps::gatherF32(buf, indices, count, false);
             buf = std::move(gathered);
         }
         compactDictCols(indices, count);

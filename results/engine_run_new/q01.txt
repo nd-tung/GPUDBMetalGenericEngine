@@ -4,29 +4,29 @@
 ======================RESULT=======================
 ---------------------------------------------------
 l_returnflag|l_linestatus|sum_qty|sum_base_price|sum_disc_price|sum_charge|avg_qty|avg_price|avg_disc|count_order|
-A|F|37734008.00|56586170368.00|53758308352.00|55908986880.00|25.52|38272.91|0.05|1478493.00|
-N|F|991417.00|1487504512.00|1413084800.00|1469652608.00|25.52|38284.46|0.05|38854.00|
-N|O|74474824.00|111701794816.00|106117341184.00|110366932992.00|25.50|38249.15|0.05|2920374.00|
-R|F|37719848.00|56568741888.00|53741207552.00|55889469440.00|25.51|38251.33|0.05|1478870.00|
+A|F|37734160.00|56585973760.00|53758193664.00|55908962304.00|25.52|38272.72|0.05|1478493.00|
+N|F|991417.00|1487506432.00|1413083264.00|1469651456.00|25.52|38284.52|0.05|38854.00|
+N|O|74475576.00|111702040576.00|106117423104.00|110366867456.00|25.50|38249.27|0.05|2920374.00|
+R|F|37719636.00|56568557568.00|53741244416.00|55889551360.00|25.51|38251.21|0.05|1478870.00|
 ---------------------------------------------------
-Planning time: 1.60 ms
-Data Load Time (Disk+Upload): 3118.20 ms
-GPU kernels time: 1791.82 ms
-CPU postprocess time: 366.93 ms
-Node timing: Scan=157.8(g156.8)ms Project=264.4(g207.2)ms Project=11.3(g0.0)ms Project=149.2(g117.8)ms GroupBy=1519.1(g1244.1)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=56.8(g65.9)ms Project=0.0(g0.0)ms
-Total Internal Pipeline time: 5276.95 ms
-Total Host Execution time: 5278.31 ms
-Total Wall time (Plan+Exec): 5279.91 ms
+Planning time: 1.31 ms
+Data Load Time (Disk+Upload): 3155.90 ms
+GPU kernels time: 660.22 ms
+CPU postprocess time: 1731.72 ms
+Node timing: Scan=159.9(g158.8)ms Project=277.1(g210.1)ms Project=15.0(g0.0)ms Project=173.8(g116.0)ms GroupBy=1734.1(g111.7)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms OrderBy=31.9(g63.7)ms Project=0.0(g0.0)ms
+Total Internal Pipeline time: 5547.84 ms
+Total Host Execution time: 5551.62 ms
+Total Wall time (Plan+Exec): 5552.93 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  119.115 ms (6.648%) [3 calls]
-  cast           :   29.835 ms (1.665%) [4 calls]
-  filter         :  156.762 ms (8.749%) [1 calls]
-  gather         :  238.553 ms (13.313%) [11 calls]
-  gather_dispatch:    0.312 ms (0.017%) [10 calls]
-  groupby        : 1214.287 ms (67.768%) [2 calls]
-  sort           :   32.955 ms (1.839%) [2 calls]
+  batch_flush    :  119.733 ms (18.135%) [5 calls]
+  cast           :   28.746 ms (4.354%) [4 calls]
+  filter         :  158.842 ms (24.058%) [1 calls]
+  gather         :  237.855 ms (36.025%) [11 calls]
+  gather_dispatch:    0.305 ms (0.046%) [10 calls]
+  groupby        :   82.908 ms (12.557%) [2 calls]
+  sort           :   31.852 ms (4.824%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1791.818 ms
-  Kernel invocations: 33
+  TOTAL GPU TIME: 660.242 ms
+  Kernel invocations: 34
