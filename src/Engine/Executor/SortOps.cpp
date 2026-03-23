@@ -117,13 +117,13 @@ void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
     uint32_t numBlocks = (count + BLK - 1) / BLK;
     uint32_t histSize  = 256 * numBlocks;
 
-    auto* keysAlt = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto* valsAlt = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto* histBuf = dev->newBuffer(histSize * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    GpuBuffer keysAlt(dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer valsAlt(dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer histBuf(dev->newBuffer(histSize * sizeof(uint32_t), MTL::ResourceStorageModeShared));
 
     auto p_hist    = makePSO(dev, store.library(), "ops::radix_histogram_u32");
     auto p_scatter = makePSO(dev, store.library(), "ops::radix_scatter_u32");
-    if (!p_hist || !p_scatter) { keysAlt->release(); valsAlt->release(); histBuf->release(); return; }
+    if (!p_hist || !p_scatter) return;
 
     MTL::Buffer* srcK = keys;
     MTL::Buffer* srcV = indices;
@@ -183,10 +183,7 @@ void GpuOps::radixSortU32(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
         checkGpuStatus(cmd);
     }
     // After 4 passes (even), result is back in original (keys, indices) buffers.
-
-    keysAlt->release();
-    valsAlt->release();
-    histBuf->release();
+    // keysAlt, valsAlt, histBuf auto-release via GpuBuffer RAII
 
     KernelTimer::instance().record("radix_sort_u32", "sort", 0, count);
 }
@@ -207,13 +204,13 @@ void GpuOps::radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
     uint32_t numBlocks = (count + BLK - 1) / BLK;
     uint32_t histSize  = 256 * numBlocks;
 
-    auto* keysAlt = dev->newBuffer(count * sizeof(uint64_t), MTL::ResourceStorageModeShared);
-    auto* valsAlt = dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-    auto* histBuf = dev->newBuffer(histSize * sizeof(uint32_t), MTL::ResourceStorageModeShared);
+    GpuBuffer keysAlt(dev->newBuffer(count * sizeof(uint64_t), MTL::ResourceStorageModeShared));
+    GpuBuffer valsAlt(dev->newBuffer(count * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+    GpuBuffer histBuf(dev->newBuffer(histSize * sizeof(uint32_t), MTL::ResourceStorageModeShared));
 
     auto p_hist    = makePSO(dev, store.library(), "ops::radix_histogram_u64");
     auto p_scatter = makePSO(dev, store.library(), "ops::radix_scatter_u64");
-    if (!p_hist || !p_scatter) { keysAlt->release(); valsAlt->release(); histBuf->release(); return; }
+    if (!p_hist || !p_scatter) return;
 
     MTL::Buffer* srcK = keys;
     MTL::Buffer* srcV = indices;
@@ -270,10 +267,7 @@ void GpuOps::radixSortU64(MTL::Buffer* keys, MTL::Buffer* indices, uint32_t coun
         checkGpuStatus(cmd);
     }
     // After 8 passes (even), result is back in original (keys, indices) buffers.
-
-    keysAlt->release();
-    valsAlt->release();
-    histBuf->release();
+    // keysAlt, valsAlt, histBuf auto-release via GpuBuffer RAII
 
     KernelTimer::instance().record("radix_sort_u64", "sort", 0, count);
 }

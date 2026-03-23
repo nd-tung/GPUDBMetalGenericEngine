@@ -40,7 +40,7 @@ GroupByKeyData buildGroupByKeys(
 
 struct GroupByAggData {
     std::vector<std::vector<float>> aggInputs;
-    std::vector<MTL::Buffer*> aggBufsGPU;
+    std::vector<GpuBuffer> aggBufsGPU;
     std::vector<AggFunc> aggFuncs;
     std::vector<std::string> aggNames;
 };
@@ -150,8 +150,7 @@ static bool handleCountDistinct(const IRGroupBy& groupBy, EvalContext& ctx, Tabl
 
 struct AggColumnResult {
     std::vector<float> values;
-    MTL::Buffer* gpuBuf = nullptr;
-    bool gpuOwned = false;
+    GpuBuffer gpuBuf;
 };
 
 static AggColumnResult resolveAggColumnAsF32(
@@ -187,8 +186,7 @@ static AggColumnResult resolveAggColumnAsF32(
         uint32_t castCount = ownSrc ? (uint32_t)expectedKeyRows : (uint32_t)itU->second.size();
         GpuBuffer f32Buf = GpuOps::castU32ToF32(src, castCount);
         // Skip CPU download — GPU buffer passed directly to kernel
-        result.gpuBuf = f32Buf.detach();
-        result.gpuOwned = true;
+        result.gpuBuf = std::move(f32Buf);
         if (ownSrc) src->release();
         if (ownU32) u32Buf->release();
         LOG_DEBUG("Exec", "GroupBy: resolved u32→f32 col " << col << " size=" << result.values.size() << " (GPU cast)\n");
@@ -216,15 +214,13 @@ static AggColumnResult resolveAggColumnAsF32(
             bool ownSrc = !ctx.f32ColsGPU.count(col);
             GpuBuffer dst = GpuOps::gatherF32(src, ctx.activeRowsGPU, (uint32_t)expectedKeyRows, false);
             // Skip CPU download — GPU buffer passed directly to kernel
-            result.gpuBuf = dst.detach();
-            result.gpuOwned = true;
+            result.gpuBuf = std::move(dst);
             if (ownSrc) src->release();
         } else {
             result.values = itF->second;
             if (ctx.f32ColsGPU.count(col) && ctx.f32ColsGPU[col] &&
                 ctx.f32ColsGPU[col]->length() >= itF->second.size() * sizeof(float)) {
-                result.gpuBuf = ctx.f32ColsGPU[col];
-                result.gpuOwned = false;
+                result.gpuBuf = ctx.f32ColsGPU[col]; // copy retains
             }
         }
         LOG_DEBUG("Exec", "GroupBy: resolved f32 col " << col << " size=" << result.values.size());
@@ -262,7 +258,7 @@ static GroupByAggData buildAggInputs(
         if (spec.func == AggFunc::CountStar) {
             // COUNT(*) doesn't need input - counts all rows
             ad.aggInputs.push_back({});
-            ad.aggBufsGPU.push_back(nullptr);
+            ad.aggBufsGPU.emplace_back();
         } else if (spec.func == AggFunc::Count || spec.func == AggFunc::CountDistinct) {
             // COUNT(column) / COUNT(DISTINCT column) - need to track which rows have non-NULL values
             // We'll store the column values so we can check for NULLs (0 = NULL sentinel)
@@ -277,15 +273,13 @@ static GroupByAggData buildAggInputs(
             // Get the column values as f32 via shared helper
             auto colRes = resolveAggColumnAsF32(ctx, col, expectedKeyRows, debug);
             input = std::move(colRes.values);
-            MTL::Buffer* inputGPU = colRes.gpuBuf;
 
             ad.aggInputs.push_back(std::move(input));
-            ad.aggBufsGPU.push_back(inputGPU);
+            ad.aggBufsGPU.push_back(std::move(colRes.gpuBuf));
         } else {
             // Evaluate input expression
             std::vector<float> input;
-            MTL::Buffer* inputGPU = nullptr;  // Track GPU buffer to avoid re-upload
-            bool inputGPUOwned = false;
+            GpuBuffer inputBuf;  // Track GPU buffer to avoid re-upload
 
             // Use pre-computed column if available (avoids double-gather)
             bool foundPrecomputed = false;
@@ -303,8 +297,7 @@ static GroupByAggData buildAggInputs(
                     size_t bufElems = preBuf->length() / sizeof(float);
                     if (bufElems == expectedKeyRows) {
                         // Skip CPU download — GPU buffer passed directly to kernel
-                        inputGPU = preBuf;  // ctx-owned, don't release
-                        inputGPUOwned = false;
+                        inputBuf = ctx.f32ColsGPU[spec.inputExpr]; // copy retains
                         foundPrecomputed = true;
                         LOG_DEBUG("Exec", "GroupBy: using pre-computed f32ColGPU '" << spec.inputExpr << "' (GPU-only, " << expectedKeyRows << " rows)\n");
                     }
@@ -318,8 +311,7 @@ static GroupByAggData buildAggInputs(
                      if (ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0) count = 0;
                      input.resize(count);
                      if (count > 0) std::memcpy(input.data(), buf->contents(), count * sizeof(float));
-                     inputGPU = buf.detach();  // transfer ownership to raw ptr for aggBufsGPU
-                     inputGPUOwned = true;
+                     inputBuf = std::move(buf);
                 }
             }
 
@@ -343,7 +335,7 @@ static GroupByAggData buildAggInputs(
                     LOG_DEBUG("GROUPBY", "\n");
                 }
             }
-            if (input.empty()) {
+            if (input.empty() && !inputBuf) {
                 // Try from inputExpr string (might be positional ref like #3)
                 std::string col = spec.inputExpr;
                 while (!col.empty() && col.front() == '(' && col.back() == ')') {
@@ -372,13 +364,10 @@ static GroupByAggData buildAggInputs(
                 
                 auto colRes = resolveAggColumnAsF32(ctx, col, expectedKeyRows, debug);
                 input = std::move(colRes.values);
-                inputGPU = colRes.gpuBuf;
-                inputGPUOwned = colRes.gpuOwned;
+                inputBuf = std::move(colRes.gpuBuf);
             }
             ad.aggInputs.push_back(std::move(input));
-            // Retain ctx-owned GPU buffers so they can be safely released later
-            if (inputGPU && !inputGPUOwned) inputGPU->retain();
-            ad.aggBufsGPU.push_back(inputGPU);
+            ad.aggBufsGPU.push_back(std::move(inputBuf));
         }
     }
     
@@ -647,20 +636,20 @@ static void processGroupByHTResults(
 // Uploads key and aggregate vectors to GPU with +1 key bias, COUNT(col) indicator,
 // and AVG→SUM+COUNT expansion. Returns all GPU buffers needed for the HT kernel.
 struct GroupByGpuBuffers {
-    std::vector<MTL::Buffer*> keyBufs;
-    std::vector<MTL::Buffer*> aggBufs;
+    std::vector<MTL::Buffer*> keyBufs;      // raw views for kernel API
+    std::vector<MTL::Buffer*> aggBufs;      // raw views for kernel API
     std::vector<uint32_t> aggTypesGpu;
     std::vector<size_t> avgIndices;
-    std::vector<MTL::Buffer*> toRelease;
+    std::vector<GpuBuffer> toRelease;       // RAII cleanup
     bool ok = true;
 };
 
 static GroupByGpuBuffers prepareGroupByGpuBuffers(
     const std::vector<std::vector<uint32_t>>& keyVecs,
-    std::vector<MTL::Buffer*>& keyBufsGPU,
+    std::vector<GpuBuffer>& keyBufsGPU,
     const std::vector<AggFunc>& aggFuncs,
     const std::vector<std::vector<float>>& aggInputs,
-    std::vector<MTL::Buffer*>& aggBufsGPU,
+    std::vector<GpuBuffer>& aggBufsGPU,
     size_t gpuRowCount, bool debug) {
 
     auto& store = GpuColumnStore::instance();
@@ -668,18 +657,18 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
 
     // ── Upload key vectors with +1 bias ──
     for (size_t k = 0; k < keyVecs.size() && gb.ok; ++k) {
+        GpuBuffer srcOwner;
         MTL::Buffer* srcBuf = nullptr;
-        bool usedGpuBuf = false;
         bool alreadyBiased = false;
         if (k < keyBufsGPU.size() && keyBufsGPU[k] &&
             keyBufsGPU[k]->length() == gpuRowCount * sizeof(uint32_t)) {
-            srcBuf = keyBufsGPU[k];
-            keyBufsGPU[k] = nullptr;
-            usedGpuBuf = true;
+            srcOwner = std::move(keyBufsGPU[k]); // take ownership
+            srcBuf = srcOwner.get();
         } else {
             // CPU upload: apply +1 bias inline, avoiding separate GPU dispatch
-            srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared);
-            if (!srcBuf) { gb.ok = false; break; }
+            srcOwner = GpuBuffer(store.device()->newBuffer(gpuRowCount * sizeof(uint32_t), MTL::ResourceStorageModeShared));
+            if (!srcOwner) { gb.ok = false; break; }
+            srcBuf = srcOwner.get();
             uint32_t* ptr = static_cast<uint32_t*>(srcBuf->contents());
             size_t copyLen = std::min(keyVecs[k].size(), gpuRowCount);
             for (size_t i = 0; i < copyLen; ++i) ptr[i] = keyVecs[k][i] + 1;
@@ -697,16 +686,16 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
                     srcMismatches++;
                 }
             }
-            LOG_WARN("Exec", "GroupBy: srcBuf vs keyVecs[0]: " << srcMismatches << " mismatches" << " (usedGpuBuf=" << usedGpuBuf << " srcLen=" << srcBuf->length()/4  << " keyVecLen=" << keyVecs[k].size() << " gpuRowCount=" << gpuRowCount << ")\n");
+            LOG_WARN("Exec", "GroupBy: srcBuf vs keyVecs[0]: " << srcMismatches << " mismatches" << " (srcLen=" << srcBuf->length()/4  << " keyVecLen=" << keyVecs[k].size() << " gpuRowCount=" << gpuRowCount << ")\n");
         }
 
         if (alreadyBiased) {
             // Bias applied during CPU copy — no GPU dispatch needed
             gb.keyBufs.push_back(srcBuf);
-            gb.toRelease.push_back(srcBuf);
+            gb.toRelease.push_back(std::move(srcOwner));
         } else {
-            auto biased = GpuOps::arithAddConstU32(srcBuf, 1, static_cast<uint32_t>(gpuRowCount)).detach();
-            srcBuf->release();
+            GpuBuffer biased = GpuOps::arithAddConstU32(srcBuf, 1, static_cast<uint32_t>(gpuRowCount));
+            srcOwner = nullptr; // release the source
             if (!biased) { gb.ok = false; break; }
 
             if (debug) {
@@ -717,8 +706,8 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
                 for (auto& [v,c] : dist) std::cerr << " " << v << ":" << c;
                 LOG_INFO("GROUPBY", "\n");
             }
-            gb.keyBufs.push_back(biased);
-            gb.toRelease.push_back(biased);
+            gb.keyBufs.push_back(biased.get());
+            gb.toRelease.push_back(std::move(biased));
         }
     }
 
@@ -738,53 +727,58 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
 
         MTL::Buffer* aggBuf = nullptr;
         if (aggFuncs[a] == AggFunc::Count) {
-            MTL::Buffer* srcBuf = nullptr;
+            GpuBuffer srcOwner;
             if (a < aggBufsGPU.size() && aggBufsGPU[a] &&
                 aggBufsGPU[a]->length() >= gpuRowCount * sizeof(float)) {
-                srcBuf = aggBufsGPU[a];
-                aggBufsGPU[a] = nullptr;
+                srcOwner = std::move(aggBufsGPU[a]);
             } else {
-                srcBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
-                if (srcBuf) {
-                    float* ptr = static_cast<float*>(srcBuf->contents());
+                srcOwner = GpuBuffer(store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared));
+                if (srcOwner) {
+                    float* ptr = static_cast<float*>(srcOwner->contents());
                     size_t copyLen = std::min(aggInputs[a].size(), gpuRowCount);
                     if (copyLen > 0) memcpy(ptr, aggInputs[a].data(), copyLen * sizeof(float));
                     if (copyLen < gpuRowCount) memset(ptr + copyLen, 0, (gpuRowCount - copyLen) * sizeof(float));
                 }
             }
-            if (srcBuf) {
-                aggBuf = GpuOps::nonNullIndicatorF32(srcBuf, static_cast<uint32_t>(gpuRowCount)).detach();
-                srcBuf->release();
-                if (aggBuf) gb.toRelease.push_back(aggBuf);
+            if (srcOwner) {
+                GpuBuffer indicator = GpuOps::nonNullIndicatorF32(srcOwner, static_cast<uint32_t>(gpuRowCount));
+                srcOwner = nullptr;
+                if (indicator) {
+                    aggBuf = indicator.get();
+                    gb.toRelease.push_back(std::move(indicator));
+                }
             }
         } else if (gpuType == 1) {
-            aggBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
-            if (aggBuf) {
-                std::memset(aggBuf->contents(), 0, gpuRowCount * sizeof(float));
-                gb.toRelease.push_back(aggBuf);
+            GpuBuffer buf(store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared));
+            if (buf) {
+                std::memset(buf->contents(), 0, gpuRowCount * sizeof(float));
+                aggBuf = buf.get();
+                gb.toRelease.push_back(std::move(buf));
             }
         } else if (!aggInputs[a].empty() ||
                    (a < aggBufsGPU.size() && aggBufsGPU[a] &&
                     aggBufsGPU[a]->length() >= gpuRowCount * sizeof(float))) {
             if (a < aggBufsGPU.size() && aggBufsGPU[a] &&
                 aggBufsGPU[a]->length() >= gpuRowCount * sizeof(float)) {
-                aggBuf = aggBufsGPU[a];
-                aggBufsGPU[a] = nullptr;
-                gb.toRelease.push_back(aggBuf);
+                GpuBuffer taken = std::move(aggBufsGPU[a]);
+                aggBuf = taken.get();
+                gb.toRelease.push_back(std::move(taken));
             } else {
-                aggBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
-                if (aggBuf) {
-                    float* ptr = static_cast<float*>(aggBuf->contents());
+                GpuBuffer buf(store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared));
+                if (buf) {
+                    float* ptr = static_cast<float*>(buf->contents());
                     for (size_t i = 0; i < gpuRowCount; ++i)
                         ptr[i] = (i < aggInputs[a].size()) ? aggInputs[a][i] : 0.0f;
-                    gb.toRelease.push_back(aggBuf);
+                    aggBuf = buf.get();
+                    gb.toRelease.push_back(std::move(buf));
                 }
             }
         } else {
-            aggBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
-            if (aggBuf) {
-                std::memset(aggBuf->contents(), 0, gpuRowCount * sizeof(float));
-                gb.toRelease.push_back(aggBuf);
+            GpuBuffer buf(store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared));
+            if (buf) {
+                std::memset(buf->contents(), 0, gpuRowCount * sizeof(float));
+                aggBuf = buf.get();
+                gb.toRelease.push_back(std::move(buf));
             }
         }
         if (!aggBuf) { gb.ok = false; break; }
@@ -796,11 +790,11 @@ static GroupByGpuBuffers prepareGroupByGpuBuffers(
         if (aggFuncs[a] == AggFunc::Avg) {
             gb.avgIndices.push_back(a);
             gb.aggTypesGpu.push_back(1);
-            MTL::Buffer* countBuf = store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared);
+            GpuBuffer countBuf(store.device()->newBuffer(gpuRowCount * sizeof(float), MTL::ResourceStorageModeShared));
             if (countBuf) {
                 std::memset(countBuf->contents(), 0, gpuRowCount * sizeof(float));
-                gb.toRelease.push_back(countBuf);
-                gb.aggBufs.push_back(countBuf);
+                gb.aggBufs.push_back(countBuf.get());
+                gb.toRelease.push_back(std::move(countBuf));
             }
         }
     }
@@ -1034,9 +1028,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
 
                     // Release GPU resources
                     GpuOps::release(*htOpt);
-                    for (auto* buf : toRelease) buf->release();
-                    for (auto* buf : keyBufsGPU) { if (buf) buf->release(); }
-                    for (size_t i = 0; i < aggBufsGPU.size(); ++i) { if (aggBufsGPU[i]) aggBufsGPU[i]->release(); }
+                    // toRelease, keyBufsGPU, aggBufsGPU auto-release via GpuBuffer RAII
                     
                     if (debug) {
                         LOG_INFO("Exec", "GroupBy: GPU completed with " << out.rowCount << " groups\n");
@@ -1060,18 +1052,14 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
             }
             
             
-            // GPU failed, release buffers and fall through to CPU
-            for (auto* buf : toRelease) buf->release();
-            for (auto* buf : keyBufsGPU) { if (buf) buf->release(); }
-            for (size_t i = 0; i < aggBufsGPU.size(); ++i) { if (aggBufsGPU[i]) aggBufsGPU[i]->release(); }
+            // GPU failed — toRelease, keyBufsGPU, aggBufsGPU auto-release via GpuBuffer RAII
             if (debug) {
                 LOG_WARN("Exec", "GroupBy: GPU path failed, falling back to CPU\n");
             }
         }
     }
     
-    for (auto* buf : keyBufsGPU) { if (buf) buf->release(); }
-    for (size_t i = 0; i < aggBufsGPU.size(); ++i) { if (aggBufsGPU[i]) aggBufsGPU[i]->release(); }
+    // keyBufsGPU, aggBufsGPU auto-release via GpuBuffer RAII
     ENGINE_THROW("GPU GroupBy failed: conditions not met for any kernel (and CPU fallback is disabled).");
 }
 

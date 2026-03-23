@@ -523,42 +523,33 @@ bool handleScalarSubqueryTableContexts(
             }
 
             // Safe Gather for U32 (preserving aliases and avoiding double-free)
-            std::unordered_map<MTL::Buffer*, MTL::Buffer*> u32Replacements;
+            std::unordered_map<MTL::Buffer*, GpuBuffer> u32Replacements;
             for (auto& [name, buf] : dataCtx.u32ColsGPU) {
                 if (buf && u32Replacements.find(buf) == u32Replacements.end()) {
-                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount, false).detach();
+                    u32Replacements[buf] = GpuOps::gatherU32(buf, indices, newCount, false);
                 }
             }
-            // Update map with new buffers
+            // Update map with new buffers (copy retains)
             for (auto& [name, buf] : dataCtx.u32ColsGPU) {
                 if (buf) {
-                    MTL::Buffer* newBuf = u32Replacements[buf];
-                    newBuf->retain(); 
-                    buf.reset(newBuf); 
+                    buf = u32Replacements[buf]; // copy retains new, releases old
                 }
             }
-            // Consume creation refs of new buffers (old buffers already released by GpuBuffer::reset)
-            for (auto& [_, newBuf] : u32Replacements) {
-                newBuf->release(); 
-            }
+            u32Replacements.clear();
 
             // Safe Gather for F32
-            std::unordered_map<MTL::Buffer*, MTL::Buffer*> f32Replacements;
+            std::unordered_map<MTL::Buffer*, GpuBuffer> f32Replacements;
             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
                 if (buf && f32Replacements.find(buf.get()) == f32Replacements.end()) {
-                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount, false).detach();
+                    f32Replacements[buf.get()] = GpuOps::gatherF32(buf, indices, newCount, false);
                 }
             }
             for (auto& [name, buf] : dataCtx.f32ColsGPU) {
                 if (buf) {
-                    MTL::Buffer* newBuf = f32Replacements[buf.get()];
-                    newBuf->retain();
-                    buf.reset(newBuf);
+                    buf = f32Replacements[buf.get()]; // copy retains new, releases old
                 }
             }
-            for (auto& [_, newBuf] : f32Replacements) {
-                newBuf->release();
-            }
+            f32Replacements.clear();
 
             // Handle strings on CPU (fallback when dict/flat not available)
             for (auto& [name, vals] : dataCtx.stringCols) {

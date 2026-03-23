@@ -168,12 +168,12 @@ static bool buildDictIdKey(EvalContext& ctx, const std::string& col,
     ctx.ensureActiveRowsCPU();
 
     std::vector<uint32_t> ids;
-    MTL::Buffer* idsBufGPU = nullptr;
+    GpuBuffer idsBufOwner;
     if (!ctx.activeRows.empty() && dict.ids.size() != expectedKeyRows) {
         if (dict.idsGPU && ctx.activeRowsGPU) {
             GpuBuffer gathered = GpuOps::gatherU32(dict.idsGPU, ctx.activeRowsGPU, ctx.activeRowsCountGPU, false);
             // Skip CPU download — GPU buffer passed directly to kernel
-            idsBufGPU = gathered.detach();
+            idsBufOwner = std::move(gathered);
         } else {
             dict.ensureIdsCPU();
             ids.reserve(expectedKeyRows);
@@ -184,8 +184,7 @@ static bool buildDictIdKey(EvalContext& ctx, const std::string& col,
     } else {
         if (dict.idsGPU && dict.ids.size() != expectedKeyRows) {
             // Skip CPU download — GPU buffer passed directly to kernel
-            dict.idsGPU->retain();
-            idsBufGPU = dict.idsGPU.get();
+            idsBufOwner = dict.idsGPU; // copy retains
         } else {
             dict.ensureIdsCPU();
             ids = dict.ids;
@@ -194,7 +193,7 @@ static bool buildDictIdKey(EvalContext& ctx, const std::string& col,
     }
 
     kd.keyVecs.push_back(std::move(ids));
-    kd.keyBufsGPU.push_back(idsBufGPU);
+    kd.keyBufsGPU.push_back(std::move(idsBufOwner));
     kd.keyNames.push_back(keyName.empty() ? col : keyName);
     kd.keyFromF32.push_back(false);
     kd.outputStringMaps.push_back({});
@@ -286,7 +285,7 @@ static bool buildStringHashKey(EvalContext& ctx, const std::string& col,
 
             gpuHashOk = true;
             kd.keyVecs.push_back({});
-            kd.keyBufsGPU.push_back(hashBuf);
+            kd.keyBufsGPU.push_back(GpuBuffer(hashBuf));
             kd.keyNames.push_back(keyName.empty() ? col : keyName);
             kd.keyFromF32.push_back(false);
             kd.outputStringMaps.push_back({});
@@ -327,7 +326,7 @@ static bool buildGroupByF32Key(EvalContext& ctx, const std::string& col,
             // Skip CPU download — GPU buffer passed directly to kernel
             LOG_DEBUG("Exec", "GroupBy: GPU bitcast f32 key " << col << " to u32 (" << gpuCount << " rows)\n");
             kd.keyVecs.push_back({});
-            kd.keyBufsGPU.push_back(gpuU32);
+            kd.keyBufsGPU.push_back(GpuBuffer(gpuU32));
             kd.keyNames.push_back(keyName.empty() ? col : keyName);
             kd.keyFromF32.push_back(true);
             kd.outputStringMaps.push_back({});
@@ -375,7 +374,7 @@ static bool buildGroupByF32Key(EvalContext& ctx, const std::string& col,
         }
         LOG_DEBUG("Exec", "GroupBy: converted f32 key " << col << " to u32\n");
         kd.keyVecs.push_back(std::move(converted));
-        kd.keyBufsGPU.push_back(nullptr);
+        kd.keyBufsGPU.emplace_back();
         kd.keyNames.push_back(keyName.empty() ? col : keyName);
         kd.keyFromF32.push_back(true);
         kd.outputStringMaps.push_back({});
@@ -402,7 +401,7 @@ GroupByKeyData buildGroupByKeys(
         for (size_t i = 0; i < groupBy.keys.size(); ++i) {
             std::string keyName = i < groupBy.keyNames.size() ? groupBy.keyNames[i] : "";
             kd.keyVecs.push_back({});
-            kd.keyBufsGPU.push_back(nullptr);
+            kd.keyBufsGPU.emplace_back();
             kd.keyNames.push_back(keyName);
             kd.keyFromF32.push_back(false);
             kd.outputStringMaps.push_back({});
@@ -522,7 +521,7 @@ GroupByKeyData buildGroupByKeys(
                         GpuBuffer gathered = GpuOps::gatherU32(ctx.u32ColsGPU[col], ctx.activeRowsGPU, (uint32_t)expectedKeyRows, false);
                         // Skip CPU download — GPU buffer passed directly to kernel
                         kd.keyVecs.push_back({});
-                        kd.keyBufsGPU.push_back(gathered.detach());
+                        kd.keyBufsGPU.push_back(std::move(gathered));
                     } else {
                         std::vector<uint32_t> filtered;
                         filtered.reserve(expectedKeyRows);
@@ -531,21 +530,20 @@ GroupByKeyData buildGroupByKeys(
                             else filtered.push_back(0);
                         }
                         kd.keyVecs.push_back(std::move(filtered));
-                        kd.keyBufsGPU.push_back(nullptr);
+                        kd.keyBufsGPU.emplace_back();
                     }
                 } else {
                     kd.keyVecs.push_back(it->second);
                     if (ctx.u32ColsGPU.count(col) && ctx.u32ColsGPU[col]) {
                         size_t gpuElems = ctx.u32ColsGPU[col]->length() / sizeof(uint32_t);
                         if (gpuElems == it->second.size()) {
-                            ctx.u32ColsGPU[col]->retain();
-                            kd.keyBufsGPU.push_back(ctx.u32ColsGPU[col]);
+                            kd.keyBufsGPU.push_back(ctx.u32ColsGPU[col]); // copy retains
                         } else {
                             LOG_DEBUG("Exec", "GroupBy: SKIP stale GPU buf for " << col << " (gpu=" << gpuElems << " vs cpu=" << it->second.size() << ")\n");
-                            kd.keyBufsGPU.push_back(nullptr);
+                            kd.keyBufsGPU.emplace_back();
                         }
                     } else {
-                        kd.keyBufsGPU.push_back(nullptr);
+                        kd.keyBufsGPU.emplace_back();
                     }
                 }
                 kd.keyNames.push_back(keyName.empty() ? col : keyName);

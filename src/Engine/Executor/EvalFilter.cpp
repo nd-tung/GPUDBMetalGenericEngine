@@ -1,5 +1,6 @@
 #include "GpuExecutorDetail.hpp"
 #include "EngineError.hpp"
+#include "GpuColumnStore.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -633,6 +634,34 @@ static MTL::Buffer* resolveFilterGpuBuffer(
                  if (ctx.f32ColsGPU.count("#0")) { buf = ctx.f32ColsGPU["#0"]; isF32=true; colName="#0"; }
                  else if (ctx.u32ColsGPU.count("#0")) { buf = ctx.u32ColsGPU["#0"]; isF32=false; colName="#0"; }
              }
+        }
+
+        if (!buf) {
+            // On-demand GPU upload from CPU columns (e.g. post-join F32 columns)
+            auto itF = ctx.f32Cols.find(colName);
+            if (itF != ctx.f32Cols.end() && !itF->second.empty()) {
+                auto& store = GpuColumnStore::instance();
+                size_t bytes = itF->second.size() * sizeof(float);
+                MTL::Buffer* uploaded = store.device()->newBuffer(itF->second.data(), bytes, MTL::ResourceStorageModeShared);
+                if (uploaded) {
+                    ctx.f32ColsGPU[colName].reset(uploaded);
+                    buf = uploaded;
+                    isF32 = true;
+                }
+            }
+            if (!buf) {
+                auto itU = ctx.u32Cols.find(colName);
+                if (itU != ctx.u32Cols.end() && !itU->second.empty()) {
+                    auto& store = GpuColumnStore::instance();
+                    size_t bytes = itU->second.size() * sizeof(uint32_t);
+                    MTL::Buffer* uploaded = store.device()->newBuffer(itU->second.data(), bytes, MTL::ResourceStorageModeShared);
+                    if (uploaded) {
+                        ctx.u32ColsGPU[colName].reset(uploaded);
+                        buf = uploaded;
+                        isF32 = false;
+                    }
+                }
+            }
         }
 
         if (!buf) {

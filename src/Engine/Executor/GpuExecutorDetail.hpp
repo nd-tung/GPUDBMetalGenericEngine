@@ -17,6 +17,7 @@
 #include "QueryExecutionContext.hpp"
 #include "GpuExecutor.hpp"
 #include "EnvUtil.hpp"
+#include "GpuBuffer.hpp"
 
 #include <map>
 #include <set>
@@ -38,7 +39,7 @@ struct GroupByKeyData {
     std::vector<std::unordered_map<uint32_t, std::string>> hashToStringMaps;
     std::vector<std::shared_ptr<std::vector<std::string>>> dictRefMaps; // shared dict refs for O(1) lookup
     std::vector<bool> keyFromF32;
-    std::vector<MTL::Buffer*> keyBufsGPU;
+    std::vector<GpuBuffer> keyBufsGPU;
 };
 
 // Unwrap Cast/Alias wrappers to get the underlying expression.

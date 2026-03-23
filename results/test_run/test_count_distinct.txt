@@ -5,32 +5,29 @@
 ---------------------------------------------------
 Scalar count_star(): 25.00
 ---------------------------------------------------
-Planning time: 0.51 ms
-Data Load Time (Disk+Upload): 91.16 ms
-GPU kernels time: 78.87 ms
-CPU postprocess time: 48.24 ms
-Node timing: Scan=0.0(g0.0)ms Project=0.5(g0.0)ms Project=0.2(g0.0)ms GroupBy=94.6(g39.3)ms Project=31.8(g39.5)ms Aggregate=0.0(g0.0)ms
-Total Internal Pipeline time: 218.27 ms
-Total Host Execution time: 218.44 ms
-Total Wall time (Plan+Exec): 218.94 ms
+Planning time: 84.73 ms
+Data Load Time (Disk+Upload): 146.26 ms
+GPU kernels time: 0.43 ms
+CPU postprocess time: 34.15 ms
+Node timing: Scan=0.0(g0.0)ms Project=0.6(g0.0)ms GroupBy=34.0(g0.4)ms Aggregate=0.0(g0.0)ms
+Total Internal Pipeline time: 180.84 ms
+Total Host Execution time: 182.05 ms
+Total Wall time (Plan+Exec): 266.78 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :   15.391 ms (19.505%) [2 calls]
-  gather         :   39.544 ms (50.114%) [2 calls]
-  groupby        :   23.974 ms (30.382%) [2 calls]
+  batch_flush    :    0.089 ms (19.128%) [2 calls]
+  groupby        :    0.376 ms (80.872%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 78.909 ms
-  Kernel invocations: 6
+  TOTAL GPU TIME: 0.464 ms
+  Kernel invocations: 4
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-sync                                15.356              0          0.000
-ops::groupby_agg_multi_key_ty        0.006         200000      31786.395
-ops::ht_extract_compact             23.967             25          0.001
-ops::gather_col_u32                  7.739             25          0.003
-ops::gather_flat_string             31.805             25          0.001
-sync                                 0.035              0          0.000
+sync                                 0.058              0          0.000
+ops::groupby_agg_multi_key_ty        0.007         200000      26968.716
+ops::ht_extract_compact              0.368             25          0.068
+sync                                 0.031              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 78.909 ms
+TOTAL: 0.464 ms

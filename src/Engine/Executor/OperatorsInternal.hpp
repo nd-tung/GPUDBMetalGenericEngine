@@ -4,6 +4,7 @@
 
 #include "GpuColumnStore.hpp"
 #include "GpuBuffer.hpp"
+#include "EngineError.hpp"
 #include <unordered_map>
 #include <iostream>
 #include <cstring>
@@ -13,22 +14,17 @@
 namespace engine {
 
 // Check GPU command buffer status after waitUntilCompleted().
-// Logs error details to stderr if the command buffer failed.
-// Returns true if the command completed successfully.
-inline bool checkGpuStatus(MTL::CommandBuffer* cmd, const char* context = nullptr) {
+// Throws std::runtime_error if the command buffer failed, ensuring GPU errors
+// propagate up the call stack instead of silently producing garbage data.
+inline void checkGpuStatus(MTL::CommandBuffer* cmd, const char* context = nullptr) {
     if (cmd->status() == MTL::CommandBufferStatusError) {
+        std::string msg = "GPU command buffer error";
+        if (context) msg += std::string(" in ") + context;
         auto err = cmd->error();
-        if (context && err)
-            LOG_ERROR("GPU", "Command buffer error in " << context << ": " << err->localizedDescription()->utf8String());
-        else if (context)
-            LOG_ERROR("GPU", "Command buffer error in " << context);
-        else if (err)
-            LOG_ERROR("GPU", "Command buffer error: " << err->localizedDescription()->utf8String());
-        else
-            LOG_ERROR("GPU", "Command buffer error");
-        return false;
+        if (err) msg += std::string(": ") + err->localizedDescription()->utf8String();
+        LOG_ERROR("GPU", msg);
+        ENGINE_THROW(msg);
     }
-    return true;
 }
 
 inline MTL::ComputePipelineState* makePSO(MTL::Device* dev, MTL::Library* lib, const char* fn) {

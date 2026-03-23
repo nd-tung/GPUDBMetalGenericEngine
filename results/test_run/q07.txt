@@ -3,164 +3,174 @@
 ---------------------------------------------------
 ======================RESULT=======================
 ---------------------------------------------------
-l_year|revenue|supp_nation|cust_nation|
-1995|54639740.00|FRANCE|GERMANY|
-1996|54633076.00|FRANCE|GERMANY|
-1995|52531752.00|GERMANY|FRANCE|
-1996|52520548.00|GERMANY|FRANCE|
+l_year|revenue|cust_nation|supp_nation|
+1995|52531752.00|FRANCE|FRANCE|
+1996|52520552.00|FRANCE|FRANCE|
+1995|54639740.00|GERMANY|GERMANY|
+1996|54633100.00|GERMANY|GERMANY|
 ---------------------------------------------------
-Planning time: 2.69 ms
-Data Load Time (Disk+Upload): 3347.49 ms
-GPU kernels time: 1384.09 ms
-CPU postprocess time: 382.97 ms
-Node timing: Scan=72.0(g71.8)ms Join=223.0(g135.5)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=199.9(g120.8)ms Save=0.0(g0.0)ms Scan=249.0(g248.3)ms Join=127.0(g74.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=104.0(g55.5)ms Join=105.0(g64.8)ms Filter=327.0(g261.7)ms Project=129.1(g144.6)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=86.9(g14.9)ms Project=63.9(g79.7)ms Project=0.0(g0.0)ms OrderBy=8.0(g15.9)ms Project=72.0(g95.8)ms
-Total Internal Pipeline time: 5114.55 ms
-Total Host Execution time: 5114.65 ms
-Total Wall time (Plan+Exec): 5117.34 ms
+Planning time: 336.75 ms
+Data Load Time (Disk+Upload): 4528.52 ms
+GPU kernels time: 48.07 ms
+CPU postprocess time: 71.13 ms
+Node timing: Scan=0.0(g0.0)ms Filter=4.1(g3.4)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=3.2(g0.8)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=4.5(g4.2)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=1.7(g0.6)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=24.6(g23.2)ms Join=12.6(g3.9)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=12.8(g4.7)ms Join=2.4(g0.7)ms Filter=11.1(g3.4)ms Project=2.4(g2.2)ms Project=0.0(g0.0)ms GroupBy=39.1(g0.2)ms OrderBy=0.6(g0.8)ms
+Total Internal Pipeline time: 4647.71 ms
+Total Host Execution time: 4647.93 ms
+Total Wall time (Plan+Exec): 4984.67 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :  231.141 ms (16.700%) [14 calls]
-  filter         :  701.720 ms (50.698%) [11 calls]
-  gather         :  303.187 ms (21.905%) [12 calls]
-  gather_dispatch:    1.114 ms (0.080%) [83 calls]
-  groupby        :   14.944 ms (1.080%) [2 calls]
-  hash_join_probe_u32:  124.080 ms (8.965%) [5 calls]
-  sort           :    7.925 ms (0.573%) [1 calls]
+  batch_flush    :   11.745 ms (24.425%) [13 calls]
+  filter         :   21.434 ms (44.577%) [10 calls]
+  gather         :    5.133 ms (10.674%) [12 calls]
+  gather_dispatch:    1.416 ms (2.945%) [95 calls]
+  groupby        :    0.177 ms (0.368%) [2 calls]
+  hash_join_probe_u32:    7.867 ms (16.361%) [5 calls]
+  sort           :    0.312 ms (0.650%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1384.110 ms
-  Kernel invocations: 128
+  TOTAL GPU TIME: 48.084 ms
+  Kernel invocations: 138
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_le_u32                  71.816         150000          2.089
-ops::filter_eq_u32                  38.917             25          0.001
-ops::filter_eq_u32                  39.983             25          0.001
-ops::gather_col_u32                  0.006         149999      27065.861
-ops::gather_col_u32                  0.005         149999      32432.216
-sync                                 7.899              0          0.000
-ops::gather_col_u32                  0.018              2          0.109
-ops::gather_col_u32                  0.007              2          0.271
+ops::filter_eq_u32                   0.796             25          0.031
+ops::filter_eq_u32                   0.498             25          0.050
+ops::gather_col_u32                  0.007              2          0.304
+ops::gather_col_u32                  0.004              2          0.466
 ops::gather_col_u32                  0.004              2          0.565
-sync                                 8.911              0          0.000
-hash_join_probe_write_multi         24.046         149999          6.238
-ops::gather_col_u32                  0.006          12008       2103.346
-ops::gather_col_u32                  0.004          12008       2853.612
-ops::gather_col_u32                  0.004          12008       3066.394
-ops::gather_col_u32                  0.006          12008       2150.815
-ops::gather_col_u32                  0.004          12008       2692.980
-sync                                15.728              0          0.000
-ops::filter_eq_u32                  40.923             25          0.001
-ops::filter_eq_u32                  39.005             25          0.001
-ops::gather_col_u32                  0.014              2          0.142
-ops::gather_col_u32                  0.003              2          0.623
-ops::gather_col_u32                  0.003              2          0.717
-sync                                 8.937              0          0.000
-hash_join_probe_write_multi         16.990          10000          0.589
-ops::gather_col_u32                  0.014            798         55.194
-ops::gather_col_u32                  0.013            798         62.795
-ops::gather_col_u32                  0.004            798        225.360
-ops::gather_col_u32                  0.004            798        203.727
-ops::gather_col_u32                  0.004            798        208.138
-sync                                14.866              0          0.000
-ops::filter_ge_u32                 135.542        6001215         44.276
-ops::filter_le_u32_indexed         112.747        3426687         30.393
-ops::gather_col_u32                  0.008        1828450     216154.392
-ops::gather_col_u32                  0.005        1828450     351084.869
-ops::gather_col_u32                  0.006        1828450     288717.827
-ops::gather_col_f32                  0.004        1828450     417931.429
-ops::gather_col_f32                  0.004        1828450     430223.529
-sync                                16.066              0          0.000
-hash_join_probe_write_multi         30.099        1828450         60.747
-ops::gather_col_u32                  0.015         145703       9476.618
-ops::gather_col_u32                  0.003         145703      48567.667
-ops::gather_col_u32                  0.003         145703      51430.639
-ops::gather_col_f32                  0.004         145703      37600.774
-ops::gather_col_f32                  0.004         145703      41629.429
-ops::gather_col_u32                  0.043         145703       3414.887
-ops::gather_col_u32                  0.054         145703       2710.753
-ops::gather_col_u32                  0.071         145703       2054.586
-ops::gather_col_u32                  0.060         145703       2408.314
-ops::gather_col_u32                  0.046         145703       3193.490
-sync                                28.287              0          0.000
-hash_join_probe_write_multi         28.968        1500000         51.782
-ops::gather_col_u32                  0.005         145703      29887.795
-ops::gather_col_u32                  0.004         145703      34965.923
-ops::gather_col_u32                  0.004         145703      39294.229
-ops::gather_col_u32                  0.004         145703      36056.174
-ops::gather_col_u32                  0.004         145703      35685.280
-ops::gather_col_u32                  0.004         145703      40193.931
-ops::gather_col_u32                  0.004         145703      41135.799
-ops::gather_col_u32                  0.005         145703      29887.795
-ops::gather_col_u32                  0.006         145703      24974.803
-ops::gather_col_f32                  0.006         145703      25902.756
-ops::gather_col_f32                  0.082         145703       1785.029
-ops::gather_col_u32                  0.083         145703       1757.215
-sync                                26.351              0          0.000
-hash_join_probe_write_multi         23.977         145703          6.077
-ops::gather_col_u32                  0.012          11723        953.710
-ops::gather_col_u32                  0.006          11723       2038.783
-ops::gather_col_u32                  0.003          11723       3430.787
+ops::gather_col_u32                  0.003              2          0.585
+sync                                 0.296              0          0.000
+ops::gather_col_u32                  0.006              2          0.312
+ops::gather_col_u32                  0.004              2          0.545
+ops::gather_col_u32                  0.241              2          0.008
+ops::gather_flat_string              0.755              2          0.003
+ops::gather_col_u32                  0.178              2          0.011
+ops::gather_flat_string              0.632              2          0.003
+hash_join_probe_write_multi          0.287         150000        521.815
+ops::gather_col_u32                  0.008          12008       1566.193
+ops::gather_col_u32                  0.004          12008       2882.381
+ops::gather_col_u32                  0.004          12008       3275.505
+ops::gather_col_u32                  0.005          12008       2183.273
+ops::gather_col_u32                  0.012          12008        970.343
+ops::gather_col_u32                  0.097          12008        124.435
+ops::gather_col_u32                  0.064          12008        187.382
+ops::gather_col_u32                  0.014          12008        862.830
+sync                                 0.347              0          0.000
+ops::filter_eq_u32                   0.475             25          0.053
+ops::filter_eq_u32                   0.451             25          0.055
+ops::gather_col_u32                  0.006              2          0.329
+ops::gather_col_u32                  0.006              2          0.320
+sync                                 2.088              0          0.000
+ops::gather_col_u32                  0.015              2          0.132
+ops::gather_col_u32                  0.335              2          0.006
+ops::gather_flat_string              0.805              2          0.002
+hash_join_probe_write_multi          0.217          10000         46.074
+ops::gather_col_u32                  0.006            798        124.357
+ops::gather_col_u32                  0.004            798        215.152
+ops::gather_col_u32                  0.005            798        152.000
+ops::gather_col_u32                  0.005            798        160.952
+ops::gather_col_u32                  0.005            798        162.294
+sync                                 0.355              0          0.000
+ops::filter_ge_u32                   9.081        6001215        660.854
+ops::filter_le_u32_indexed           7.572        3426687        452.555
+ops::gather_col_u32                  0.010        1828450     178385.366
+ops::gather_col_u32                  0.005        1828450     381563.022
+ops::gather_col_u32                  0.004        1828450     410150.292
+ops::gather_col_f32                  0.007        1828450     258146.266
+ops::gather_col_f32                  0.005        1828450     348276.190
+sync                                 6.556              0          0.000
+hash_join_probe_write_multi          2.883        1828450        634.300
+ops::gather_col_u32                  0.015         145703       9687.055
+ops::gather_col_u32                  0.005         145703      28198.761
+ops::gather_col_u32                  0.005         145703      28903.591
+ops::gather_col_f32                  0.006         145703      25526.104
+ops::gather_col_f32                  0.006         145703      26290.689
+ops::gather_col_u32                  0.013         145703      11207.923
+ops::gather_col_u32                  0.009         145703      16732.085
+ops::gather_col_u32                  0.235         145703        620.124
+ops::gather_col_u32                  0.082         145703       1771.465
+ops::gather_col_u32                  0.068         145703       2149.265
+sync                                 0.527              0          0.000
+hash_join_probe_write_multi          4.096        1500000        366.203
+ops::gather_col_u32                  0.023         145703       6358.134
+ops::gather_col_u32                  0.006         145703      23788.245
+ops::gather_col_u32                  0.005         145703      26491.455
+ops::gather_col_u32                  0.006         145703      25339.652
+ops::gather_col_u32                  0.006         145703      23470.200
+ops::gather_col_u32                  0.005         145703      28903.591
+ops::gather_col_u32                  0.005         145703      28664.765
+ops::gather_col_u32                  0.005         145703      29632.499
+ops::gather_col_u32                  0.006         145703      23312.480
+ops::gather_col_f32                  0.006         145703      24119.020
+ops::gather_col_f32                  0.050         145703       2918.905
+ops::gather_col_u32                  0.007         145703      20693.509
+sync                                 0.439              0          0.000
+hash_join_probe_write_multi          0.384         145703        379.642
+ops::gather_col_u32                  0.008          11723       1504.492
 ops::gather_col_u32                  0.004          11723       3025.290
-ops::gather_col_u32                  0.004          11723       3092.324
-ops::gather_col_u32                  0.004          11723       2758.353
-ops::gather_col_u32                  0.004          11723       2629.655
+ops::gather_col_u32                  0.004          11723       3058.440
 ops::gather_col_u32                  0.005          11723       2344.600
-ops::gather_col_u32                  0.005          11723       2131.455
-ops::gather_col_f32                  0.005          11723       2181.023
-ops::gather_col_f32                  0.006          11723       2038.783
 ops::gather_col_u32                  0.005          11723       2404.718
-ops::gather_col_u32                  0.040          11723        289.757
-ops::gather_col_u32                  0.059          11723        197.161
-ops::gather_col_u32                  0.053          11723        219.121
-ops::gather_col_u32                  0.047          11723        248.986
-ops::gather_col_u32                  0.053          11723        221.189
-sync                                40.463              0          0.000
-ops::filter_eq_u32                  54.921          11723          0.213
-ops::filter_eq_u32_indexed          55.888           5994          0.107
-ops::filter_eq_u32                  57.000          11723          0.206
-ops::filter_eq_u32_indexed          54.978           5729          0.104
-ops::gather_col_u32                  0.018           5924        329.881
-ops::gather_col_u32                  0.005           5924       1119.426
-ops::gather_col_u32                  0.004           5924       1597.196
-ops::gather_col_u32                  0.003           5924       1799.514
+ops::gather_col_u32                  0.005          11723       2512.430
+ops::gather_col_u32                  0.005          11723       2250.960
+ops::gather_col_u32                  0.005          11723       2181.023
+ops::gather_col_u32                  0.009          11723       1250.453
+ops::gather_col_f32                  0.006          11723       1900.924
+ops::gather_col_f32                  0.005          11723       2363.985
+ops::gather_col_u32                  0.073          11723        161.418
+ops::gather_col_u32                  0.058          11723        203.878
+ops::gather_col_u32                  0.057          11723        204.618
+ops::gather_col_u32                  0.005          11723       2215.649
+ops::gather_col_u32                  0.004          11723       2930.750
+ops::gather_col_u32                  0.004          11723       2961.101
+ops::gather_col_u32                  0.004          11723       3091.508
+ops::gather_col_u32                  0.005          11723       2425.616
+ops::gather_col_u32                  0.005          11723       2268.821
+sync                                 0.025              0          0.000
+ops::filter_eq_u32                   0.602          11723         19.460
+ops::filter_eq_u32_indexed           0.841           5890          7.003
+ops::filter_eq_u32                   0.561          11723         20.906
+ops::filter_eq_u32_indexed           0.557           5833         10.473
+ops::gather_col_u32                  0.008           5924        740.500
 ops::gather_col_u32                  0.004           5924       1407.795
-ops::gather_col_u32                  0.004           5924       1615.490
-ops::gather_col_u32                  0.005           5924       1292.321
-ops::gather_col_u32                  0.005           5924       1155.902
-ops::gather_col_u32                  0.006           5924        967.184
-ops::gather_col_u32                  0.005           5924       1085.379
-ops::gather_col_u32                  0.006           5924        967.184
-ops::gather_col_u32                  0.006           5924       1022.967
-ops::gather_col_u32                  0.006           5924        973.702
-ops::gather_col_f32                  0.006           5924       1022.790
-ops::gather_col_f32                  0.006           5924        917.312
-sync                                38.805              0          0.000
-ops::gather_col_u32                  0.005           5924       1102.140
-ops::gather_col_u32                  0.004           5924       1545.526
-ops::gather_col_u32                 15.902           5924          0.373
-ops::gather_flat_string             56.911           5924          0.104
-ops::gather_col_u32                  6.942           5924          0.853
-ops::gather_flat_string             47.939           5924          0.124
-sync                                16.879              0          0.000
-ops::groupby_agg_multi_key_ty        0.002           5924       3023.992
-ops::ht_extract_compact             14.942              4          0.000
-ops::gather_col_u32                  8.889              4          0.000
-ops::gather_flat_string             32.893              4          0.000
-ops::gather_col_u32                  6.965              4          0.001
-ops::gather_flat_string             30.978              4          0.000
+ops::gather_col_u32                  0.004           5924       1393.882
+ops::gather_col_u32                  0.005           5924       1146.507
+ops::gather_col_u32                  0.004           5924       1393.882
+ops::gather_col_u32                  0.004           5924       1496.716
+ops::gather_col_u32                  0.005           5924       1093.796
+ops::gather_col_u32                  0.008           5924        700.319
+ops::gather_col_u32                  0.006           5924        917.312
+ops::gather_col_u32                  0.006           5924       1037.842
+ops::gather_col_u32                  0.005           5924       1077.091
+ops::gather_col_u32                  0.007           5924        807.855
+ops::gather_col_u32                  0.005           5924       1119.426
+ops::gather_col_u32                  0.006           5924       1069.121
+ops::gather_col_u32                  0.075           5924         78.855
+ops::gather_col_f32                  0.021           5924        280.426
+ops::gather_col_f32                  0.016           5924        374.132
+sync                                 0.604              0          0.000
+ops::gather_col_u32                  0.008           5924        700.402
+ops::gather_col_u32                  0.004           5924       1481.000
+ops::gather_col_u32                  0.004           5924       1450.894
+ops::gather_col_u32                  0.302           5924         19.619
+ops::gather_flat_string              0.802           5924          7.390
+ops::gather_col_u32                  0.184           5924         32.152
+ops::gather_flat_string              0.678           5924          8.733
+sync                                 0.216              0          0.000
+ops::groupby_agg_multi_key_ty        0.003           5924       2121.777
+ops::ht_extract_compact              0.174              4          0.023
 sync                                 0.021              0          0.000
-ops::gather_col_u32                  0.004              4          0.990
-ops::gather_col_f32                  0.004              4          1.043
-sync                                 7.912              0          0.000
-orderby_gpu_gather                   7.925              8          0.001
-ops::gather_col_u32                  0.024              4          0.166
-ops::gather_col_u32                  0.004              4          1.116
-ops::gather_col_u32                 15.893              4          0.000
-ops::gather_flat_string             39.931              4          0.000
-ops::gather_col_u32                  7.962              4          0.001
-ops::gather_flat_string             31.981              4          0.000
-sync                                 0.017              0          0.000
+ops::gather_col_u32                  0.008              4          0.487
+ops::gather_col_u32                  0.004              4          0.970
+ops::gather_col_u32                  0.005              4          0.787
+ops::gather_col_u32                  0.010              4          0.403
+ops::gather_col_u32                  0.005              4          0.744
+ops::gather_col_f32                  0.005              4          0.780
+sync                                 0.254              0          0.000
+orderby_gpu_gather                   0.312             24          0.077
+ops::gather_col_u32                  0.094              4          0.042
+ops::gather_col_u32                  0.126              4          0.032
+sync                                 0.016              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1384.110 ms
+TOTAL: 48.084 ms
