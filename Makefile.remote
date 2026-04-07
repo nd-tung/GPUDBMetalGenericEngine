@@ -53,7 +53,7 @@ REMOTE_USER ?= $(error REMOTE_USER is not set — export it or pass on the comma
 REMOTE_HOST ?= $(error REMOTE_HOST is not set — export it or pass on the command line)
 REMOTE_PATH_GENERIC ?= $(error REMOTE_PATH_GENERIC is not set — export it or pass on the command line)
 REMOTE      = $(REMOTE_USER)@$(REMOTE_HOST)
-SSH         = ssh $(REMOTE)
+SSH         = ssh "$(REMOTE)"
 RSYNC       = rsync -avz --delete
 
 # ---------------------------------------------------------------------------

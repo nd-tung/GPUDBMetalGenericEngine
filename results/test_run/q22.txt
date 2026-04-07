@@ -5,27 +5,27 @@
 ---------------------------------------------------
 
 ---------------------------------------------------
-Planning time: 281.16 ms
-Data Load Time (Disk+Upload): 845.95 ms
-GPU kernels time: 0.09 ms
-CPU postprocess time: 3.26 ms
-Node timing: Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.1(g0.0)ms Join=0.3(g0.0)ms Filter=0.0(g0.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms Aggregate=0.0(g0.0)ms Project=0.0(g0.0)ms Aggregate=0.1(g0.1)ms Aggregate=0.0(g0.0)ms Project=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.1(g0.0)ms Join=0.0(g0.0)ms Filter=0.5(g0.0)ms Project=0.5(g0.0)ms Join=0.0(g0.0)ms Save=0.4(g0.0)ms Scan=0.2(g0.0)ms Save=0.4(g0.0)ms Scan=0.1(g0.0)ms Save=0.1(g0.0)ms Scan=0.0(g0.0)ms Join=0.0(g0.0)ms Project=0.0(g0.0)ms Join=0.3(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=0.0(g0.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=0.0(g0.0)ms OrderBy=0.0(g0.0)ms
-Total Internal Pipeline time: 849.30 ms
-Total Host Execution time: 851.28 ms
-Total Wall time (Plan+Exec): 1132.45 ms
+Planning time: 426.65 ms
+Data Load Time (Disk+Upload): 1126.27 ms
+GPU kernels time: 0.06 ms
+CPU postprocess time: 3.98 ms
+Node timing: Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.2(g0.0)ms Join=0.6(g0.0)ms Filter=0.0(g0.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms Aggregate=0.0(g0.0)ms Project=0.0(g0.0)ms Aggregate=0.1(g0.0)ms Aggregate=0.0(g0.0)ms Project=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=0.0(g0.0)ms Filter=0.3(g0.0)ms Project=0.6(g0.0)ms Join=0.0(g0.0)ms Save=0.5(g0.0)ms Scan=0.2(g0.0)ms Save=0.6(g0.0)ms Scan=0.1(g0.0)ms Save=0.1(g0.0)ms Scan=0.0(g0.0)ms Join=0.0(g0.0)ms Project=0.0(g0.0)ms Join=0.4(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=0.0(g0.0)ms Project=0.0(g0.0)ms Project=0.0(g0.0)ms GroupBy=0.0(g0.0)ms OrderBy=0.0(g0.0)ms
+Total Internal Pipeline time: 1130.31 ms
+Total Host Execution time: 1132.26 ms
+Total Wall time (Plan+Exec): 1558.91 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    0.139 ms (100.000%) [3 calls]
+  batch_flush    :    0.114 ms (100.000%) [3 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 0.139 ms
+  TOTAL GPU TIME: 0.114 ms
   Kernel invocations: 3
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-sync                                 0.063              0          0.000
-sync                                 0.023              0          0.000
+sync                                 0.042              0          0.000
+sync                                 0.020              0          0.000
 sync                                 0.053              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 0.139 ms
+TOTAL: 0.114 ms

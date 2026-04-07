@@ -30,45 +30,45 @@ EUROPE|UNITED KINGDOM|
 AMERICA|UNITED STATES|
 ASIA|VIETNAM|
 ---------------------------------------------------
-Planning time: 2.25 ms
-Data Load Time (Disk+Upload): 52.08 ms
-GPU kernels time: 1.41 ms
-CPU postprocess time: 1.08 ms
-Node timing: Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=1.8(g0.7)ms OrderBy=0.4(g0.7)ms
-Total Internal Pipeline time: 54.57 ms
-Total Host Execution time: 54.60 ms
-Total Wall time (Plan+Exec): 56.85 ms
+Planning time: 3.46 ms
+Data Load Time (Disk+Upload): 56.78 ms
+GPU kernels time: 1.73 ms
+CPU postprocess time: 0.67 ms
+Node timing: Scan=0.0(g0.0)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Join=1.5(g0.6)ms OrderBy=0.6(g1.1)ms
+Total Internal Pipeline time: 59.18 ms
+Total Host Execution time: 59.22 ms
+Total Wall time (Plan+Exec): 62.69 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    0.779 ms (48.021%) [4 calls]
-  gather_dispatch:    0.262 ms (16.177%) [12 calls]
-  hash_join_probe_u32:    0.250 ms (15.385%) [1 calls]
-  sort           :    0.331 ms (20.418%) [1 calls]
+  batch_flush    :    0.993 ms (51.620%) [4 calls]
+  gather_dispatch:    0.199 ms (10.338%) [12 calls]
+  hash_join_probe_u32:    0.169 ms (8.787%) [1 calls]
+  sort           :    0.563 ms (29.255%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1.622 ms
+  TOTAL GPU TIME: 1.923 ms
   Kernel invocations: 18
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-hash_join_probe_write_multi          0.250             25          0.100
-ops::gather_col_u32                  0.009             25          2.912
-ops::gather_col_u32                  0.005             25          4.958
-ops::gather_col_u32                  0.054             25          0.465
-ops::gather_col_u32                  0.070             25          0.359
-ops::gather_col_u32                  0.070             25          0.359
-ops::gather_col_u32                  0.021             25          1.188
-sync                                 0.246              0          0.000
-sync                                 0.026              0          0.000
-ops::gather_col_u32                  0.008             25          3.208
+hash_join_probe_write_multi          0.169             25          0.148
+ops::gather_col_u32                  0.009             25          2.790
+ops::gather_col_u32                  0.005             25          5.000
+ops::gather_col_u32                  0.049             25          0.511
+ops::gather_col_u32                  0.072             25          0.346
+ops::gather_col_u32                  0.022             25          1.156
 ops::gather_col_u32                  0.004             25          5.556
+sync                                 0.250              0          0.000
+sync                                 0.021              0          0.000
+ops::gather_col_u32                  0.010             25          2.439
 ops::gather_col_u32                  0.004             25          5.660
-ops::gather_col_u32                  0.004             25          6.061
-sync                                 0.295              0          0.000
-orderby_gpu_gather                   0.331            100          0.302
-ops::gather_col_u32                  0.007             25          3.592
-ops::gather_col_u32                  0.007             25          3.571
-sync                                 0.211              0          0.000
+ops::gather_col_u32                  0.004             25          6.593
+ops::gather_col_u32                  0.004             25          6.897
+sync                                 0.528              0          0.000
+orderby_gpu_gather                   0.563            100          0.178
+ops::gather_col_u32                  0.011             25          2.371
+ops::gather_col_u32                  0.005             25          5.128
+sync                                 0.193              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1.622 ms
+TOTAL: 1.923 ms

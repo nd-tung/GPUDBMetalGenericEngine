@@ -36,6 +36,7 @@ void flattenStringCol(EvalContext& ctx, const std::string& colName) {
 
     size_t currentOffset = 0;
     for (size_t i = 0; i < rowCount; ++i) {
+        if (currentOffset > (size_t)UINT32_MAX) return;  // per-offset overflow guard
         offsets[i] = static_cast<uint32_t>(currentOffset);
         lengths[i] = static_cast<uint32_t>(data[i].size());
         chars.insert(chars.end(), data[i].begin(), data[i].end());

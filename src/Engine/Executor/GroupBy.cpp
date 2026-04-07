@@ -307,11 +307,11 @@ static GroupByAggData buildAggInputs(
             if (!foundPrecomputed) {
                 GpuBuffer buf = GpuExecutor::evaluateExpression(spec.input, ctx);
                 if (buf) {
-                     uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
-                     if (ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0) count = 0;
-                     input.resize(count);
-                     if (count > 0) std::memcpy(input.data(), buf->contents(), count * sizeof(float));
-                     inputBuf = std::move(buf);
+                    uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
+                    if (ctx.activeRowsGPU && ctx.activeRowsCountGPU == 0) count = 0;
+                    input.resize(count);
+                    if (count > 0) std::memcpy(input.data(), buf->contents(), count * sizeof(float));
+                    inputBuf = std::move(buf);
                 }
             }
 
@@ -1019,7 +1019,7 @@ bool GpuExecutor::executeGroupBy(const IRGroupBy& groupBy, EvalContext& ctx, Tab
                     }
                     
                     processGroupByHTResults(*htOpt, keyVecs, aggFuncs, keyNames, aggNames, out);
-                    
+
                     postProcessStringKeys(keyVecs, outputStringMaps, hashToStringMaps, dictRefMaps, out, debug);
 
                     restoreF32Keys(keyFromF32, out, debug);

@@ -10,37 +10,37 @@ r_regionkey|r_name|
 3|EUROPE|
 4|MIDDLE EAST|
 ---------------------------------------------------
-Planning time: 1.50 ms
-Data Load Time (Disk+Upload): 53.08 ms
-GPU kernels time: 1.69 ms
-CPU postprocess time: 0.06 ms
-Node timing: Scan=0.0(g0.0)ms Filter=1.4(g1.2)ms OrderBy=0.3(g0.5)ms
-Total Internal Pipeline time: 54.83 ms
-Total Host Execution time: 54.85 ms
-Total Wall time (Plan+Exec): 56.35 ms
+Planning time: 1.48 ms
+Data Load Time (Disk+Upload): 52.55 ms
+GPU kernels time: 1.46 ms
+CPU postprocess time: 0.04 ms
+Node timing: Scan=0.0(g0.0)ms Filter=1.2(g1.1)ms OrderBy=0.2(g0.4)ms
+Total Internal Pipeline time: 54.06 ms
+Total Host Execution time: 54.08 ms
+Total Wall time (Plan+Exec): 55.56 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    0.482 ms (27.925%) [4 calls]
-  filter         :    0.971 ms (56.233%) [1 calls]
-  gather_dispatch:    0.035 ms (2.017%) [4 calls]
-  sort           :    0.239 ms (13.825%) [1 calls]
+  batch_flush    :    0.390 ms (26.171%) [4 calls]
+  filter         :    0.879 ms (59.049%) [1 calls]
+  gather_dispatch:    0.029 ms (1.951%) [4 calls]
+  sort           :    0.191 ms (12.828%) [1 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 1.727 ms
+  TOTAL GPU TIME: 1.489 ms
   Kernel invocations: 10
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_ge_u32                   0.971              5          0.005
-ops::gather_col_u32                  0.012              5          0.408
-ops::gather_col_u32                  0.006              5          0.882
-sync                                 0.204              0          0.000
-sync                                 0.027              0          0.000
-ops::gather_col_u32                  0.012              5          0.412
-ops::gather_col_u32                  0.005              5          1.043
-sync                                 0.214              0          0.000
-orderby_gpu_gather                   0.239             10          0.042
-sync                                 0.036              0          0.000
+ops::filter_ge_u32                   0.879              5          0.006
+ops::gather_col_u32                  0.008              5          0.606
+ops::gather_col_u32                  0.004              5          1.122
+sync                                 0.173              0          0.000
+sync                                 0.024              0          0.000
+ops::gather_col_u32                  0.012              5          0.433
+ops::gather_col_u32                  0.005              5          1.044
+sync                                 0.167              0          0.000
+orderby_gpu_gather                   0.191             10          0.052
+sync                                 0.026              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 1.727 ms
+TOTAL: 1.489 ms

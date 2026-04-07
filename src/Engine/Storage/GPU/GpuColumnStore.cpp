@@ -143,6 +143,10 @@ GpuColumn* GpuColumnStore::stageFloatColumn(const std::string& name,
     GpuColumn col; col.name = name; col.count = data.size();
     const unsigned long bytes = data.size() * sizeof(float);
     col.buffer = m_device->newBuffer(data.data(), bytes, MTL::ResourceStorageModeShared);
+    if (!col.buffer) {
+        LOG_ERROR("GPU", "newBuffer failed for float column '" << name << "' (" << bytes << " bytes)");
+        return nullptr;
+    }
     auto [insertIt, _] = m_columns.emplace(name, col);
     return &insertIt->second;
 }
@@ -163,6 +167,10 @@ GpuColumn* GpuColumnStore::stageU32Column(const std::string& name,
     col.count = data.size();
     const unsigned long bytes = data.size() * sizeof(uint32_t);
     col.buffer = m_device->newBuffer(data.data(), bytes, MTL::ResourceStorageModeShared);
+    if (!col.buffer) {
+        LOG_ERROR("GPU", "newBuffer failed for u32 column '" << name << "' (" << bytes << " bytes)");
+        return nullptr;
+    }
     auto [insertIt, _] = m_columns.emplace(name, col);
     return &insertIt->second;
 }

@@ -598,9 +598,52 @@ bool handleExecFilterNode(const IRFilter& filter, QueryExecutionContext& qctx) {
             LOG_INFO("Exec", n << " size=" << v.size());
         }
     }
-    if (!GpuExecutor::executeFilter(filter, currentCtx)) {
-        result.error = "Filter execution failed";
-        return false;
+    bool filterOk = false;
+    try {
+        filterOk = GpuExecutor::executeFilter(filter, currentCtx);
+    } catch (const std::exception& ex) {
+        // Filter threw (ENGINE_THROW path) — treat as failure, try tableContext routing below.
+        LOG_DEBUG("Exec", "Filter: primary executeFilter threw: " << ex.what() << "\n");
+        filterOk = false;
+    }
+    if (!filterOk) {
+        // Primary filter failed — the column may live in a separate table context
+        // (common when the planner emits predicates for table B while currentCtx holds table A
+        // in a multi-table FROM clause before the join has run). Search tableContexts.
+        bool appliedToTable = false;
+        for (auto& [tname, tctx] : tableContexts) {
+            // Quick check: does this context contain any CPU or GPU column matching the predicate?
+            const std::string& pred = filter.predicateStr;
+            bool hasColumn = false;
+            for (const auto& [cn, _] : tctx.f32Cols)    if (!_.empty() && pred.find(cn) != std::string::npos) { hasColumn = true; break; }
+            if (!hasColumn) for (const auto& [cn, _] : tctx.u32Cols)    if (!_.empty() && pred.find(cn) != std::string::npos) { hasColumn = true; break; }
+            if (!hasColumn) for (const auto& [cn, b] : tctx.f32ColsGPU) if (b && pred.find(cn) != std::string::npos) { hasColumn = true; break; }
+            if (!hasColumn) for (const auto& [cn, b] : tctx.u32ColsGPU) if (b && pred.find(cn) != std::string::npos) { hasColumn = true; break; }
+            if (!hasColumn) continue;
+
+            if (debug) LOG_INFO("Exec", "Filter: routing '" << filter.predicateStr
+                                << "' to tableContext '" << tname << "'\n");
+            bool innerOk = false;
+            try {
+                innerOk = GpuExecutor::executeFilter(filter, tctx);
+            } catch (const std::exception& ex2) {
+                LOG_DEBUG("Exec", "Filter: tableContext '" << tname << "' threw: " << ex2.what() << "\n");
+            }
+            if (innerOk) {
+                // Compact the table context using the active rows from the filter
+                compactContextAfterFilter(tctx);
+                tableContexts[tname] = tctx;
+                appliedToTable = true;
+                if (debug) LOG_INFO("Exec", "Filter: applied to tableContext '" << tname
+                                    << "', " << tctx.rowCount << " rows remain\n");
+                break;
+            }
+        }
+        if (!appliedToTable) {
+            result.error = "Filter execution failed";
+            return false;
+        }
+        return true;  // Filter applied to a table context — currentCtx unchanged
     }
     if (debug) {
         LOG_INFO("Exec", "Filter: AFTER filter, currentCtx.stringCols:\n");
@@ -621,6 +664,7 @@ bool handleExecFilterNode(const IRFilter& filter, QueryExecutionContext& qctx) {
     }
     return true;
 }
+
 
 bool handleExecGroupByNode(const IRGroupBy& groupBy, QueryExecutionContext& qctx) {
     auto& currentCtx = qctx.currentCtx;

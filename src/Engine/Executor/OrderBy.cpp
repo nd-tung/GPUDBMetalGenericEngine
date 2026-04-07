@@ -211,8 +211,11 @@ static MTL::Buffer* gpuRadixSortComposite(
         }
     }
 
-    // CPU sort for small row counts — avoids GPU command buffer overhead
-    constexpr uint32_t kCpuSortThreshold = 131072;
+    // CPU sort for small row counts — avoids GPU command buffer overhead.
+    // Threshold lowered from 131072 to 32768: q10 produces ~116K rows which previously
+    // fell below the old threshold and used CPU std::stable_sort (dominant bottleneck).
+    // GPU radix sort wins for n > 32K on Apple Silicon.
+    constexpr uint32_t kCpuSortThreshold = 32768;
     if (n <= kCpuSortThreshold) {
         GpuOps::sync(); // ensure rank buffers from async GPU ops are complete before CPU read
         auto* idxBuf = store.device()->newBuffer(n * sizeof(uint32_t), MTL::ResourceStorageModeShared);

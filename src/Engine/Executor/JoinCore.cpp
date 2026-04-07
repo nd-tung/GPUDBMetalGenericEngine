@@ -146,16 +146,20 @@ static void materializeJoinContext(EvalContext& ctx, const char* label, bool /*d
         // Phase 2: Sync + download
         if (!pendU32.empty() || !pendF32.empty()) GpuOps::sync();
         for (auto& p : pendU32) {
-            auto& vec = ctx.u32Cols[p.name];
-            vec.resize(count);
-            std::memcpy(vec.data(), p.dst->contents(), count * sizeof(uint32_t));
-            p.tmpSrc->release();
+            if (p.dst) {
+                auto& vec = ctx.u32Cols[p.name];
+                vec.resize(count);
+                std::memcpy(vec.data(), p.dst->contents(), count * sizeof(uint32_t));
+            }
+            if (p.tmpSrc) p.tmpSrc->release();
         }
         for (auto& p : pendF32) {
-            auto& vec = ctx.f32Cols[p.name];
-            vec.resize(count);
-            std::memcpy(vec.data(), p.dst->contents(), count * sizeof(float));
-            p.tmpSrc->release();
+            if (p.dst) {
+                auto& vec = ctx.f32Cols[p.name];
+                vec.resize(count);
+                std::memcpy(vec.data(), p.dst->contents(), count * sizeof(float));
+            }
+            if (p.tmpSrc) p.tmpSrc->release();
         }
     }
     // Compact CPU string columns: prefer invalidation if dictCol exists, else GPU/CPU gather

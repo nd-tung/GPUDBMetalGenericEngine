@@ -99,7 +99,7 @@ static std::vector<std::string> parseNodeProjections(const json& extraInfo,
             proj.find("__internal_decompress") != std::string::npos) {
             size_t start = proj.find('(');
             size_t end = proj.rfind(')');
-            if (start != std::string::npos && end != std::string::npos) {
+            if (start != std::string::npos && end != std::string::npos && end > start) {
                 proj = proj.substr(start + 1, end - start - 1);
                 size_t comma = proj.find(',');
                 if (comma != std::string::npos) proj = proj.substr(0, comma);
@@ -255,7 +255,7 @@ static bool tryCaptureJoinRHS(const json& root, JoinCapture& jc, TraverseContext
                                     s.find("__internal_decompress") != std::string::npos) {
                                     size_t start = s.find('(');
                                     size_t end = s.rfind(')');
-                                    if (start != std::string::npos && end != std::string::npos) {
+                                    if (start != std::string::npos && end != std::string::npos && end > start) {
                                         s = s.substr(start + 1, end - start - 1);
                                         size_t comma = s.find(',');
                                         if (comma != std::string::npos) s = s.substr(0, comma);

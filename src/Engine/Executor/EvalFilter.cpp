@@ -404,7 +404,22 @@ static bool filterCompareStringHash(const CompareExpr& cmp, EvalContext& ctx, bo
     }
     engine::GpuFilterOp op = (cmp.op == engine::CompareOp::Eq) ? engine::GpuFilterOp::EQ : engine::GpuFilterOp::NE;
 
-    if (!ctx.u32ColsGPU.count(actualCol)) return false;
+    if (!ctx.u32ColsGPU.count(actualCol)) {
+        // Lazy upload: try to find the column in CPU u32Cols and upload to GPU.
+        // This is critical for post-join contexts where hash values are in u32Cols
+        // but haven't been mirrored to u32ColsGPU yet.
+        auto cpuIt = ctx.u32Cols.find(actualCol);
+        if (cpuIt == ctx.u32Cols.end() || cpuIt->second.empty()) return false;
+        auto& store = GpuColumnStore::instance();
+        if (!store.device()) return false;
+        size_t bytes = cpuIt->second.size() * sizeof(uint32_t);
+        MTL::Buffer* uploaded = store.device()->newBuffer(
+            cpuIt->second.data(), bytes, MTL::ResourceStorageModeShared);
+        if (!uploaded) return false;
+        ctx.u32ColsGPU[actualCol].reset(uploaded);
+        LOG_DEBUG("Exec", "filterCompareStringHash: lazy-uploaded u32 col '" << actualCol
+                  << "' (" << cpuIt->second.size() << " rows) to GPU");
+    }
     MTL::Buffer* colBuf = ctx.u32ColsGPU.at(actualCol);
     uint32_t count = (ctx.activeRowsGPU) ? ctx.activeRowsCountGPU : ctx.rowCount;
 
@@ -666,6 +681,45 @@ static MTL::Buffer* resolveFilterGpuBuffer(
 
         if (!buf) {
             LOG_DEBUG("Exec", "DEBUG FIND BUF: FAILED for colName " << colName);
+            // Final fallback: check the global GpuColumnStore for scan-staged columns.
+            // Post-join intermediate columns (e.g. ps_supplycost after partsupp join)
+            // are staged in GpuColumnStore by the scan/join pipeline but not yet mirrored
+            // into ctx.f32ColsGPU. Retrieve the staged buffer and register it in ctx
+            // so subsequent filters can reuse it without another GpuColumnStore lookup.
+            auto* staged = GpuColumnStore::instance().getColumn(colName);
+            if (staged && staged->buffer && staged->count > 0) {
+                // We need to determine if this is an f32 or u32 column.
+                // Heuristic: try to match the column type by common name patterns.
+                // Most numeric-valued table columns in TPC-H are float (supplycost,
+                // retailprice, extendedprice, etc.); integer keys are uint.
+                const std::string& cn = colName;
+                bool looksLikeFloat =
+                    cn.find("price") != std::string::npos ||
+                    cn.find("cost")  != std::string::npos ||
+                    cn.find("bal")   != std::string::npos ||
+                    cn.find("tax")   != std::string::npos ||
+                    cn.find("disc")  != std::string::npos ||
+                    cn.find("qty")   != std::string::npos ||
+                    cn.find("quantity") != std::string::npos ||
+                    cn.find("size") != std::string::npos ||
+                    cn.find("rate") != std::string::npos;
+                // Retain and register in ctx so it's available for reuse.
+                staged->buffer->retain();
+                if (looksLikeFloat) {
+                    ctx.f32ColsGPU[colName].reset(staged->buffer);
+                    buf = staged->buffer;
+                    isF32 = true;
+                } else {
+                    ctx.u32ColsGPU[colName].reset(staged->buffer);
+                    buf = staged->buffer;
+                    isF32 = false;
+                }
+                LOG_DEBUG("Exec", "DEBUG FIND BUF: GpuColumnStore fallback for '"
+                          << colName << "' isF32=" << isF32 << "\n");
+            }
+            if (!buf) {
+                LOG_ERROR("Exec", "DEBUG FIND BUF: TOTAL FAIL for colName " << colName << "\n");
+            }
         }
     }
     return buf;

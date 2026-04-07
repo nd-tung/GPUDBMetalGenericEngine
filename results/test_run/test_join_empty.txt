@@ -5,28 +5,28 @@
 ---------------------------------------------------
 
 ---------------------------------------------------
-Planning time: 2.68 ms
-Data Load Time (Disk+Upload): 51.93 ms
-GPU kernels time: 0.93 ms
-CPU postprocess time: 0.17 ms
-Node timing: Scan=0.0(g0.0)ms Filter=0.7(g0.6)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=0.4(g0.4)ms Join=0.0(g0.0)ms
-Total Internal Pipeline time: 53.03 ms
-Total Host Execution time: 53.06 ms
-Total Wall time (Plan+Exec): 55.74 ms
+Planning time: 5.25 ms
+Data Load Time (Disk+Upload): 64.70 ms
+GPU kernels time: 2.63 ms
+CPU postprocess time: 0.19 ms
+Node timing: Scan=0.0(g0.0)ms Filter=2.5(g2.3)ms Save=0.0(g0.0)ms Scan=0.0(g0.0)ms Filter=0.3(g0.3)ms Join=0.0(g0.0)ms
+Total Internal Pipeline time: 67.52 ms
+Total Host Execution time: 67.56 ms
+Total Wall time (Plan+Exec): 72.81 ms
 ---------------------------------------------------
 GPU Kernel Timing Summary:
 ─────────────────────────────────────────
-  batch_flush    :    0.027 ms (2.777%) [1 calls]
-  filter         :    0.931 ms (97.223%) [2 calls]
+  batch_flush    :    0.021 ms (0.808%) [1 calls]
+  filter         :    2.630 ms (99.192%) [2 calls]
 ─────────────────────────────────────────
-  TOTAL GPU TIME: 0.957 ms
+  TOTAL GPU TIME: 2.652 ms
   Kernel invocations: 3
 Detailed Kernel Timings:
 ─────────────────────────────────────────────────────────────────
 Kernel                           Time (ms)       Elements           ME/s
 ─────────────────────────────────────────────────────────────────
-ops::filter_gt_u32                   0.574              5          0.009
-ops::filter_gt_u32                   0.356             25          0.070
-sync                                 0.027              0          0.000
+ops::filter_gt_u32                   2.349              5          0.002
+ops::filter_gt_u32                   0.282             25          0.089
+sync                                 0.021              0          0.000
 ─────────────────────────────────────────────────────────────────
-TOTAL: 0.957 ms
+TOTAL: 2.652 ms

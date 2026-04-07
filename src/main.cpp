@@ -188,7 +188,7 @@ int main(int argc, const char* argv[]) {
         std::string arg = argv[i];
         if (arg == "sf1") datasetPath = "data/SF-1/";
         else if (arg == "sf10") datasetPath = "data/SF-10/";
-        else if (arg == "sf100") datasetPath = "/Users/nguyen/Documents/GPUDBMetalBenchmark/data/SF-100/";
+        else if (arg == "sf100") datasetPath = "data/SF-100/";
         // "v1" flag removed — GPUDB_V1 was never read anywhere
         else if (arg == "--sql" && i+1 < argc) { sql = argv[++i]; }
         else if (arg == "help" || arg == "--help" || arg == "-h") {
@@ -214,7 +214,13 @@ int main(int argc, const char* argv[]) {
     // Initialise embedded DuckDB once (persistent DB or in-memory views)
     engine::DuckDBAdapter::init(datasetPath);
 
-    int rc = executeQuery(sql, datasetPath);
+    int rc = 1;
+    try {
+        rc = executeQuery(sql, datasetPath);
+    } catch (...) {
+        engine::DuckDBAdapter::shutdown();
+        throw;
+    }
 
     engine::DuckDBAdapter::shutdown();
     return rc;
